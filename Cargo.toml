@@ -1,0 +1,9 @@
+[package]
+name = "wlel"
+version = "0.1.0"
+edition = "2021"
+description = "Wlel: a fast, simple systems programming language"
+
+[profile.release]
+opt-level = 3
+lto = true
