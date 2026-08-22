@@ -4,8 +4,8 @@ use wlel::parser::Parser;
 
 fn check(src: &str) -> Result<(), String> {
     let toks = Lexer::new(src).tokenize().expect("lex");
-    let p = Parser::new(&toks).program().expect("parse");
-    Checker::check(&p).map_err(|e| e.msg)
+    let mut p = Parser::new(&toks).program().expect("parse");
+    Checker::check(&mut p).map_err(|e| e.msg)
 }
 
 #[test]

@@ -17,6 +17,7 @@ impl Type {
             "float" => Some(Type::Float),
             "bool" => Some(Type::Bool),
             "string" => Some(Type::Str),
+            "void" => Some(Type::Void),
             _ => None,
         }
     }
@@ -67,7 +68,7 @@ pub struct Checker {
 impl Checker {
     /// Two passes: collect function signatures (forward refs allowed),
     /// then check every body.
-    pub fn check(program: &Program) -> CResult<()> {
+    pub fn check(program: &mut Program) -> CResult<()> {
         let mut sigs = HashMap::new();
         for f in &program.funcs {
             let ret = match &f.ret_type {
@@ -92,7 +93,7 @@ impl Checker {
 
         let mut cx = Checker { sigs: HashMap::new(), scopes: vec![HashMap::new()], current_ret: Type::Void };
         cx.sigs = sigs;
-        for f in &program.funcs {
+        for f in program.funcs.iter_mut() {
             let sig = cx.sigs.get(&f.name).unwrap().clone();
             let (sig_params, sig_ret) = (sig.params.clone(), sig.ret);
             cx.current_ret = sig_ret;
@@ -100,7 +101,7 @@ impl Checker {
             for (p, t) in f.params.iter().zip(sig_params.iter()) {
                 cx.declare(&f.name, &p.name, *t)?;
             }
-            cx.check_block(&f.body)?;
+            cx.check_block_mut(&mut f.body)?;
             if sig_ret != Type::Void && !guarantees_return(&f.body) {
                 return err(format!(
                     "function '{}' declares '-> {}' but has no return statement",
@@ -134,20 +135,21 @@ impl Checker {
         None
     }
 
-    fn check_block(&mut self, b: &Block) -> CResult<()> {
+    fn check_block_mut(&mut self, b: &mut Block) -> CResult<()> {
         self.scopes.push(HashMap::new());
-        for s in &b.0 {
+        for s in b.0.iter_mut() {
             self.check_stmt(s)?;
         }
         self.scopes.pop();
         Ok(())
     }
 
-    fn check_stmt(&mut self, s: &Stmt) -> CResult<()> {
+
+    fn check_stmt(&mut self, s: &mut Stmt) -> CResult<()> {
         match s {
             Stmt::Let(name, ty_ann, init) => {
                 let init_ty = self.check_expr(init)?;
-                let declared = match ty_ann {
+                let declared = match ty_ann.as_deref() {
                     Some(t) => Some(Self::resolve_type(t)?),
                     None => None,
                 };
@@ -165,6 +167,8 @@ impl Checker {
                     if init_ty == Type::Void {
                         return err(format!("cannot infer type of '{name}' from void expression"));
                     }
+                    // write the inferred type back for the codegen
+                    *ty_ann = Some(init_ty.name().to_string());
                     self.declare("let", name, init_ty)?;
                 }
                 Ok(())
@@ -189,10 +193,10 @@ impl Checker {
                 if cond != Type::Bool {
                     return err(format!("if condition must be bool, got {}", cond.name()));
                 }
-                self.check_block(&i.then_body)?;
-                match &i.else_branch {
-                    Some(ElseBranch::Block(b)) => self.check_block(b)?,
-                    Some(ElseBranch::If(inner)) => self.check_stmt(&Stmt::If((**inner).clone()))?,
+                self.check_block_mut(&mut i.then_body)?;
+                match &mut i.else_branch {
+                    Some(ElseBranch::Block(b)) => self.check_block_mut(b)?,
+                    Some(ElseBranch::If(inner)) => self.check_stmt(&mut Stmt::If((**inner).clone()))?,
                     None => {}
                 }
                 Ok(())
@@ -202,7 +206,7 @@ impl Checker {
                 if c != Type::Bool {
                     return err(format!("while condition must be bool, got {}", c.name()));
                 }
-                self.check_block(body)
+                self.check_block_mut(body)
             }
             Stmt::Return(e) => {
                 let actual = match e {
@@ -280,6 +284,11 @@ impl Checker {
                         ))
                     }
                     Eq | Ne | Lt | Gt | Le | Ge => {
+                        if lt == Type::Str || rt == Type::Str {
+                            return err(
+                                "string comparison is not supported yet (planned: wlel_streq)",
+                            );
+                        }
                         if lt != rt {
                             return err(format!(
                                 "comparison between {} and {}",
@@ -307,13 +316,14 @@ impl Checker {
                     Some(s) => s,
                     None => {
                         // known builtin
-                        if name == "wlel_print_int" {
+                        if name == "wlel_print_int" || name == "wlel_print_str" {
                             if args.len() != 1 {
-                                return err("wlel_print_int takes exactly 1 argument");
+                                return err(format!("{name} takes exactly 1 argument"));
                             }
                             let t = self.check_expr(&args[0])?;
-                            if t != Type::Int {
-                                return err(format!("wlel_print_int expects int, got {}", t.name()));
+                            let want = if name.ends_with("_int") { Type::Int } else { Type::Str };
+                            if t != want {
+                                return err(format!("{name} expects {}, got {}", want.name(), t.name()));
                             }
                             return Ok(Type::Void);
                         }

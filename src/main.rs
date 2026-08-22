@@ -41,8 +41,8 @@ fn front(file: &str) -> Result<String, String> {
     let src = fs::read_to_string(file)
         .map_err(|e| format!("cannot read {file}: {e}"))?;
     let toks = Lexer::new(&src).tokenize().map_err(|e| format!("{file}:{e}"))?;
-    let program = Parser::new(&toks).program().map_err(|e| format!("{file}: syntax error: {e}"))?;
-    Checker::check(&program).map_err(|e| format!("{file}: type error: {e}"))?;
+    let mut program = Parser::new(&toks).program().map_err(|e| format!("{file}: syntax error: {e}"))?;
+    Checker::check(&mut program).map_err(|e| format!("{file}: type error: {e}"))?;
     Ok(gen_program(&program))
 }
 
