@@ -78,7 +78,7 @@ fn assign_vs_eq_lookahead() {
         }",
     );
     let body = &p.funcs[0].body.0;
-    assert!(matches!(&body[0], Stmt::Let(n, _) if n == "x"));
+    assert!(matches!(&body[0], Stmt::Let(n, _, _) if n == "x"));
     assert!(matches!(&body[1], Stmt::Assign(n, _) if n == "x"));
     assert!(matches!(&body[2], Stmt::ExprStmt(Expr::Call(f, args)) if f == "foo" && args.len() == 1));
     assert!(matches!(&body[3], Stmt::While(..)));

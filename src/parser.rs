@@ -136,10 +136,20 @@ impl<'a> Parser<'a> {
             Token::Let => {
                 self.advance();
                 let name = self.ident()?;
-                self.expect(&Token::Define)?;
+                // `let x := expr` (inferred) or `let x: T = expr` (annotated)
+                let ty = if self.eat(&Token::Colon) {
+                    Some(self.type_name()?)
+                } else {
+                    None
+                };
+                if ty.is_some() {
+                    self.expect(&Token::Assign)?;
+                } else {
+                    self.expect(&Token::Define)?;
+                }
                 let e = self.expr(0)?;
                 self.expect(&Token::Semicolon)?;
-                Ok(Stmt::Let(name, e))
+                Ok(Stmt::Let(name, ty, e))
             }
             // bare `x := expr;` — inference-first declaration (canonical form)
             _ if matches!(self.peek(), Token::Ident(_))
@@ -149,7 +159,7 @@ impl<'a> Parser<'a> {
                 self.advance(); // :=
                 let e = self.expr(0)?;
                 self.expect(&Token::Semicolon)?;
-                Ok(Stmt::Let(name, e))
+                Ok(Stmt::Let(name, None, e))
             }
             Token::If => Ok(Stmt::If(self.if_stmt()?)),
             Token::While => {

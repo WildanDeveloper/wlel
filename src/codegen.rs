@@ -48,9 +48,13 @@ fn gen_block(b: &Block, level: usize, out: &mut String) {
 
 fn gen_stmt(s: &Stmt, level: usize, out: &mut String) {
     match s {
-        Stmt::Let(name, e) => {
+        Stmt::Let(name, ty_ann, e) => {
             indent(level, out);
-            out.push_str(&format!("long long {} = {};\n", name, gen_expr(e)));
+            let cty = match ty_ann.as_deref().map(c_type) {
+                Some(t) => t.to_string(),
+                None => infer_cty(e).to_string(),
+            };
+            out.push_str(&format!("{} {} = {};\n", cty, name, gen_expr(e)));
         }
         Stmt::Assign(name, e) => {
             indent(level, out);
@@ -141,6 +145,15 @@ fn binop_str(op: BinOp) -> &'static str {
         BinOp::Ge => ">=",
         BinOp::And => "&&",
         BinOp::Or => "||",
+    }
+}
+
+/// fallback inference from the init expression itself
+fn infer_cty(e: &Expr) -> &'static str {
+    match e {
+        Expr::Float(_) => "double",
+        Expr::Str(_) => "const char*",
+        _ => "long long",
     }
 }
 

@@ -17,13 +17,14 @@ pub struct Param {
     pub ty: Option<String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block(pub Vec<Stmt>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    /// x := expr;
-    Let(String, Expr),
+    /// x := expr;        (inferred)
+    /// let x: T = expr;  (annotated)
+    Let(String, Option<String>, Expr),
     /// x = expr;
     Assign(String, Expr),
     If(IfStmt),
@@ -34,14 +35,14 @@ pub enum Stmt {
     ExprStmt(Expr),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     pub cond: Expr,
     pub then_body: Block,
     pub else_branch: Option<ElseBranch>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ElseBranch {
     If(Box<IfStmt>),
     Block(Block),

@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, exit};
+use wlel::checker::Checker;
 use wlel::codegen::gen_program;
 use wlel::lexer::Lexer;
 use wlel::parser::Parser;
@@ -41,6 +42,7 @@ fn front(file: &str) -> Result<String, String> {
         .map_err(|e| format!("cannot read {file}: {e}"))?;
     let toks = Lexer::new(&src).tokenize().map_err(|e| format!("{file}:{e}"))?;
     let program = Parser::new(&toks).program().map_err(|e| format!("{file}: syntax error: {e}"))?;
+    Checker::check(&program).map_err(|e| format!("{file}: type error: {e}"))?;
     Ok(gen_program(&program))
 }
 

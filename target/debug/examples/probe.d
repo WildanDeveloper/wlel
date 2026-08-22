@@ -1,1 +1,1 @@
-/root/pr/wlel/target/debug/examples/probe: /root/pr/wlel/examples/probe.rs /root/pr/wlel/src/ast.rs /root/pr/wlel/src/codegen.rs /root/pr/wlel/src/lexer.rs /root/pr/wlel/src/lib.rs /root/pr/wlel/src/parser.rs /root/pr/wlel/src/token.rs
+/root/pr/wlel/target/debug/examples/probe: /root/pr/wlel/examples/probe.rs /root/pr/wlel/src/ast.rs /root/pr/wlel/src/checker.rs /root/pr/wlel/src/codegen.rs /root/pr/wlel/src/lexer.rs /root/pr/wlel/src/lib.rs /root/pr/wlel/src/parser.rs /root/pr/wlel/src/token.rs
