@@ -65,11 +65,52 @@ impl<'a> Parser<'a> {
     }
 
     pub fn program(mut self) -> PResult<Program> {
+        let mut structs = Vec::new();
         let mut funcs = Vec::new();
         while *self.peek() != Token::Eof {
-            funcs.push(self.func_def()?);
+            if *self.peek() == Token::Struct {
+                structs.push(self.struct_def()?);
+            } else {
+                funcs.push(self.func_def()?);
+            }
         }
-        Ok(Program { funcs })
+        Ok(Program { structs, funcs })
+    }
+
+    /// struct Name { field: Type, ... }
+    fn struct_def(&mut self) -> PResult<StructDef> {
+        self.expect(&Token::Struct)?;
+        let name = self.ident()?;
+        self.expect(&Token::LBrace)?;
+        let mut fields = Vec::new();
+        while *self.peek() != Token::RBrace {
+            let fname = self.ident()?;
+            self.expect(&Token::Colon)?;
+            let ty = self.type_expr()?;
+            fields.push((fname, ty));
+            // comma optional before '}'
+            if !self.eat(&Token::Comma) {
+                break;
+            }
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(StructDef { name, fields })
+    }
+
+    /// Type := '*'* Ident   (e.g. int, *Point, **Node)
+    fn type_expr(&mut self) -> PResult<String> {
+        let mut stars = String::new();
+        while self.eat(&Token::Star) {
+            stars.push('*');
+        }
+        let base = match self.peek().clone() {
+            Token::Ident(s) => {
+                self.advance();
+                s
+            }
+            t => return err(format!("expected type, found {:?}", t)),
+        };
+        Ok(format!("{}{}", stars, base))
     }
 
     fn func_def(&mut self) -> PResult<FuncDef> {
@@ -102,13 +143,7 @@ impl<'a> Parser<'a> {
     }
 
     fn type_name(&mut self) -> PResult<String> {
-        match self.peek().clone() {
-            Token::Ident(s) => {
-                self.advance();
-                Ok(s)
-            }
-            t => err(format!("expected type name, found {:?}", t)),
-        }
+        self.type_expr()
     }
 
     fn ident(&mut self) -> PResult<String> {
@@ -179,23 +214,15 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Return(e))
             }
             _ => {
-                if let Token::Ident(_) = *self.peek() {
-                    let is_assign = matches!(self.peek_at(1), Token::Assign);
-                    let is_call = matches!(self.peek_at(1), Token::LParen);
-                    if is_assign {
-                        let name = self.ident()?;
-                        self.expect(&Token::Assign)?;
-                        let e = self.expr(0)?;
-                        self.expect(&Token::Semicolon)?;
-                        return Ok(Stmt::Assign(name, e));
-                    }
-                    if is_call {
-                        let e = self.expr(0)?;
-                        self.expect(&Token::Semicolon)?;
-                        return Ok(Stmt::ExprStmt(e));
-                    }
-                }
                 let e = self.expr(0)?;
+                if self.eat(&Token::Assign) {
+                    let value = self.expr(0)?;
+                    self.expect(&Token::Semicolon)?;
+                    return Ok(Stmt::Assign(AssignStmt {
+                        target: e,
+                        value,
+                    }));
+                }
                 self.expect(&Token::Semicolon)?;
                 Ok(Stmt::ExprStmt(e))
             }
@@ -273,7 +300,27 @@ impl<'a> Parser<'a> {
         if self.eat(&Token::Bang) {
             return Ok(Expr::Unary(UnOp::Not, Box::new(self.unary()?)));
         }
-        self.primary()
+        if self.eat(&Token::Amp) {
+            return Ok(Expr::AddrOf(Box::new(self.unary()?)));
+        }
+        if self.eat(&Token::Star) {
+            return Ok(Expr::Deref(Box::new(self.unary()?)));
+        }
+        let p = self.primary()?;
+        Ok(self.postfix(p))
+    }
+
+    /// postfix: field access chains (a.b.c) after calls/literals
+    fn postfix(&mut self, e: Expr) -> Expr {
+        let mut cur = e;
+        while self.eat(&Token::Dot) {
+            let f = match self.ident() {
+                Ok(f) => f,
+                Err(_) => break,
+            };
+            cur = Expr::Field(Box::new(cur), f);
+        }
+        cur
     }
 
     fn primary(&mut self) -> PResult<Expr> {
@@ -312,10 +359,26 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.expect(&Token::RParen)?;
-                    Ok(Expr::Call(name, args))
-                } else {
-                    Ok(Expr::Ident(name))
+                    return Ok(self.postfix(Expr::Call(name, args)));
                 }
+                // struct literal? Name { Field: expr, ... } — require '{ IDENT :' so
+                // statement blocks like `if x {` never collide
+                if *self.peek() == Token::LBrace && matches!(self.peek_at(1), Token::Ident(_)) {
+                    self.advance(); // {
+                    let mut fields = Vec::new();
+                    while *self.peek() != Token::RBrace {
+                        let fname = self.ident()?;
+                        self.expect(&Token::Colon)?;
+                        let v = self.expr(0)?;
+                        fields.push((fname, v));
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&Token::RBrace)?;
+                    return Ok(self.postfix(Expr::StructLit(name, fields)));
+                }
+                Ok(self.postfix(Expr::Ident(name)))
             }
             Token::LParen => {
                 self.advance();

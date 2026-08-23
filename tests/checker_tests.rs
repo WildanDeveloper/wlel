@@ -123,3 +123,53 @@ fn forward_reference_ok() {
     )
     .is_ok());
 }
+
+#[test]
+fn structs_and_pointers() {
+    // happy path: literal, addr-of, auto-deref field, mutation through pointer
+    assert!(check(
+        "struct Pt { x: float, y: float }
+         fn bump(p: *Pt) -> void { p.x = p.x + 1.0; }
+         fn main() -> int {
+             let o: Pt = Pt { x: 0.0, y: 2.5 };
+             let q: *Pt = &o;
+             bump(q);
+             if o.x == 1.0 { return 0; }
+             return 1;
+         }"
+    )
+    .is_ok());
+
+    // unknown struct
+    let e = check("fn main() -> int { let g: Ghost = 1; return 0; }").unwrap_err();
+    assert!(e.contains("unknown type 'Ghost'"), "{e}");
+
+    // bad field
+    let e = check(
+        "struct Pt { x: int }
+         fn main() -> int { let o: Pt = Pt { x: 1 }; return o.nope; }"
+    ).unwrap_err();
+    assert!(e.contains("no field 'nope'"), "{e}");
+
+    // struct literal field mismatch
+    let e = check(
+        "struct Pt { x: int }
+         fn main() -> int { let o: Pt = Pt { x: 1.5 }; return 0; }"
+    ).unwrap_err();
+    assert!(e.contains("field 'x': expected int"), "{e}");
+
+    // & of non-lvalue rejected
+    let e = check(
+        "struct Pt { x: int }
+         fn main() -> int { let p: *Pt = &Pt { x: 1 }; return 0; }"
+    ).unwrap_err();
+    assert!(e.contains("'&' needs a variable"), "{e}");
+
+    // deref of non-pointer
+    let e = check("fn main() -> int { let x: int = 1; return *x; }").unwrap_err();
+    assert!(e.contains("cannot dereference non-pointer"), "{e}");
+
+    // field on non-struct
+    let e = check("fn main() -> int { let x: int = 1; return x.nope; }").unwrap_err();
+    assert!(e.contains("non-struct"), "{e}");
+}

@@ -7,6 +7,7 @@ pub enum Token {
 
     // keywords
     Fn,
+    Struct,
     Let,
     Return,
     If,
@@ -21,6 +22,7 @@ pub enum Token {
     LBrace,
     RBrace,
     Comma,
+    Dot,
     Semicolon,
     Colon,
     Assign,  // =
@@ -37,6 +39,7 @@ pub enum Token {
     Gt,
     LtEq,
     GtEq,
+    Amp,     // &
     AndAnd,
     OrOr,
     Arrow,   // ->

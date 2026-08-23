@@ -1,6 +1,14 @@
 #[derive(Debug)]
 pub struct Program {
+    pub structs: Vec<StructDef>,
     pub funcs: Vec<FuncDef>,
+}
+
+#[derive(Debug)]
+pub struct StructDef {
+    pub name: String,
+    /// raw type strings, e.g. "float", "*Point"
+    pub fields: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -25,14 +33,20 @@ pub enum Stmt {
     /// x := expr;        (inferred)
     /// let x: T = expr;  (annotated)
     Let(String, Option<String>, Expr),
-    /// x = expr;
-    Assign(String, Expr),
+    Assign(AssignStmt),
     If(IfStmt),
     While(Expr, Block),
     /// return; | return expr;
     Return(Option<Expr>),
     /// foo(...);
     ExprStmt(Expr),
+}
+
+/// validated by the checker into one of: variable, field path, deref
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignStmt {
+    pub target: Expr,
+    pub value: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,6 +72,14 @@ pub enum Expr {
     Unary(UnOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Call(String, Vec<Expr>),
+    /// &lvalue
+    AddrOf(Box<Expr>),
+    /// *ptr
+    Deref(Box<Expr>),
+    /// obj.field (auto-derefs one pointer level, decided by the checker)
+    Field(Box<Expr>, String),
+    /// Point { x: 1.0, y: 2.0 }
+    StructLit(String, Vec<(String, Expr)>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

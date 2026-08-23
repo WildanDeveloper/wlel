@@ -6,7 +6,17 @@ pub fn gen_program(p: &Program) -> String {
     out.push_str("#include <stdio.h>\n#include <string.h>\n\n");
     // runtime builtins
     out.push_str("static void wlel_print_int(long long v) { printf(\"%lld\\n\", v); }\n");
+    out.push_str("static void wlel_print_float(double v) { printf(\"%g\\n\", v); }\n");
     out.push_str("static void wlel_print_str(const char* s) { fputs(s, stdout); }\n\n");
+
+    // struct typedefs
+    for st in &p.structs {
+        out.push_str(&format!("typedef struct {{\n"));
+        for (fname, fty) in &st.fields {
+            out.push_str(&format!("    {} {};\n", c_type(fty), fname));
+        }
+        out.push_str(&format!("}} {};\n\n", st.name));
+    }
 
     // prototypes so forward references link correctly
     for f in &p.funcs {
@@ -47,14 +57,18 @@ pub fn gen_program(p: &Program) -> String {
     out
 }
 
-fn c_type(t: &str) -> &'static str {
-    match t {
-        "int" | "void" => if t == "int" { "long long" } else { "void" },
+fn c_type(t: &str) -> String {
+    let stars = t.chars().take_while(|c| *c == '*').count();
+    let base = &t[stars..];
+    let base_c = match base {
+        "int" => "long long",
         "float" => "double",
         "bool" => "_Bool",
         "string" => "const char*",
-        _ => "long long",
-    }
+        "void" => "void",
+        other => other, // struct name
+    };
+    format!("{}{}", base_c, "*".repeat(stars))
 }
 
 fn indent(level: usize, out: &mut String) {
@@ -79,9 +93,9 @@ fn gen_stmt(s: &Stmt, level: usize, out: &mut String) {
             };
             out.push_str(&format!("{} {} = {};\n", cty, name, gen_expr(e)));
         }
-        Stmt::Assign(name, e) => {
+        Stmt::Assign(a) => {
             indent(level, out);
-            out.push_str(&format!("{} = {};\n", name, gen_expr(e)));
+            out.push_str(&format!("{} = {};\n", gen_expr(&a.target), gen_expr(&a.value)));
         }
         Stmt::If(i) => gen_if(i, level, out),
         Stmt::While(cond, body) => {
@@ -149,6 +163,16 @@ fn gen_expr(e: &Expr) -> String {
         Expr::Call(f, args) => {
             let a: Vec<String> = args.iter().map(gen_expr).collect();
             format!("{}({})", f, a.join(", "))
+        }
+        Expr::AddrOf(x) => format!("&{}", gen_expr(x)),
+        Expr::Deref(x) => format!("(*{})", gen_expr(x)),
+        Expr::Field(obj, f) => format!("{}.{}", gen_expr(obj), f),
+        Expr::StructLit(name, fields) => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(n, v)| format!(".{} = {}", n, gen_expr(v)))
+                .collect();
+            format!("({}){{ {} }}", name, parts.join(", "))
         }
     }
 }

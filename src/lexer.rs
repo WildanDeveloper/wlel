@@ -127,6 +127,7 @@ impl Lexer {
             b'{' => Ok(Token::LBrace),
             b'}' => Ok(Token::RBrace),
             b',' => Ok(Token::Comma),
+            b'.' => Ok(Token::Dot),
             b';' => Ok(Token::Semicolon),
             b':' => {
                 if self.eat(b'=') {
@@ -178,7 +179,7 @@ impl Lexer {
                 if self.eat(b'&') {
                     Ok(Token::AndAnd)
                 } else {
-                    self.err("unexpected '&' (did you mean '&&'?)")
+                    Ok(Token::Amp)
                 }
             }
             b'|' => {
@@ -234,6 +235,7 @@ impl Lexer {
         }
         match s.as_str() {
             "fn" => Token::Fn,
+            "struct" => Token::Struct,
             "let" => Token::Let,
             "return" => Token::Return,
             "if" => Token::If,

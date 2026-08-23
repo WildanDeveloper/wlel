@@ -79,7 +79,10 @@ fn assign_vs_eq_lookahead() {
     );
     let body = &p.funcs[0].body.0;
     assert!(matches!(&body[0], Stmt::Let(n, _, _) if n == "x"));
-    assert!(matches!(&body[1], Stmt::Assign(n, _) if n == "x"));
+    match &body[1] {
+        Stmt::Assign(a) => assert!(matches!(a.target, Expr::Ident(ref n) if n == "x")),
+        other => panic!("{:?}", other),
+    }
     assert!(matches!(&body[2], Stmt::ExprStmt(Expr::Call(f, args)) if f == "foo" && args.len() == 1));
     assert!(matches!(&body[3], Stmt::While(..)));
 }
@@ -126,4 +129,49 @@ fn strings_with_escapes_and_utf8() {
     let src = r##""hi\nthere \"x\" 🇮🇩""##;
     let toks = Lexer::new(src).tokenize().expect("should lex");
     assert_eq!(toks[0], Token::Str("hi\nthere \"x\" 🇮🇩".into()));
+}
+
+#[test]
+fn struct_def_and_pointer_ops_parse() {
+    let p = parse(
+        "struct Node {
+            value: int,
+            next: *Node
+        }
+        fn main() -> int {
+            let n: Node = Node { value: 1, next: 0 };
+            let p: *Node = &n;
+            p.value = 2;
+            (*p).value = p.value + 1;
+            return n.value;
+        }",
+    );
+    assert_eq!(p.structs.len(), 1);
+    let st = &p.structs[0];
+    assert_eq!(st.name, "Node");
+    assert_eq!(st.fields[1].1, "*Node");
+
+    match &p.funcs[0].body.0[2] {
+        Stmt::Assign(a) => match &a.target {
+            Expr::Field(_, f) => assert_eq!(f, "value"),
+            other => panic!("{:?}", other),
+        },
+        other => panic!("{:?}", other),
+    }
+}
+
+#[test]
+fn codegen_emits_structs_and_pointers() {
+    let c = gen_program(&parse(
+        "struct Pt { x: float, y: float }
+         fn bump(p: *Pt) -> void { p.x = p.x + 1.0; }
+         fn main() -> int { let o: Pt = Pt { x: 0.0, y: 2.5 }; bump(&o); return 0; }",
+    ));
+    assert!(c.contains("typedef struct {"), "{c}");
+    assert!(c.contains("double x;"), "{c}");
+    assert!(c.contains("} Pt;"), "{c}");
+    assert!(c.contains("static void bump(Pt* p);"), "{c}");
+    assert!(c.contains("(Pt){ .x = 0.0, .y = 2.5 }"), "{c}");
+    assert!(c.contains("p.x = (p.x + 1.0);"), "{c}");
+    assert!(c.contains("bump(&o);"), "{c}");
 }
