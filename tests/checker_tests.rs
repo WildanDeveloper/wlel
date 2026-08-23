@@ -173,3 +173,14 @@ fn structs_and_pointers() {
     let e = check("fn main() -> int { let x: int = 1; return x.nope; }").unwrap_err();
     assert!(e.contains("non-struct"), "{e}");
 }
+
+#[test]
+fn defer_must_be_void() {
+    let e = check("fn f() -> int { defer 5; return 0; }").unwrap_err();
+    assert!(e.contains("defer needs a void expression"), "{e}");
+    assert!(check(
+        "fn log() -> void { return; }
+         fn main() -> int { defer log(); return 0; }"
+    )
+    .is_ok());
+}

@@ -21,6 +21,7 @@ fn main() -> int {
 - [x] Recursive-descent + precedence-climbing parser → AST
 - [x] Codegen: transpile to C99 (`cc/gcc/clang -O2`)
 - [x] CLI: `wlel run file.wl`, `wlel build file.wl -o out`
+- [x] `defer` (LIFO, scope/loop/early-return aware), bare blocks for scoping
 - [ ] Type checker (currently: untyped AST, everything `long long`)
 - [ ] Pointers, structs, arrays
 - [ ] Arena allocator (`defer`-based), modules/imports

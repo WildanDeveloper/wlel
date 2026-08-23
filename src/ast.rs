@@ -40,6 +40,10 @@ pub enum Stmt {
     Return(Option<Expr>),
     /// foo(...);
     ExprStmt(Expr),
+    /// runs at scope exit (LIFO)
+    Defer(Expr),
+    /// { ... } nested scope
+    Block(Block),
 }
 
 /// validated by the checker into one of: variable, field path, deref

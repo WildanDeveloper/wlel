@@ -203,6 +203,13 @@ impl<'a> Parser<'a> {
                 let body = self.block()?;
                 Ok(Stmt::While(cond, body))
             }
+            Token::LBrace => Ok(Stmt::Block(self.block()?)),
+            Token::Defer => {
+                self.advance();
+                let e = self.expr(0)?;
+                self.expect(&Token::Semicolon)?;
+                Ok(Stmt::Defer(e))
+            }
             Token::Return => {
                 self.advance();
                 let e = if *self.peek() == Token::Semicolon {

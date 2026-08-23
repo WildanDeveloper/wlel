@@ -8,6 +8,7 @@ pub enum Token {
     // keywords
     Fn,
     Struct,
+    Defer,
     Let,
     Return,
     If,

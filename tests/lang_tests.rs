@@ -175,3 +175,20 @@ fn codegen_emits_structs_and_pointers() {
     assert!(c.contains("p.x = (p.x + 1.0);"), "{c}");
     assert!(c.contains("bump(&o);"), "{c}");
 }
+
+#[test]
+fn defer_lifo_and_early_return_codegen() {
+    let c = gen_program(&parse(
+        "fn main() -> int {
+            defer cleanup(1);
+            defer cleanup(2);
+            if true { return 0; }
+            return 1;
+        }
+        fn cleanup(n: int) -> void { wlel_print_int(n); }",
+    ));
+    // early return inside defer-having fn: defers run before the return
+    assert!(c.contains("{ cleanup(1); cleanup(2); return 0; }"), "{c}");
+    // block end: reversed order
+    assert!(c.contains("cleanup(2);\n    cleanup(1);\n}"), "{c}");
+}

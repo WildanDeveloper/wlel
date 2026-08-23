@@ -491,6 +491,14 @@ impl Checker {
                 self.expr_ty(e)?;
                 Ok(())
             }
+            Stmt::Block(b) => self.check_block_mut(b),
+            Stmt::Defer(e) => {
+                let t = self.expr_ty(e)?;
+                if t != Type::Void {
+                    return err(format!("defer needs a void expression, got {}", t.name()));
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -508,6 +516,7 @@ fn guarantees_return(b: &Block) -> bool {
     match b.0.last() {
         Some(Stmt::Return(_)) => true,
         Some(Stmt::If(i)) => if_guarantees(i),
+        Some(Stmt::Block(inner)) => guarantees_return(inner),
         _ => false,
     }
 }

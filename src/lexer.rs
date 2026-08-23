@@ -236,6 +236,7 @@ impl Lexer {
         match s.as_str() {
             "fn" => Token::Fn,
             "struct" => Token::Struct,
+            "defer" => Token::Defer,
             "let" => Token::Let,
             "return" => Token::Return,
             "if" => Token::If,
