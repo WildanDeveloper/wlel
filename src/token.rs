@@ -9,6 +9,8 @@ pub enum Token {
     Fn,
     Struct,
     Defer,
+    Use,
+    As,
     Let,
     Return,
     If,
@@ -24,6 +26,9 @@ pub enum Token {
     RBrace,
     Comma,
     Dot,
+    LBracket,
+    RBracket,
+    DoubleColon,
     Semicolon,
     Colon,
     Assign,  // =

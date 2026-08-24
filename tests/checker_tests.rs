@@ -184,3 +184,49 @@ fn defer_must_be_void() {
     )
     .is_ok());
 }
+
+#[test]
+fn arrays_and_casts() {
+    // array decay to pointer param
+    assert!(check(
+        "fn sum(a: *int, n: int) -> int { return a[0]; }
+         fn main() -> int { let x: [int; 2] = [1, 2]; return sum(x, 2); }"
+    )
+    .is_ok());
+
+    // whole-array assignment rejected
+    let e = check(
+        "fn main() -> int { let a: [int; 2] = [1, 2]; a = [3, 4]; return 0; }"
+    ).unwrap_err();
+    assert!(e.contains("not assignable"), "{e}");
+
+    // array literal too long
+    let e = check(
+        "fn main() -> int { let a: [int; 2] = [1, 2, 3]; return 0; }"
+    ).unwrap_err();
+    assert!(e.contains("holds 2"), "{e}");
+
+    // casts
+    assert!(check("fn main() -> int { let f: float = 1.5; return f as int; }").is_ok());
+    let e = check("fn main() -> int { return 1 as string; }").unwrap_err();
+    assert!(e.contains("invalid cast"), "{e}");
+
+    // sizeof via type
+    assert!(check(
+        "struct Pt { x: int }
+         fn main() -> int { return wlel_sizeof(Pt); }"
+    )
+    .is_ok());
+}
+
+#[test]
+fn std_module_gate() {
+    // without `use std;` the std functions are unavailable
+    let e = check("fn main() -> int { std::println_int(1); return 0; }").unwrap_err();
+    assert!(e.contains("requires `use std;`"), "{e}");
+    assert!(check(
+        "use std;
+         fn main() -> int { std::println_int(1); return 0; }"
+    )
+    .is_ok());
+}

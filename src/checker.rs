@@ -10,6 +10,7 @@ pub enum Type {
     Void,
     Struct(String),
     Ptr(Box<Type>),
+    Array(Box<Type>, usize),
 }
 
 impl Type {
@@ -33,6 +34,7 @@ impl Type {
             Type::Void => "void".into(),
             Type::Struct(n) => n.clone(),
             Type::Ptr(t) => format!("*{}", t.name()),
+            Type::Array(t, n) => format!("[{}; {}]", t.name(), n),
         }
     }
 }
@@ -67,6 +69,7 @@ pub struct Checker {
     structs: HashMap<String, Vec<(String, Type)>>,
     scopes: Vec<HashMap<String, Type>>,
     current_ret: Type,
+    use_std: bool,
 }
 
 impl Checker {
@@ -75,11 +78,13 @@ impl Checker {
     /// codegen can emit exact C types. Auto-deref on field access is
     /// rewritten into the AST here as well.
     pub fn check(program: &mut Program) -> CResult<()> {
+        let use_std = program.uses.iter().any(|u| u.path.is_none());
         let mut cx = Checker {
             sigs: HashMap::new(),
             structs: HashMap::new(),
             scopes: vec![HashMap::new()],
             current_ret: Type::Void,
+            use_std,
         };
 
         // pass 0: register struct names, then resolve field types
@@ -106,12 +111,24 @@ impl Checker {
         // pass 1: signatures
         for f in &program.funcs {
             let ret = cx.resolve_type_str(f.ret_type.as_deref().unwrap_or("void"))?;
+            if matches!(ret, Type::Array(..)) {
+                return err(format!(
+                    "function '{}': cannot return an array — return a pointer or wrap it in a struct",
+                    f.name
+                ));
+            }
             let mut params = Vec::with_capacity(f.params.len());
             for p in &f.params {
                 let t = cx.resolve_type_str(p.ty.as_deref().unwrap_or("int"))?;
                 if t == Type::Void {
                     return err(format!(
                         "function '{}': parameter '{}' cannot be void",
+                        f.name, p.name
+                    ));
+                }
+                if matches!(t, Type::Array(..)) {
+                    return err(format!(
+                        "function '{}': parameter '{}' — pass arrays by pointer or wrap them in a struct",
                         f.name, p.name
                     ));
                 }
@@ -145,6 +162,25 @@ impl Checker {
     }
 
     fn resolve_type_str(&self, s: &str) -> CResult<Type> {
+        // array form: [T; N]
+        if let Some(rest) = s.strip_prefix('[') {
+            let close = rest
+                .rfind(']')
+                .ok_or_else(|| CheckError { msg: format!("bad array type '{s}'") })?;
+            let inner_s = &rest[..close];
+            let n: usize = inner_s
+                .rsplit(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .parse()
+                .map_err(|_| CheckError { msg: format!("bad array length in '{s}'") })?;
+            let inner = self.resolve_type_str(inner_s[..inner_s.len() - inner_s.rsplit(';').next().unwrap().len()].trim_end_matches(';'))?;
+            if n == 0 {
+                return err(format!("array length must be > 0 in '{s}'"));
+            }
+            return Ok(Type::Array(Box::new(inner), n));
+        }
         let stars = s.chars().take_while(|c| *c == '*').count();
         let base = &s[stars..];
         let t = match Type::from_builtin(base) {
@@ -342,11 +378,140 @@ impl Checker {
                     }
                 }
             }
+            Expr::Cast(ty, x) => {
+                let from = self.expr_ty(x)?;
+                let to = self.resolve_type_str(ty)?;
+                let num = |t: &Type| matches!(t, Type::Int | Type::Float);
+                let ptr = |t: &Type| matches!(t, Type::Ptr(_));
+                let ok = (num(&from) && num(&to))
+                    || (ptr(&from) && ptr(&to))
+                    || (ptr(&from) && to == Type::Int)
+                    || (from == Type::Int && ptr(&to))
+                    || (from == Type::Str && ptr(&to))
+                    || (ptr(&from) && to == Type::Str);
+                if !ok {
+                    return err(format!("invalid cast from {} to {}", from.name(), to.name()));
+                }
+                Ok(to)
+            }
+            Expr::Index(base, idx) => {
+                let bt = self.expr_ty(base)?;
+                let it = self.expr_ty(idx)?;
+                if it != Type::Int {
+                    return err(format!("index must be int, got {}", it.name()));
+                }
+                match bt {
+                    Type::Array(inner, _) => Ok(*inner),
+                    Type::Ptr(inner) => Ok(*inner),
+                    other => err(format!("cannot index into {}", other.name())),
+                }
+            }
+            Expr::Sizeof(ty) => {
+                let t = self.resolve_type_str(ty)?;
+                if t == Type::Void {
+                    return err("wlel_sizeof cannot take void");
+                }
+                Ok(Type::Int)
+            }
+            Expr::ArrayLit(elems) => {
+                if elems.is_empty() {
+                    return err("cannot infer type of empty array — use an explicit annotation");
+                }
+                let first = self.expr_ty(&mut elems[0])?;
+                if first == Type::Void {
+                    return err("array elements cannot be void");
+                }
+                for el in elems.iter_mut().skip(1) {
+                    let t = self.expr_ty(el)?;
+                    if t != first {
+                        return err(format!(
+                            "mixed array element types: {} and {}",
+                            first.name(),
+                            t.name()
+                        ));
+                    }
+                }
+                Ok(Type::Array(Box::new(first), elems.len()))
+            }
             Expr::Call(name, args) => {
+                // std module
+                if let Some(rest) = name.strip_prefix("std::") {
+                    if !self.use_std {
+                        return err(format!("'{}' requires `use std;`", name));
+                    }
+                    let want_args: &[Type] = match rest {
+                        "print_int" | "println_int" => &[Type::Int],
+                        "print_float" | "println_float" => &[Type::Float],
+                        "print_str" | "println_str" => &[Type::Str],
+                        "streq" => &[Type::Str, Type::Str],
+                        "len" => &[],
+                        "abs" => &[Type::Int],
+                        "min" | "max" => &[Type::Int, Type::Int],
+                        other => return err(format!("unknown std function 'std::{other}'")),
+                    };
+                    let ret = match rest {
+                        "streq" => Type::Bool,
+                        "abs" | "min" | "max" => Type::Int,
+                        "len" => return self.check_len(args),
+                        _ => Type::Void,
+                    };
+                    if args.len() != want_args.len() {
+                        return err(format!(
+                            "std::{} takes {} argument(s), got {}",
+                            rest,
+                            want_args.len(),
+                            args.len()
+                        ));
+                    }
+                    for (i, a) in args.iter_mut().enumerate() {
+                        let t = self.expr_ty(a)?;
+                        if t != want_args[i] {
+                            return err(format!(
+                                "std::{} argument {}: expected {}, got {}",
+                                rest,
+                                i + 1,
+                                want_args[i].name(),
+                                t.name()
+                            ));
+                        }
+                    }
+                    return Ok(ret);
+                }
                 let cached: Option<FuncSig> = self.sigs.get(name).cloned();
                 let sig = match cached {
                     Some(s) => s,
                     None => {
+                        if name == "wlel_alloc" || name == "wlel_arena_new" {
+                            if args.len() != 1 {
+                                return err(format!("{name} takes exactly 1 argument"));
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Int {
+                                return err(format!("{name} expects int, got {}", t.name()));
+                            }
+                            return Ok(Type::Ptr(Box::new(Type::Void)));
+                        }
+                        if name == "wlel_arena_alloc" {
+                            if args.len() != 2 {
+                                return err("wlel_arena_alloc takes exactly 2 arguments");
+                            }
+                            let a = self.expr_ty(&mut args[0])?;
+                            let n = self.expr_ty(&mut args[1])?;
+                            if !matches!(a, Type::Ptr(_)) || n != Type::Int {
+                                return err("wlel_arena_alloc(arena: *void, bytes: int)");
+                            }
+                            return Ok(Type::Ptr(Box::new(Type::Void)));
+                        }
+                        if name == "wlel_free" || name == "wlel_arena_free" {
+                            if args.len() != 1 {
+                                return err(format!("{name} takes exactly 1 argument"));
+                            }
+                            let a = self.expr_ty(&mut args[0])?;
+                            if !matches!(a, Type::Ptr(_)) {
+                                return err(format!("{name} expects a pointer"));
+                            }
+                            return Ok(Type::Void);
+                        }
                         if name == "wlel_print_int" || name == "wlel_print_float" {
                             if args.len() != 1 {
                                 return err(format!("{name} takes exactly 1 argument"));
@@ -381,12 +546,18 @@ impl Checker {
                 }
                 for (i, a) in args.iter_mut().enumerate() {
                     let at = self.expr_ty(a)?;
-                    if at != sig.params[i] {
+                    let want = &sig.params[i];
+                    // C-style array decay: [T; N] argument to *T parameter
+                    let ok = match (want, &at) {
+                        (Type::Ptr(w), Type::Array(el, _)) => **w == **el,
+                        _ => want == &at,
+                    };
+                    if !ok {
                         return err(format!(
                             "argument {} of '{}': expected {}, got {}",
                             i + 1,
                             name,
-                            sig.params[i].name(),
+                            want.name(),
                             at.name()
                         ));
                     }
@@ -417,7 +588,33 @@ impl Checker {
                     if d == Type::Void {
                         return err(format!("'{name}' cannot be void"));
                     }
-                    if !assignable(&d, &init_ty) {
+                    // array literal may be shorter than the declared length
+                    // (C zero-fills the rest); longer is an error
+                    let array_ok = match (&d, init) {
+                        (Type::Array(dt, dn), Expr::ArrayLit(elems)) => {
+                            if elems.len() > *dn {
+                                return err(format!(
+                                    "array literal has {} element(s), '{}' holds {}",
+                                    elems.len(),
+                                    name,
+                                    dn
+                                ));
+                            }
+                            for el in elems {
+                                let t = self.expr_ty(el)?;
+                                if !assignable(dt, &t) {
+                                    return err(format!(
+                                        "array element: expected {}, got {}",
+                                        dt.name(),
+                                        t.name()
+                                    ));
+                                }
+                            }
+                            true
+                        }
+                        _ => false,
+                    };
+                    if !array_ok && !assignable(&d, &init_ty) {
                         return err(format!(
                             "cannot initialize '{}' of type {} with {}",
                             name,
@@ -437,6 +634,9 @@ impl Checker {
             }
             Stmt::Assign(a) => {
                 let target_ty = self.expr_ty(&mut a.target)?;
+                if matches!(target_ty, Type::Array(..)) {
+                    return err("arrays are not assignable — assign elements or wrap the array in a struct");
+                }
                 let value_ty = self.expr_ty(&mut a.value)?;
                 if !assignable(&target_ty, &value_ty) {
                     return err(format!(
@@ -503,12 +703,28 @@ impl Checker {
     }
 }
 
+impl Checker {
+    fn check_len(&mut self, args: &mut [Expr]) -> CResult<Type> {
+        if args.len() != 1 {
+            return err("std::len takes exactly 1 argument");
+        }
+        let t = self.expr_ty(&mut args[0])?;
+        match t {
+            Type::Array(_, _) => Ok(Type::Int),
+            _ => err(format!("std::len expects an array, got {}", t.name())),
+        }
+    }
+}
+
 fn assignable(target: &Type, value: &Type) -> bool {
     target == value || (*target == Type::Float && *value == Type::Int)
 }
 
 fn is_lvalue(e: &Expr) -> bool {
-    matches!(e, Expr::Ident(_) | Expr::Field(..) | Expr::Deref(_))
+    matches!(
+        e,
+        Expr::Ident(_) | Expr::Field(..) | Expr::Deref(_) | Expr::Index(..)
+    )
 }
 
 /// True when executing this block guarantees the function returns.

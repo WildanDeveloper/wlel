@@ -23,6 +23,37 @@ fn gen_program_into(cg: &mut Cg, p: &Program) {
     cg.out.push_str("static void wlel_print_int(long long v) { printf(\"%lld\\n\", v); }\n");
     cg.out.push_str("static void wlel_print_float(double v) { printf(\"%g\\n\", v); }\n");
     cg.out.push_str("static void wlel_print_str(const char* s) { fputs(s, stdout); }\n\n");
+    cg.out.push_str("#include <stdlib.h>\n\n");
+    cg.out.push_str("static void std__print_int(long long v) { printf(\"%lld\", v); }\n");
+    cg.out.push_str("static void std__print_float(double v) { printf(\"%g\", v); }\n");
+    cg.out.push_str("static void std__print_str(const char* s) { fputs(s, stdout); }\n");
+    cg.out.push_str("static void std__println_int(long long v) { printf(\"%lld\\n\", v); }\n");
+    cg.out.push_str("static void std__println_float(double v) { printf(\"%g\\n\", v); }\n");
+    cg.out.push_str("static void std__println_str(const char* s) { printf(\"%s\\n\", s); }\n");
+    cg.out.push_str("static _Bool std__streq(const char* a, const char* b) { return strcmp(a, b) == 0; }\n");
+    cg.out.push_str("static long long std__abs(long long v) { return v < 0 ? -v : v; }\n");
+    cg.out.push_str("static long long std__min(long long a, long long b) { return a < b ? a : b; }\n");
+    cg.out.push_str("static long long std__max(long long a, long long b) { return a > b ? a : b; }\n\n");
+    cg.out.push_str("typedef struct WArena { unsigned char* buf; unsigned long long cap; unsigned long long used; struct WArena* next; } WArena;\n");
+    cg.out.push_str("static void* wlel_alloc(unsigned long long n) { return malloc(n); }\n");
+    cg.out.push_str("static void wlel_free(void* p) { free(p); }\n");
+    cg.out.push_str("static WArena* wlel_arena_new(unsigned long long cap) {\n");
+    cg.out.push_str("    WArena* a = (WArena*)malloc(sizeof(WArena));\n");
+    cg.out.push_str("    a->buf = (unsigned char*)malloc(cap ? cap : 1);\n");
+    cg.out.push_str("    a->cap = cap ? cap : 1; a->used = 0; a->next = 0;\n");
+    cg.out.push_str("    return a;\n");
+    cg.out.push_str("}\n");
+    cg.out.push_str("static void* wlel_arena_alloc(WArena* a, unsigned long long n) {\n");
+    cg.out.push_str("    if (a->used + n <= a->cap) { void* p = a->buf + a->used; a->used += n; return p; }\n");
+    cg.out.push_str("    WArena* chunk = (WArena*)malloc(sizeof(WArena));\n");
+    cg.out.push_str("    unsigned long long cap = n > a->cap ? n : a->cap;\n");
+    cg.out.push_str("    chunk->buf = (unsigned char*)malloc(cap); chunk->cap = cap; chunk->used = n; chunk->next = a->next;\n");
+    cg.out.push_str("    a->next = chunk;\n");
+    cg.out.push_str("    return chunk->buf;\n");
+    cg.out.push_str("}\n");
+    cg.out.push_str("static void wlel_arena_free(WArena* a) {\n");
+    cg.out.push_str("    while (a) { WArena* nx = a->next; free(a->buf); free(a); a = nx; }\n");
+    cg.out.push_str("}\n\n");
 
     // struct typedefs
     for st in &p.structs {
@@ -93,12 +124,12 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
     match s {
         Stmt::Let(name, ty_ann, e) => {
             indent(&mut cg.out, level);
-            let cty = match ty_ann.as_deref().map(c_type) {
-                Some(t) => t,
-                None => infer_cty(e).to_string(),
+            let decl = match ty_ann.as_deref() {
+                Some(t) => c_decl(t, name),
+                None => format!("{} {}", infer_cty(e), name),
             };
             cg.out
-                .push_str(&format!("{} {} = {};\n", cty, name, gen_expr(e)));
+                .push_str(&format!("{} = {};\n", decl, gen_expr(e)));
         }
         Stmt::Assign(a) => {
             indent(&mut cg.out, level);
@@ -190,8 +221,19 @@ fn gen_expr(e: &Expr) -> String {
             format!("({} {} {})", gen_expr(l), binop_str(*op), gen_expr(r))
         }
         Expr::Call(f, args) => {
+            if f == "std::len" {
+                let arr = gen_expr(&args[0]);
+                return format!("((long long)(sizeof({}) / sizeof(({}[0]))))", arr, arr);
+            }
             let a: Vec<String> = args.iter().map(gen_expr).collect();
-            format!("{}({})", f, a.join(", "))
+            format!("{}({})", f.replace("::", "__"), a.join(", "))
+        }
+        Expr::Sizeof(ty) => format!("sizeof({})", c_sizeof_ty(ty)),
+        Expr::Cast(ty, x) => format!("({})({})", c_type(ty), gen_expr(x)),
+        Expr::Index(b, i) => format!("{}[{}]", gen_expr(b), gen_expr(i)),
+        Expr::ArrayLit(elems) => {
+            let parts: Vec<String> = elems.iter().map(gen_expr).collect();
+            format!("{{ {} }}", parts.join(", "))
         }
         Expr::AddrOf(x) => format!("&{}", gen_expr(x)),
         Expr::Deref(x) => format!("(*{})", gen_expr(x)),
@@ -237,6 +279,32 @@ fn c_type(t: &str) -> String {
         other => other, // struct name
     };
     format!("{}{}", base_c, "*".repeat(stars))
+}
+
+/// type inside sizeof(): arrays keep their length (`long long[5]`)
+fn c_sizeof_ty(ty: &str) -> String {
+    if let Some(rest) = ty.strip_prefix('[') {
+        let close = rest.rfind(']').unwrap_or(rest.len());
+        let inner = &rest[..close];
+        if let Some((base, n)) = inner.rsplit_once(';') {
+            return format!("{}[{}]", c_type(base.trim()), n.trim());
+        }
+    }
+    c_type(ty)
+}
+
+/// declaration fragment: arrays need `long long a[4]`, others `long long a`
+fn c_decl(ty: &str, name: &str) -> String {
+    if let Some(rest) = ty.strip_prefix('[') {
+        let close = rest.rfind(']').unwrap_or(rest.len());
+        let inner = &rest[..close];
+        if let Some((base, n)) = inner.rsplit_once(';') {
+            let bt = c_type(base.trim());
+            let stars = bt.chars().take_while(|c| *c == '*').count();
+            return format!("{}{} {}[{}]", &bt[stars..], "*".repeat(stars), name, n.trim());
+        }
+    }
+    format!("{} {}", c_type(ty), name)
 }
 
 /// fallback when the checker did not annotate (direct gen without check)

@@ -1,7 +1,14 @@
 #[derive(Debug)]
 pub struct Program {
+    pub uses: Vec<UseDecl>,
     pub structs: Vec<StructDef>,
     pub funcs: Vec<FuncDef>,
+}
+
+#[derive(Debug)]
+pub struct UseDecl {
+    /// None = std
+    pub path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -84,6 +91,14 @@ pub enum Expr {
     Field(Box<Expr>, String),
     /// Point { x: 1.0, y: 2.0 }
     StructLit(String, Vec<(String, Expr)>),
+    /// expr as T
+    Cast(String, Box<Expr>),
+    /// a[i]
+    Index(Box<Expr>, Box<Expr>),
+    /// [1, 2, 3]
+    ArrayLit(Vec<Expr>),
+    /// wlel_sizeof(T)
+    Sizeof(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -192,3 +192,23 @@ fn defer_lifo_and_early_return_codegen() {
     // block end: reversed order
     assert!(c.contains("cleanup(2);\n    cleanup(1);\n}"), "{c}");
 }
+
+#[test]
+fn arrays_casts_and_arena_codegen() {
+    let c = gen_program(&parse(
+        "struct Pt { x: int }
+         fn main() -> int {
+             let a: [int; 3] = [1, 2, 3];
+             a[0] = 9;
+             let p: *Pt = wlel_alloc(wlel_sizeof(Pt)) as *Pt;
+             p.x = 5;
+             wlel_free(p);
+             return a[0];
+         }",
+    ));
+    assert!(c.contains("long long a[3] = { 1, 2, 3 };"), "{c}");
+    assert!(c.contains("a[0] = 9;"), "{c}");
+    assert!(c.contains("Pt* p = (Pt*)(wlel_alloc(sizeof(Pt)));"), "{c}");
+    assert!(c.contains("p.x = 5;"), "{c}");
+    assert!(c.contains("wlel_free(p);"), "{c}");
+}

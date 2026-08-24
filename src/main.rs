@@ -42,6 +42,32 @@ fn front(file: &str) -> Result<String, String> {
         .map_err(|e| format!("cannot read {file}: {e}"))?;
     let toks = Lexer::new(&src).tokenize().map_err(|e| format!("{file}:{e}"))?;
     let mut program = Parser::new(&toks).program().map_err(|e| format!("{file}: syntax error: {e}"))?;
+
+    // merge `use "path.wl";` files (relative to the importing file)
+    let base_dir = std::path::Path::new(file)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    for u in program.uses.iter().rev() {
+        if let Some(rel) = &u.path {
+            let path = base_dir.join(rel);
+            let src = fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read use file {}: {}", path.display(), e))?;
+            let toks = Lexer::new(&src)
+                .tokenize()
+                .map_err(|e| format!("{}:{e}", path.display()))?;
+            let sub = Parser::new(&toks)
+                .program()
+                .map_err(|e| format!("{}: syntax error: {e}", path.display()))?;
+            let mut structs = sub.structs;
+            let mut funcs = sub.funcs;
+            structs.extend(program.structs.drain(..));
+            funcs.extend(program.funcs.drain(..));
+            program.structs = structs;
+            program.funcs = funcs;
+        }
+    }
+
     Checker::check(&mut program).map_err(|e| format!("{file}: type error: {e}"))?;
     Ok(gen_program(&program))
 }

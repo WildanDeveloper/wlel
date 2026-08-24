@@ -67,14 +67,15 @@ impl<'a> Parser<'a> {
     pub fn program(mut self) -> PResult<Program> {
         let mut structs = Vec::new();
         let mut funcs = Vec::new();
+        let mut uses = Vec::new();
         while *self.peek() != Token::Eof {
-            if *self.peek() == Token::Struct {
-                structs.push(self.struct_def()?);
-            } else {
-                funcs.push(self.func_def()?);
+            match self.peek() {
+                Token::Struct => structs.push(self.struct_def()?),
+                Token::Use => uses.push(self.use_decl()?),
+                _ => funcs.push(self.func_def()?),
             }
         }
-        Ok(Program { structs, funcs })
+        Ok(Program { uses, structs, funcs })
     }
 
     /// struct Name { field: Type, ... }
@@ -97,8 +98,39 @@ impl<'a> Parser<'a> {
         Ok(StructDef { name, fields })
     }
 
-    /// Type := '*'* Ident   (e.g. int, *Point, **Node)
+    /// use std;   |   use "lib/math.wl";
+    fn use_decl(&mut self) -> PResult<UseDecl> {
+        self.expect(&Token::Use)?;
+        let path = match self.peek().clone() {
+            Token::Str(s) => {
+                self.advance();
+                Some(s)
+            }
+            Token::Ident(i) if i == "std" => {
+                self.advance();
+                None
+            }
+            t => return err(format!("expected \"path\" or std, found {:?}", t)),
+        };
+        self.expect(&Token::Semicolon)?;
+        Ok(UseDecl { path })
+    }
+
+    /// Type := '*'* Ident | '[' Type ';' INT ']'
     fn type_expr(&mut self) -> PResult<String> {
+        if self.eat(&Token::LBracket) {
+            let inner = self.type_expr()?;
+            self.expect(&Token::Semicolon)?;
+            let n = match self.peek().clone() {
+                Token::Int(v) => {
+                    self.advance();
+                    v
+                }
+                t => return err(format!("expected array length, found {:?}", t)),
+            };
+            self.expect(&Token::RBracket)?;
+            return Ok(format!("[{}; {}]", inner, n));
+        }
         let mut stars = String::new();
         while self.eat(&Token::Star) {
             stars.push('*');
@@ -254,6 +286,7 @@ impl<'a> Parser<'a> {
 
     fn lbp(t: &Token) -> Option<u8> {
         match t {
+            Token::As => Some(5),
             Token::OrOr => Some(1),
             Token::AndAnd => Some(2),
             Token::Eq | Token::NotEq | Token::Lt | Token::Gt | Token::LtEq | Token::GtEq => Some(3),
@@ -292,6 +325,12 @@ impl<'a> Parser<'a> {
             if bp < min_bp {
                 break;
             }
+            if *self.peek() == Token::As {
+                self.advance();
+                let ty = self.type_expr()?;
+                lhs = Expr::Cast(ty, Box::new(lhs));
+                continue;
+            }
             let op = Self::binop(self.peek());
             self.advance();
             let rhs = self.expr(bp + 1)?;
@@ -314,20 +353,30 @@ impl<'a> Parser<'a> {
             return Ok(Expr::Deref(Box::new(self.unary()?)));
         }
         let p = self.primary()?;
-        Ok(self.postfix(p))
+        self.postfix(p)
     }
 
     /// postfix: field access chains (a.b.c) after calls/literals
-    fn postfix(&mut self, e: Expr) -> Expr {
+    fn postfix(&mut self, e: Expr) -> PResult<Expr> {
         let mut cur = e;
-        while self.eat(&Token::Dot) {
-            let f = match self.ident() {
-                Ok(f) => f,
-                Err(_) => break,
-            };
-            cur = Expr::Field(Box::new(cur), f);
+        loop {
+            if self.eat(&Token::Dot) {
+                let f = match self.ident() {
+                    Ok(f) => f,
+                    Err(_) => break,
+                };
+                cur = Expr::Field(Box::new(cur), f);
+                continue;
+            }
+            if self.eat(&Token::LBracket) {
+                let idx = self.expr(0)?;
+                self.expect(&Token::RBracket)?;
+                cur = Expr::Index(Box::new(cur), Box::new(idx));
+                continue;
+            }
+            break;
         }
-        cur
+        Ok(cur)
     }
 
     fn primary(&mut self) -> PResult<Expr> {
@@ -355,6 +404,18 @@ impl<'a> Parser<'a> {
             }
             Token::Ident(name) => {
                 self.advance();
+                let mut qname = name;
+                while self.eat(&Token::DoubleColon) {
+                    let part = self.ident()?;
+                    qname = format!("{}::{}", qname, part);
+                }
+                // wlel_sizeof(Type) — type form
+                if qname == "wlel_sizeof" && self.eat(&Token::LParen) {
+                    let ty = self.type_expr()?;
+                    self.expect(&Token::RParen)?;
+                    return self.postfix(Expr::Sizeof(ty));
+                }
+                let name = qname;
                 if self.eat(&Token::LParen) {
                     let mut args = Vec::new();
                     if *self.peek() != Token::RParen {
@@ -366,11 +427,14 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.expect(&Token::RParen)?;
-                    return Ok(self.postfix(Expr::Call(name, args)));
+                    return self.postfix(Expr::Call(name, args));
                 }
                 // struct literal? Name { Field: expr, ... } — require '{ IDENT :' so
-                // statement blocks like `if x {` never collide
-                if *self.peek() == Token::LBrace && matches!(self.peek_at(1), Token::Ident(_)) {
+                // statement blocks like `while i < n { i = ...` never collide
+                if *self.peek() == Token::LBrace
+                    && matches!(self.peek_at(1), Token::Ident(_))
+                    && matches!(self.peek_at(2), Token::Colon)
+                {
                     self.advance(); // {
                     let mut fields = Vec::new();
                     while *self.peek() != Token::RBrace {
@@ -383,9 +447,23 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.expect(&Token::RBrace)?;
-                    return Ok(self.postfix(Expr::StructLit(name, fields)));
+                    return self.postfix(Expr::StructLit(name, fields));
                 }
-                Ok(self.postfix(Expr::Ident(name)))
+                self.postfix(Expr::Ident(name))
+            }
+            Token::LBracket => {
+                self.advance();
+                let mut elems = Vec::new();
+                if *self.peek() != Token::RBracket {
+                    loop {
+                        elems.push(self.expr(0)?);
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&Token::RBracket)?;
+                self.postfix(Expr::ArrayLit(elems))
             }
             Token::LParen => {
                 self.advance();

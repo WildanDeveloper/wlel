@@ -128,14 +128,18 @@ impl Lexer {
             b'}' => Ok(Token::RBrace),
             b',' => Ok(Token::Comma),
             b'.' => Ok(Token::Dot),
-            b';' => Ok(Token::Semicolon),
+            b'[' => Ok(Token::LBracket),
+            b']' => Ok(Token::RBracket),
             b':' => {
-                if self.eat(b'=') {
+                if self.eat(b':') {
+                    Ok(Token::DoubleColon)
+                } else if self.eat(b'=') {
                     Ok(Token::Define)
                 } else {
                     Ok(Token::Colon)
                 }
             }
+            b';' => Ok(Token::Semicolon),
             b'+' => Ok(Token::Plus),
             b'*' => Ok(Token::Star),
             b'%' => Ok(Token::Percent),
@@ -236,6 +240,8 @@ impl Lexer {
         match s.as_str() {
             "fn" => Token::Fn,
             "struct" => Token::Struct,
+            "use" => Token::Use,
+            "as" => Token::As,
             "defer" => Token::Defer,
             "let" => Token::Let,
             "return" => Token::Return,
