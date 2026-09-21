@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790018387987,
+  "lastUpdate": 1790018765887,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -116,6 +116,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 70.1,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "3c5ad628d0d198f8fa1b83326928778b3f5bcf33",
+          "message": "CI fixes round 5, all green: mingw-w64 gcc 15 ships no ubsan runtime either (not just asan) so the sanitizer probe returned an empty flag string that was passed as a literal empty arg and ld failed with 'cannot find :' — probe now omits the flag entirely when no sanitizer links, wlel's own bounds/div-zero failure paths (clean exits, file:line messages) still verified uninstrumented on windows (304 tests green)",
+          "timestamp": "2026-09-22T02:25:41+07:00",
+          "tree_id": "56500341d94572e0339e625b9a6d42c6567b8e58",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/3c5ad628d0d198f8fa1b83326928778b3f5bcf33"
+        },
+        "date": 1790018764611,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 15.3,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 78,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 62,
             "unit": "ms"
           }
         ]
