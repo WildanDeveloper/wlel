@@ -24,9 +24,11 @@ fn front(src: &str, safe: bool) -> String {
 }
 
 /// Sanitizer flags this toolchain can actually link, probed once: full
-/// ASan+UBSan where available (Linux/macOS CI); MinGW-w64 GCC on Windows
-/// has no AddressSanitizer, so we degrade to UBSan-only there. The tests
-/// below assert *wlel's own* failure messages, which are sanitizer-agnostic.
+/// ASan+UBSan where available (Linux/macOS CI). MinGW-w64 GCC on Windows
+/// ships neither an ASan nor a UBSan runtime, so the probe degrades to ""
+/// there — meaning "no sanitizer instrumentation"; the tests below still
+/// verify wlel's own failure paths (clean exit codes, file:line messages),
+/// only the sanitizer-output assertions become vacuous.
 fn sanitizer_flags() -> &'static str {
     static FLAGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     FLAGS.get_or_init(|| {
@@ -40,18 +42,14 @@ fn sanitizer_flags() -> &'static str {
             .find(|cc| Command::new(cc).arg("--version").output().is_ok())
             .copied()
             .expect("need a C compiler");
-        for flags in [
-            "-fsanitize=address,undefined",
-            "-fsanitize=undefined",
-            "",
-        ] {
-            let ok = Command::new(cc)
-                .args(["-O0", flags, "-o"])
-                .arg(&bin)
-                .arg(&c_path)
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
+        for flags in ["-fsanitize=address,undefined", "-fsanitize=undefined", ""] {
+            let mut cmd = Command::new(cc);
+            cmd.arg("-O0");
+            if !flags.is_empty() {
+                cmd.arg(flags);
+            }
+            cmd.arg("-o").arg(&bin).arg(&c_path);
+            let ok = cmd.output().map(|o| o.status.success()).unwrap_or(false);
             if ok {
                 return flags.to_string();
             }
@@ -60,7 +58,8 @@ fn sanitizer_flags() -> &'static str {
     })
 }
 
-/// compile with the best available sanitizers and run; returns (exit code, combined output)
+/// compile with the best available sanitizers (possibly none) and run;
+/// returns (exit code, combined output)
 fn cc_asan_run(c: &str, tag: &str) -> (Option<i32>, String) {
     let dir = std::env::temp_dir().join(format!("wlel_safe_{}", std::process::id()));
     fs::create_dir_all(&dir).expect("mkdir");
@@ -72,14 +71,14 @@ fn cc_asan_run(c: &str, tag: &str) -> (Option<i32>, String) {
         .find(|cc| Command::new(cc).arg("--version").output().is_ok())
         .copied()
         .expect("need a C compiler");
-    let st = Command::new(cc)
-        .args(["-O1", "-g", "-fwrapv"])
-        .arg(sanitizer_flags())
-        .args(["-o"])
-        .arg(&bin)
-        .arg(&c_path)
-        .output()
-        .expect("spawn cc");
+    let mut cmd = Command::new(cc);
+    cmd.args(["-O1", "-g", "-fwrapv"]);
+    let flags = sanitizer_flags();
+    if !flags.is_empty() {
+        cmd.arg(flags);
+    }
+    cmd.args(["-o"]).arg(&bin).arg(&c_path);
+    let st = cmd.output().expect("spawn cc");
     assert!(
         st.status.success(),
         "cc failed: {}",
