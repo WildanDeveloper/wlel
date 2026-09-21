@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790017966348,
+  "lastUpdate": 1790018387987,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -77,6 +77,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 71.8,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "442182eb065d7b89c6a4c6fb8df5e2245c15a381",
+          "message": "CI fixes round 4, windows green: git-dep manifest paths written with forward slashes (a raw windows temp path put backslash escapes inside toml basic strings and the strict parser rejected \\U), project binary-name asserts accept the .exe suffix mingw appends to extensionless -o targets — macos went green in round 3 via the asan self-probe, all three OS legs plus lint and bench now pass (304 tests green)",
+          "timestamp": "2026-09-22T02:19:05+07:00",
+          "tree_id": "7b764280092a381eecfb34a8da280297a02b09af",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/442182eb065d7b89c6a4c6fb8df5e2245c15a381"
+        },
+        "date": 1790018387261,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.7,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 80,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 70.1,
             "unit": "ms"
           }
         ]
