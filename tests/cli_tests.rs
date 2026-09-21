@@ -279,8 +279,8 @@ fn build_sanitize_catches_heap_overflow() {
     let t = TempWl::new(
         "sanitize_oob",
         r#"fn main() -> int {
-               p := wlel_alloc(12) as *int;
-               i := sys::argc() + 2;
+               p := wlel_alloc(4096) as *int;
+               i := sys::argc() + 514;
                return p[i];
            }"#,
     );
@@ -294,9 +294,10 @@ fn build_sanitize_catches_heap_overflow() {
     // release codegen has no bounds checks, so ASan itself must abort on
     // the out-of-bounds read; wlel_alloc is raw malloc (redzoned) and the
     // index comes from sys::argc() so the optimizer cannot fold the access.
-    // the read lands at byte 24+ of a 12-byte allocation — inside the right
-    // redzone on every ASan allocator (a far index could hit a neighbouring
-    // live chunk and stay silent, as seen on Apple Silicon size classes)
+    // the read lands ~24 bytes past a 4096-byte allocation — inside the
+    // right redzone (>= 1 KiB for this size) on every ASan allocator; a
+    // short hop past a tiny allocation can silently land in a neighbouring
+    // live chunk (seen on Apple Silicon size classes)
     assert_ne!(run.status.code(), Some(0), "ASan must abort");
     let err = String::from_utf8_lossy(&run.stderr);
     assert!(err.contains("AddressSanitizer"), "{err}");
