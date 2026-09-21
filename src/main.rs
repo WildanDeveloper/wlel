@@ -318,11 +318,25 @@ fn emit_binary(
         format!("{cc}|O{opt}|{flags}|{}\n{c_src}", link.join("\u{1}")).as_bytes(),
     );
     let cache_bin = cache_dir.join(format!("{key:016x}"));
-    if allow_cache && cache_bin.exists() {
-        if out != &cache_bin {
-            let _ = fs::copy(&cache_bin, out);
+    // MinGW gcc appends .exe to an extensionless -o target, so the file on
+    // disk is <name>.exe; track, copy and return that exact file (callers
+    // run the returned path)
+    let with_exe = |p: &PathBuf| -> PathBuf {
+        if cfg!(windows) && p.extension().is_none() {
+            let mut s = p.clone().into_os_string();
+            s.push(".exe");
+            PathBuf::from(s)
+        } else {
+            p.clone()
         }
-        return out.clone();
+    };
+    let out = with_exe(out);
+    let cache_bin = with_exe(&cache_bin);
+    if allow_cache && cache_bin.exists() {
+        if out != cache_bin {
+            let _ = fs::copy(&cache_bin, &out);
+        }
+        return out;
     }
     let c_path = env::temp_dir().join(format!("wlel_{}.c", std::process::id()));
     fs::write(&c_path, c_src).expect("write temp c");
@@ -342,10 +356,10 @@ fn emit_binary(
         exit(1);
     }
     let _ = fs::create_dir_all(&cache_dir);
-    if out != &cache_bin {
-        let _ = fs::copy(&cache_bin, out);
+    if out != cache_bin {
+        let _ = fs::copy(&cache_bin, &out);
     }
-    out.clone()
+    out
 }
 
 /// load the project for the current directory (walks up to find wlel.toml)

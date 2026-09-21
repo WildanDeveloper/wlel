@@ -58,9 +58,13 @@ sort_ms=$(printf '%s\n' "${sort_vals[@]}" | sort -n | sed -n '3p')
 compile_ms=$(median_ms "$WLEL" build examples/kitchen.wl --emit-c -o "$TMP/kitchen.c")
 
 # --- emit JSON ---------------------------------------------------------------
+# github-action-benchmark customSmallerIsBetter wants ONE JSON array, not
+# newline-delimited objects
 {
-    printf '{"name":"fib(35) runtime","unit":"ms","value":%s}\n' "$fib_ms"
-    printf '{"name":"sort 1M ints","unit":"ms","value":%s}\n' "$sort_ms"
-    printf '{"name":"compile kitchen.wl (front-end)","unit":"ms","value":%s}\n' "$compile_ms"
+    printf '[\n'
+    printf '  {"name":"fib(35) runtime","unit":"ms","value":%s},\n' "$fib_ms"
+    printf '  {"name":"sort 1M ints","unit":"ms","value":%s},\n' "$sort_ms"
+    printf '  {"name":"compile kitchen.wl (front-end)","unit":"ms","value":%s}\n' "$compile_ms"
+    printf ']\n'
 } > "$OUT"
 cat "$OUT"

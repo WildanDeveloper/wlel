@@ -224,7 +224,9 @@ fn release_build_has_zero_checks() {
                return a[1] + 10 / z;
            }"#,
     );
-    let out_bin = t.path.with_extension("bin");
+    // extensionless -o: on Windows the wlel binary lands at <name>.exe and
+    // CreateProcess appends .exe to the extensionless path automatically
+    let out_bin = t.path.with_extension("");
     let out_c = t.path.with_extension("c");
     let st = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["build", t.path.to_str().unwrap(), "-o", out_bin.to_str().unwrap(), "--emit-c"])
@@ -257,7 +259,7 @@ fn build_sanitize_runs_clean_program() {
                return 0;
            }"#,
     );
-    let bin = t.path.with_extension("bin");
+    let bin = t.path.with_extension("");
     let st = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["build", t.path.to_str().unwrap(), "-o", bin.to_str().unwrap(), "-sanitize"])
         .output()
@@ -278,11 +280,11 @@ fn build_sanitize_catches_heap_overflow() {
         "sanitize_oob",
         r#"fn main() -> int {
                p := wlel_alloc(12) as *int;
-               i := sys::argc() + 8;
+               i := sys::argc() + 2;
                return p[i];
            }"#,
     );
-    let bin = t.path.with_extension("bin");
+    let bin = t.path.with_extension("");
     let st = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["build", t.path.to_str().unwrap(), "-o", bin.to_str().unwrap(), "-sanitize"])
         .output()
@@ -291,7 +293,10 @@ fn build_sanitize_catches_heap_overflow() {
     let run = Command::new(&bin).output().expect("run sanitized binary");
     // release codegen has no bounds checks, so ASan itself must abort on
     // the out-of-bounds read; wlel_alloc is raw malloc (redzoned) and the
-    // index comes from sys::argc() so the optimizer cannot fold the access
+    // index comes from sys::argc() so the optimizer cannot fold the access.
+    // the read lands at byte 24+ of a 12-byte allocation — inside the right
+    // redzone on every ASan allocator (a far index could hit a neighbouring
+    // live chunk and stay silent, as seen on Apple Silicon size classes)
     assert_ne!(run.status.code(), Some(0), "ASan must abort");
     let err = String::from_utf8_lossy(&run.stderr);
     assert!(err.contains("AddressSanitizer"), "{err}");
