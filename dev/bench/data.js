@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790017538054,
+  "lastUpdate": 1790017966348,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -38,6 +38,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 69.6,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "9658609f54579dc8e864170d5117582d8ea51193",
+          "message": "CI fixes round 3: asan oob test self-probes the toolchain (compiles a known-OOB C program with the same -sanitize flags; skips with a reason where -fsanitize=address links but catches nothing, as seen with apple clang on the macOS runners — otherwise wlel build -sanitize must abort with cc/run stderr in the assert), .gitattributes pins *.wl to LF so the fmt no-diff check agrees with windows checkouts, generated-C binary stdout from round 2 already fixed collections/sort exact-output on windows (304 tests green)",
+          "timestamp": "2026-09-22T02:12:10+07:00",
+          "tree_id": "ef50f4e8291d5f83a1c86bc1ade11ea929766239",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/9658609f54579dc8e864170d5117582d8ea51193"
+        },
+        "date": 1790017964919,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.9,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 80,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 71.8,
             "unit": "ms"
           }
         ]
