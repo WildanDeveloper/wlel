@@ -232,11 +232,20 @@ fn project_build_names_binary_after_package_and_emit_c_works() {
     let app = t.path.join("aplikasi");
     let (_out, err, code) = t.wlel(&["build"], &app);
     assert_eq!(code, Some(0), "{err}");
-    assert!(app.join("aplikasi").is_file(), "binary named after the package");
+    // windows binaries carry the .exe suffix (mingw appends it to an
+    // extensionless -o target)
+    let exe = |name: &str| {
+        if cfg!(windows) {
+            app.join(format!("{name}.exe"))
+        } else {
+            app.join(name)
+        }
+    };
+    assert!(exe("aplikasi").is_file(), "binary named after the package");
 
     let (_out, err, code) = t.wlel(&["build", "--emit-c", "-o", "custom"], &app);
     assert_eq!(code, Some(0), "{err}");
-    assert!(app.join("custom").is_file());
+    assert!(exe("custom").is_file());
     assert!(app.join("custom.c").is_file());
 }
 
@@ -394,11 +403,14 @@ fn git_dep_clones_builds_and_lock_pins_the_revision() {
     );
 
     t.wlel(&["new", "app"], &t.path);
+    // forward slashes in the manifest: on Windows a raw temp path would put
+    // backslash escapes (\U of \Users) inside a TOML basic string
+    let remote = t.path.join("remote").display().to_string().replace('\\', "/");
     t.write(
         "app/wlel.toml",
         &format!(
             "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[deps]\ngreetx = {{ git = \"{}\" }}\n",
-            t.path.join("remote").display()
+            remote
         ),
     );
     t.write(
