@@ -273,9 +273,69 @@ fn build_sanitize_runs_clean_program() {
     assert!(!err.contains("LeakSanitizer"), "{err}");
 }
 
+/// does this toolchain's `-fsanitize=address` actually catch a known OOB
+/// read at runtime? Probed with a direct C program using the same flags
+/// `wlel build -sanitize` passes to cc. Some toolchains link ASan fine but
+/// silently miss detections (observed with Apple clang on the macOS CI
+/// runners); there the wlel-level assertion would be a false alarm, so the
+/// test below skips instead.
+#[cfg(unix)]
+fn asan_catches_oob() -> Option<bool> {
+    static RESULT: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
+    *RESULT.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("wlel_asan_probe_{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let c_path = dir.join("oob_probe.c");
+        let bin = dir.join("oob_probe");
+        // read ~24 bytes past a 4096-byte malloc: inside the >= 1 KiB right
+        // redzone on every working ASan allocator
+        fs::write(
+            &c_path,
+            "#include <stdlib.h>\n\
+             int main(int argc, char** argv) {\n\
+             long long* p = (long long*)malloc(4096);\n\
+             long long i = (long long)argc + 514;\n\
+             volatile long long v = p[i];\n\
+             (void)v;\n\
+             return 0;\n\
+             }\n",
+        )
+        .expect("write probe");
+        let mut ran = None;
+        for cc in ["cc", "gcc", "clang"] {
+            let out = Command::new(cc)
+                .args(["-O2", "-fwrapv", "-fsanitize=address", "-fno-omit-frame-pointer", "-o"])
+                .arg(&bin)
+                .arg(&c_path)
+                .output();
+            let Ok(out) = out else { continue };
+            if !out.status.success() {
+                continue;
+            }
+            let run = Command::new(&bin).output().expect("run probe");
+            ran = Some(run.status.code() != Some(0));
+            break;
+        }
+        let _ = fs::remove_dir_all(&dir);
+        ran
+    })
+}
+
 #[cfg(unix)]
 #[test]
 fn build_sanitize_catches_heap_overflow() {
+    let Some(asan_works) = asan_catches_oob() else {
+        eprintln!("skip: no C compiler found for the ASan probe");
+        return;
+    };
+    if !asan_works {
+        eprintln!(
+            "skip: this toolchain links -fsanitize=address but does not catch OOB reads \
+             at runtime (known-OOB probe ran to completion); the wlel-level assertion \
+             would be a false alarm"
+        );
+        return;
+    }
     let t = TempWl::new(
         "sanitize_oob",
         r#"fn main() -> int {
@@ -293,13 +353,14 @@ fn build_sanitize_catches_heap_overflow() {
     let run = Command::new(&bin).output().expect("run sanitized binary");
     // release codegen has no bounds checks, so ASan itself must abort on
     // the out-of-bounds read; wlel_alloc is raw malloc (redzoned) and the
-    // index comes from sys::argc() so the optimizer cannot fold the access.
-    // the read lands ~24 bytes past a 4096-byte allocation — inside the
-    // right redzone (>= 1 KiB for this size) on every ASan allocator; a
-    // short hop past a tiny allocation can silently land in a neighbouring
-    // live chunk (seen on Apple Silicon size classes)
-    assert_ne!(run.status.code(), Some(0), "ASan must abort");
+    // index comes from sys::argc() so the optimizer cannot fold the access
     let err = String::from_utf8_lossy(&run.stderr);
+    assert_ne!(
+        run.status.code(),
+        Some(0),
+        "ASan must abort — cc build stderr: {} — run stderr: {err}",
+        String::from_utf8_lossy(&st.stderr)
+    );
     assert!(err.contains("AddressSanitizer"), "{err}");
     assert!(err.contains("heap-buffer-overflow"), "{err}");
 }

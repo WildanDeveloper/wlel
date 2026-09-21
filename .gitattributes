@@ -1,0 +1,4 @@
+# the formatter's canonical form is LF; keep .wl sources LF on every OS so
+# `wlel fmt -check` (and the repo-examples no-diff test) agree on Windows
+*.wl text eol=lf
+*.sh text eol=lf
