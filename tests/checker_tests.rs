@@ -844,3 +844,154 @@ fn checked_ops_typecheck() {
         .unwrap_err();
     assert!(e5.contains("std::checked_sub takes 3 argument(s), got 2"), "{e5}");
 }
+
+#[test]
+fn test_block_body_typechecks() {
+    assert!(check(
+        "fn add(a: int, b: int) -> int { return a + b; }
+         test \"works\" {
+             assert_eq(add(1, 1), 2);
+             assert(true);
+         }"
+    )
+    .is_ok());
+}
+
+#[test]
+fn test_body_can_call_and_be_checked() {
+    // undefined name inside a test body is an error, like anywhere else
+    let e = check("test \"bad\" { return nope; }").unwrap_err();
+    assert!(e.contains("undefined variable 'nope'"), "{e}");
+}
+
+#[test]
+fn test_cannot_return_a_value() {
+    let e = check("test \"x\" { return 5; }").unwrap_err();
+    assert!(e.contains("void function cannot return a value"), "{e}");
+}
+
+#[test]
+fn test_break_outside_loop_rejected() {
+    let e = check("test \"x\" { break; }").unwrap_err();
+    assert!(e.contains("'break' outside of loop"), "{e}");
+}
+
+#[test]
+fn assert_needs_bool() {
+    let e = check("fn main() -> int { assert(1); return 0; }").unwrap_err();
+    assert!(e.contains("assert() expects a bool condition, got int"), "{e}");
+    let e2 = check("fn main() -> int { assert(); return 0; }").unwrap_err();
+    assert!(e2.contains("assert() takes exactly 1 argument"), "{e2}");
+}
+
+#[test]
+fn assert_eq_semantics_match_eq_operator() {
+    // untyped literal adapts to the variable's width (range-checked)
+    assert!(check(
+        "fn main() -> int {
+             let b: u8 = 5;
+             assert_eq(b, 5);
+             return 0;
+         }"
+    )
+    .is_ok());
+    // literal out of range for the target width
+    let e = check(
+        "fn main() -> int {
+             let b: u8 = 5;
+             assert_eq(b, 300);
+             return 0;
+         }",
+    )
+    .unwrap_err();
+    assert!(e.contains("literal 300 does not fit in type u8"), "{e}");
+    // mixed int widths without a cast
+    let e2 = check(
+        "fn main() -> int {
+             let a: u8 = 5;
+             let b: i32 = 6;
+             assert_eq(a, b);
+             return 0;
+         }",
+    )
+    .unwrap_err();
+    assert!(e2.contains("mixed int widths: u8 and i32"), "{e2}");
+    // mixed float widths
+    let e3 = check(
+        "fn main() -> int {
+             let a: f32 = 1.0;
+             let b: float = 1.0;
+             assert_eq(a, b);
+             return 0;
+         }",
+    )
+    .unwrap_err();
+    assert!(e3.contains("comparison between f32 and float"), "{e3}");
+    // unsupported operand kinds
+    let e4 = check(
+        "struct Pt { x: int }
+         fn main() -> int {
+             let p: Pt = Pt { x: 1 };
+             assert_eq(p, p);
+             return 0;
+         }",
+    )
+    .unwrap_err();
+    assert!(e4.contains("assert_eq() supports numbers, bools and strings"), "{e4}");
+    // argument count
+    let e5 = check("fn main() -> int { assert_eq(1); return 0; }").unwrap_err();
+    assert!(e5.contains("assert_eq() takes exactly 2 arguments"), "{e5}");
+}
+
+#[test]
+fn assert_works_in_plain_functions_too() {
+    // assert is not test-only: outside a test run a failed assert exits(1)
+    assert!(check("fn main() -> int { assert(1 == 1); return 0; }").is_ok());
+    let e = check("fn main() -> int { assert(\"x\"); return 0; }").unwrap_err();
+    assert!(e.contains("assert() expects a bool condition, got string"), "{e}");
+}
+
+#[test]
+fn arena_stats_typechecks_and_exposes_fields() {
+    assert!(check(
+        "fn show(s: ArenaStats) -> int { return s.bytes + s.chunks + s.peak; }
+         fn main() -> int {
+             let s: ArenaStats = arena_stats();
+             arena(1024) { p := new(int, 4); p[0] = 1; show(arena_stats()); }
+             return show(s);
+         }"
+    ).is_ok());
+}
+
+#[test]
+fn arena_stats_rejects_arguments() {
+    assert!(check("fn main() -> int { arena_stats(1); return 0; }").is_err());
+}
+
+#[test]
+fn arena_stats_rejects_bad_field() {
+    assert!(check("fn main() -> int { return arena_stats().nope; }").is_err());
+}
+
+#[test]
+fn arena_stats_struct_name_is_reserved() {
+    let e = check_err("struct ArenaStats { x: int }
+                       fn main() -> int { return 0; }")
+        .expect_err("must be rejected");
+    assert!(e.msg.contains("reserved"), "{}", e.msg);
+}
+
+#[test]
+fn arena_stats_codegen_emits_helper_and_struct() {
+    let mut p = parse_ok(
+        "fn main() -> int {
+             let s: ArenaStats = arena_stats();
+             return s.bytes;
+         }",
+    );
+    Checker::check(&mut p).expect("typecheck");
+    let c = gen_program(&p);
+    assert!(c.contains("typedef struct ArenaStats { long long bytes; long long chunks; long long peak; } ArenaStats;"), "{c}");
+    assert!(c.contains("_wlel_arena_stats()"), "{c}");
+    assert!(c.contains("s.peak = (long long)_wlel_cur_arena->peak;"), "{c}");
+}

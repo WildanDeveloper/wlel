@@ -16,11 +16,21 @@ impl std::fmt::Display for LexError {
 
 impl std::error::Error for LexError {}
 
+/// a `// line comment` seen between tokens (block comments do not exist in
+/// Wlel); `text` is everything after the `//` on that line
+#[derive(Debug, Clone)]
+pub struct Comment {
+    pub line: usize,
+    pub col: usize,
+    pub text: String,
+}
+
 pub struct Lexer {
     src: Vec<u8>,
     pos: usize,
     line: usize,
     col: usize,
+    comments: Vec<Comment>,
 }
 
 impl Lexer {
@@ -30,6 +40,7 @@ impl Lexer {
             pos: 0,
             line: 1,
             col: 1,
+            comments: Vec::new(),
         }
     }
 
@@ -77,19 +88,29 @@ impl Lexer {
                     self.bump();
                 }
                 Some(b'/') if self.peek2() == Some(b'/') => {
+                    // record the comment (the formatter replays it) and skip it
+                    let (cline, ccol) = (self.line, self.col);
+                    let start = self.pos + 2; // past the two slashes
                     while let Some(c) = self.peek() {
                         if c == b'\n' {
                             break;
                         }
                         self.bump();
                     }
+                    let text = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+                    self.comments.push(Comment { line: cline, col: ccol, text });
                 }
                 _ => break,
             }
         }
     }
 
-    pub fn tokenize(mut self) -> Result<Vec<SpannedToken>, LexError> {
+    pub fn tokenize(self) -> Result<Vec<SpannedToken>, LexError> {
+        self.tokenize_with_comments().map(|(t, _)| t)
+    }
+
+    /// tokens plus every comment seen, in source order (used by `wlel fmt`)
+    pub fn tokenize_with_comments(mut self) -> Result<(Vec<SpannedToken>, Vec<Comment>), LexError> {
         let mut out = Vec::new();
         loop {
             self.skip_trivia();
@@ -101,7 +122,7 @@ impl Lexer {
                         Token::Eof,
                         Span::point(start_line, start_col),
                     ));
-                    return Ok(out);
+                    return Ok((out, self.comments));
                 }
                 Some(c) => {
                     match self.token(c) {
@@ -193,6 +214,8 @@ impl Lexer {
             b'=' => {
                 if self.eat(b'=') {
                     Ok(Token::Eq)
+                } else if self.eat(b'>') {
+                    Ok(Token::FatArrow)
                 } else {
                     Ok(Token::Assign)
                 }
@@ -407,8 +430,12 @@ impl Lexer {
         }
         match s.as_str() {
             "fn" => Token::Fn,
+            "extern" => Token::Extern,
             "struct" => Token::Struct,
+            "enum" => Token::Enum,
+            "match" => Token::Match,
             "use" => Token::Use,
+            "test" => Token::Test,
             "as" => Token::As,
             "defer" => Token::Defer,
             "arena" => Token::Arena,
@@ -634,7 +661,7 @@ mod tests {
 
     #[test]
     fn utf8_strings() {
-        let toks = lex("\"apa kabar 🇮🇩\"");
-        assert_eq!(toks[0], Token::Str("apa kabar 🇮🇩".into()));
+        let toks = lex("\"hello there 🇮🇩\"");
+        assert_eq!(toks[0], Token::Str("hello there 🇮🇩".into()));
     }
 }

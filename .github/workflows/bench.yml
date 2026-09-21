@@ -1,0 +1,36 @@
+name: benchmark
+
+# Benchmark trend on every push to main (and on demand): results are
+# appended to the `gh-pages` branch via github-action-benchmark, which
+# alerts when a change regresses beyond the threshold.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  deployments: write
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (release)
+        run: cargo build --release --locked
+      - name: Run benchmarks
+        run: ./scripts/bench.sh benchmark-data.json
+      - name: Record benchmark trend
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Wlel benchmarks
+          tool: customSmallerIsBetter
+          output-file-path: benchmark-data.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: "150%"
+          fail-on-alert: true

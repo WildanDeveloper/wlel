@@ -43,11 +43,14 @@ impl std::fmt::Display for Span {
 pub struct Spanned<T> {
     pub node: T,
     pub span: Span,
+    /// type name assigned by the checker to expression nodes ("int",
+    /// "*Pt", "[int; 3]", ...); None on parser output and statements
+    pub ty: Option<String>,
 }
 
 impl<T> Spanned<T> {
     pub fn new(node: T, span: Span) -> Spanned<T> {
-        Spanned { node, span }
+        Spanned { node, span, ty: None }
     }
 }
 

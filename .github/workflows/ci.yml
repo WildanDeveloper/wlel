@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # build + full test suite on the three release OSes; the suite itself
+  # runs the Wlel-generated code under ASan+UBSan (safe_tests and the
+  # `wlel build -sanitize` dogfood tests) on Linux/macOS, UBSan on Windows
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install MinGW-w64 GCC (C backend)
+        if: runner.os == 'Windows'
+        run: choco install mingw -y --no-progress
+      - name: Build (release)
+        run: cargo build --release --locked
+      - name: Test suite
+        run: cargo test --release --locked
+
+  # keep the quality bar the repo already claims: clippy -D warnings and
+  # canonical .wl formatting (wlel fmt -check, the fmt∘fmt == fmt guarantee)
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: wlel fmt -check (all examples)
+        run: |
+          cargo build --release --locked
+          find examples -name '*.wl' -print0 | xargs -0 ./target/release/wlel fmt -check

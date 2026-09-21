@@ -1,1 +1,0 @@
-/root/wlel/target/debug/wlel: /root/wlel/src/ast.rs /root/wlel/src/checker.rs /root/wlel/src/codegen.rs /root/wlel/src/lexer.rs /root/wlel/src/lib.rs /root/wlel/src/main.rs /root/wlel/src/parser.rs /root/wlel/src/span.rs /root/wlel/src/token.rs

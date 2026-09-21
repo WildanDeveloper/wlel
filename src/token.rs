@@ -14,10 +14,14 @@ pub enum Token {
 
     // keywords
     Fn,
+    Extern,
     Struct,
+    Enum,
+    Match,
     Defer,
     Arena,
     Use,
+    Test,
     As,
     Let,
     Return,
@@ -72,6 +76,7 @@ pub enum Token {
     AndAnd,
     OrOr,
     Arrow,   // ->
+    FatArrow, // =>
     Eof,
 }
 

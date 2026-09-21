@@ -1,6 +1,6 @@
 use wlel::ast::*;
 use wlel::checker::Checker;
-use wlel::codegen::gen_program;
+use wlel::codegen::{gen_program, gen_program_safe, gen_program_tests, gen_program_tests_safe};
 use wlel::lexer::Lexer;
 use wlel::token::Token;
 use wlel::parser::Parser;
@@ -108,7 +108,7 @@ fn assign_vs_eq_lookahead() {
         StmtKind::Assign(a) => assert!(matches!(a.target.node, ExprKind::Ident(ref n) if n == "x")),
         other => panic!("{:?}", other),
     }
-    assert!(matches!(&body[2].node, StmtKind::ExprStmt(e) if matches!(e.node, ExprKind::Call(ref f, ref args) if f == "foo" && args.len() == 1)));
+    assert!(matches!(&body[2].node, StmtKind::ExprStmt(e) if matches!(e.node, ExprKind::Call(ref f, ref ta, ref args) if f == "foo" && ta.is_empty() && args.len() == 1)));
     assert!(matches!(&body[3].node, StmtKind::While(..)));
 }
 
@@ -357,7 +357,9 @@ fn void_main_emits_return_zero() {
     ));
     assert!(c.contains("int main("), "{c}");
     assert!(c.contains("return 0;"), "{c}");
-    assert!(!c.contains("return;"), "{c}");
+    // no standalone `return;` inside main (the shared assert runtime has
+    // `if (cond) return;`, so check line-wise)
+    assert!(!c.lines().any(|l| l.trim() == "return;"), "{c}");
 
     // without an explicit return the synthesized one closes main
     let c2 = gen_program(&parse("fn main() { wlel_print_str(\"hi\"); }"));
@@ -653,4 +655,199 @@ fn i64_wrap_add_codegen_stays_plain_c() {
          }",
     ));
     assert!(c.contains("long long wrapped = (max + 1);"), "{c}");
+}
+
+#[test]
+fn test_blocks_parse() {
+    let p = parse(
+        "fn add(a: int, b: int) -> int { return a + b; }
+         test \"arithmetic\" {
+             assert_eq(add(1, 1), 2);
+         }
+         test \"all good\" {
+             assert(true);
+         }",
+    );
+    assert_eq!(p.tests.len(), 2, "{p:?}");
+    assert_eq!(p.tests[0].name, "arithmetic");
+    assert_eq!(p.tests[1].name, "all good");
+    assert_eq!(p.tests[0].body.0.len(), 1);
+    // test span starts at the `test` keyword (line 2)
+    assert_eq!(p.tests[0].span.start.line, 2);
+    assert_eq!(p.tests[1].span.start.line, 5);
+}
+
+#[test]
+fn test_recovery_keeps_neighbouring_tests() {
+    let toks = Lexer::new(
+        "test \"broken\" {
+             x := ;
+         }
+         test \"good\" {
+             assert(true);
+         }",
+    )
+    .tokenize()
+    .unwrap();
+    let (p, errs) = Parser::new(&toks).program();
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    // statement-level recovery: the broken test survives with an empty body,
+    // the intact one is untouched
+    assert_eq!(p.tests.len(), 2, "{p:?}");
+    assert_eq!(p.tests[0].name, "broken");
+    assert_eq!(p.tests[0].body.0.len(), 0);
+    assert_eq!(p.tests[1].name, "good");
+}
+
+#[test]
+fn test_runner_codegen_replaces_main() {
+    let mut p = parse(
+        "fn helper() -> int { return 7; }
+         fn main() -> int { wlel_print_int(helper()); return 0; }
+         test \"helper works\" {
+             assert_eq(helper(), 7);
+         }",
+    );
+    Checker::check(&mut p).expect("typecheck");
+    let c = gen_program_tests(&p);
+    // test body calls the real function; assert_eq rewrites to _wlel_assert
+    assert!(c.contains("long long helper() {"), "{c}");
+    assert!(c.contains("static void _wlel_test_0_helper_works(void)"), "{c}");
+    assert!(c.contains("_wlel_assert((helper() == 7),"), "{c}");
+    // the runner main replaced the user main (no wlel_print_int body)
+    assert!(!c.contains("wlel_print_int(helper());"), "{c}");
+    assert!(c.contains("if (setjmp(_wlel_test_jmp) == 0) {"), "{c}");
+    assert!(c.contains("printf(\"pass: %s\\n\", \"helper works\");"), "{c}");
+    assert!(c.contains("printf(\"%lld passed, %lld failed\\n\", _wlel_passed, _wlel_failed);"), "{c}");
+    assert_eq!(c.matches("int main(").count(), 1, "{c}");
+}
+
+#[test]
+fn run_codegen_ignores_tests() {
+    let c = gen_program(&parse(
+        "fn main() -> int { return 0; }
+         test \"never generated\" {
+             assert(true);
+         }",
+    ));
+    // no test functions, no setjmp-based runner (the shared assert runtime
+    // and its setjmp.h include are always present)
+    assert!(!c.contains("_wlel_test_0"), "{c}");
+    assert!(!c.contains("if (setjmp("), "{c}");
+    assert!(c.contains("int main("), "{c}");
+}
+
+#[test]
+fn assert_rewrite_carries_file_and_line() {
+    let mut p = parse(
+        "fn main() -> int {
+             assert(true);
+             return 0;
+         }",
+    );
+    p.funcs[0].file = "t.wl".into();
+    Checker::check(&mut p).expect("typecheck");
+    let c = gen_program(&p);
+    // assert on line 2 of t.wl reports that location at runtime
+    assert!(c.contains("_wlel_assert(1, \"t.wl\", 2);"), "{c}");
+}
+
+#[test]
+fn assert_eq_string_and_width_rewrite() {
+    let mut p = parse(
+        "fn main() -> int {
+             assert_eq(\"he\" + \"llo\", \"hello\");
+             let b: u8 = 5;
+             assert_eq(b, 5);
+             return 0;
+         }",
+    );
+    Checker::check(&mut p).expect("typecheck");
+    let c = gen_program(&p);
+    // strings compare by content, untyped literal adapts to the u8 width
+    assert!(c.contains("_wlel_assert(_wlel_streq(_wlel_strcat(\"he\", \"llo\"), \"hello\"),"), "{c}");
+    assert!(c.contains("_wlel_assert((b == 5),"), "{c}");
+}
+
+#[test]
+fn checker_annotates_expression_types() {
+    let mut p = parse(
+        "fn main() -> int {
+             let a: [int; 3] = [1, 2, 3];
+             return a[1];
+         }",
+    );
+    Checker::check(&mut p).expect("typecheck");
+    // navigate: return a[1]
+    let stmt = &p.funcs[0].body.0[1];
+    let StmtKind::Return(Some(e)) = &stmt.node else {
+        panic!("expected return");
+    };
+    let ExprKind::Index(base, _) = &e.node else {
+        panic!("expected index");
+    };
+    // the base carries the array type, the index expression the element type
+    assert_eq!(base.ty.as_deref(), Some("[int; 3]"), "base type");
+    assert_eq!(e.ty.as_deref(), Some("int"), "index expression type");
+}
+
+#[test]
+fn safe_mode_emits_checks_release_does_not() {
+    let mut p = parse(
+        "fn main() -> int {
+             let a: [int; 3] = [1, 2, 3];
+             a[1] = 10 / (a[0] + 1);
+             return a[1];
+         }",
+    );
+    p.funcs[0].file = "safe.wl".into();
+    Checker::check(&mut p).expect("typecheck");
+    let dev = gen_program_safe(&p);
+    let rel = gen_program(&p);
+    // dev: routing through checked helpers, arena free poisons
+    assert!(dev.contains("_wlel_arr_at("), "{dev}");
+    assert!(dev.contains("_wlel_divz("), "{dev}");
+    assert!(dev.contains("memset(a->buf, 0xDE, a->cap)"), "{dev}");
+    // dev checks carry the .wl location for the runtime message
+    assert!(dev.contains("\"safe.wl\", 4"), "{dev}");
+    // release: none of it — zero overhead
+    assert!(!rel.contains("_wlel_arr_at"), "{rel}");
+    assert!(!rel.contains("_wlel_divz"), "{rel}");
+    assert!(!rel.contains("0xDE"), "{rel}");
+}
+
+#[test]
+fn safe_mode_skips_pointers_floats_and_unchecked_trees() {
+    let mut p = parse(
+        "fn main() -> int {
+             heap := new(int, 4);
+             heap[2] = 5;
+             f := 1.5;
+             g := f / 0.0;
+             return heap[2];
+         }",
+    );
+    Checker::check(&mut p).expect("typecheck");
+    let dev = gen_program_safe(&p);
+    // pointer from new() has no tracked length: plain indexing
+    assert!(dev.contains("heap[2] = 5;"), "{dev}");
+    assert!(!dev.contains("_wlel_arr_at"), "{dev}");
+    // float division is IEEE inf, not an error: no divz on either side
+    assert!(!dev.contains("_wlel_divz"), "{dev}");
+    assert!(dev.contains("f / 0.0"), "{dev}");
+}
+
+#[test]
+fn test_runner_safe_mode_also_instruments() {
+    let mut p = parse(
+        "test \"t\" {
+             let a: [int; 2] = [1, 2];
+             assert_eq(a[1], 2);
+         }",
+    );
+    Checker::check(&mut p).expect("typecheck");
+    let c = gen_program_tests_safe(&p);
+    assert!(c.contains("_wlel_arr_at("), "{c}");
+    let rel = gen_program_tests(&p);
+    assert!(!rel.contains("_wlel_arr_at"), "{rel}");
 }

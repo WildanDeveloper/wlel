@@ -1,6 +1,8 @@
 // greet.wl — strings, floats, and forward references
 fn fib(n: int) -> int {
-    if n < 2 { return n; }
+    if n < 2 {
+        return n;
+    }
     return fib(n - 1) + fib(n - 2);
 }
 
