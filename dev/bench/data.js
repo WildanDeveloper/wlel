@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790078412192,
+  "lastUpdate": 1790079467752,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -194,6 +194,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 72.9,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "e82050e84b924712bad6b46c1b503887fa5cb879",
+          "message": "CI fixes round 6: mingw-w64 gcc does not implement __declspec(thread) — the attribute was silently ignored so _wlel_cur_arena/_wlel_root_arena/_wlel_is_main became plain statics shared by every thread and the worker pool corrupted its arena state on windows (3 concurrency tests failed); _WLEL_TLS now maps __GNUC__/__clang__ (incl. mingw, which supports __thread via emutls) to __thread and reserves __declspec(thread) for MSVC, with the macro logic locked by a test; plus the scheduled cargo-fuzz soak caught a real crash — a mutated defer.wl with ~900 nested parens overflowed the parser stack (fatal runtime error before any diagnostic could print), so the parser now carries a recursion guard (MAX_NESTING 256, balanced on success and error paths so recovery keeps parsing) across expr/unary/block/type recursion and rejects hostile nesting with 'expression nesting too deep (limit 256)' at file:line — verified against the downloaded fuzz artifact (wlel check now exits 1 with three clean syntax errors where it previously aborted with SIGABRT), 100-deep parens still parse, 5 regression tests added (478 tests green)",
+          "timestamp": "2026-09-22T19:17:17+07:00",
+          "tree_id": "9064467660b1619c3b0fbbf28fd97f8be1626bb6",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/e82050e84b924712bad6b46c1b503887fa5cb879"
+        },
+        "date": 1790079465954,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 11.4,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 71,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 52.5,
             "unit": "ms"
           }
         ]
