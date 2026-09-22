@@ -29,7 +29,17 @@ pub struct Parser<'a> {
     last_end: Pos,
     /// all syntax errors found so far (recovery keeps parsing after each)
     errors: Vec<ParseError>,
+    /// recursion guard for expr/unary/block/type nesting — the parser is a
+    /// recursive-descent walker, so a hostile (or mutated) input with
+    /// thousands of `(`/`-`/`{` would overflow the stack before any other
+    /// check could run
+    depth: u32,
 }
+
+/// nesting limit for expressions, unary chains, blocks and types: generous
+/// for human code (real programs stay under ~20), tiny for the stack even
+/// with sanitizer-inflated frames
+const MAX_NESTING: u32 = 256;
 
 impl<'a> Parser<'a> {
     pub fn new(toks: &'a [SpannedToken]) -> Self {
@@ -38,7 +48,24 @@ impl<'a> Parser<'a> {
             pos: 0,
             last_end: Pos { line: 1, col: 1 },
             errors: Vec::new(),
+            depth: 0,
         }
+    }
+
+    /// enter one recursion level; the counter stays balanced on both the
+    /// success and the error path so error recovery keeps parsing safely
+    fn enter(&mut self, what: &str) -> PResult<()> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING {
+            self.depth -= 1;
+            let sp = self.peek_span();
+            return err_at(sp, format!("{} nesting too deep (limit {})", what, MAX_NESTING));
+        }
+        Ok(())
+    }
+
+    fn leave(&mut self) {
+        self.depth -= 1;
     }
 
     fn peek(&self) -> &Token {
@@ -359,6 +386,13 @@ impl<'a> Parser<'a> {
     ///       | '*'* Ident
     ///       | '[' Type ';' INT ']'
     fn type_expr(&mut self) -> PResult<String> {
+        self.enter("type")?;
+        let r = self.type_expr_inner();
+        self.leave();
+        r
+    }
+
+    fn type_expr_inner(&mut self) -> PResult<String> {
         if self.eat(&Token::LBracket) {
             let inner = self.type_expr()?;
             self.expect(&Token::Semicolon)?;
@@ -550,6 +584,13 @@ impl<'a> Parser<'a> {
     }
 
     fn block(&mut self) -> PResult<Block> {
+        self.enter("block")?;
+        let r = self.block_inner();
+        self.leave();
+        r
+    }
+
+    fn block_inner(&mut self) -> PResult<Block> {
         self.expect(&Token::LBrace)?;
         let mut stmts = Vec::new();
         while *self.peek() != Token::RBrace && *self.peek() != Token::Eof {
@@ -871,6 +912,13 @@ impl<'a> Parser<'a> {
     }
 
     fn expr(&mut self, min_bp: u8) -> PResult<Expr> {
+        self.enter("expression")?;
+        let r = self.expr_inner(min_bp);
+        self.leave();
+        r
+    }
+
+    fn expr_inner(&mut self, min_bp: u8) -> PResult<Expr> {
         let mut lhs = self.unary()?;
         while let Some(bp) = Self::lbp(self.peek()) {
             if bp < min_bp {
@@ -893,6 +941,13 @@ impl<'a> Parser<'a> {
     }
 
     fn unary(&mut self) -> PResult<Expr> {
+        self.enter("expression")?;
+        let r = self.unary_inner();
+        self.leave();
+        r
+    }
+
+    fn unary_inner(&mut self) -> PResult<Expr> {
         let start = self.peek_span();
         if self.eat(&Token::Minus) {
             let inner = self.unary()?;

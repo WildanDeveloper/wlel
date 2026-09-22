@@ -292,6 +292,13 @@ fn thread_codegen_splices_trampolines_and_tls_arenas() {
     // per-thread arenas: thread-local storage markers present
     assert!(c.contains("_WLEL_TLS"), "{c}");
     assert!(c.contains("static _WLEL_TLS WArena* _wlel_cur_arena"), "{c}");
+    // TLS mapping: gcc/clang (incl. mingw-w64, where __declspec(thread) is
+    // silently ignored by the compiler and the arenas would end up shared
+    // between threads) must get __thread; __declspec(thread) is MSVC-only
+    assert!(
+        c.contains("#if defined(__GNUC__) || defined(__clang__)\n#define _WLEL_TLS __thread\n#else\n#define _WLEL_TLS __declspec(thread)\n#endif"),
+        "{c}"
+    );
     // worker trampoline boxes the argument and frees the thread's arena
     assert!(c.contains("typedef struct _wlel_tharg_work { long long data; } _wlel_tharg_work;"), "{c}");
     assert!(c.contains("_wlel_thread_entry_work"), "{c}");

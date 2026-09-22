@@ -995,3 +995,60 @@ fn arena_stats_codegen_emits_helper_and_struct() {
     assert!(c.contains("_wlel_arena_stats()"), "{c}");
     assert!(c.contains("s.peak = (long long)_wlel_cur_arena->peak;"), "{c}");
 }
+
+// ---------------------------------------------------------------------------
+// parser recursion guard: hostile nesting must be rejected with a syntax
+// error, never overflow the stack (nightly cargo-fuzz found this via a
+// mutated defer.wl with ~900 nested parens)
+
+fn parse_errors_of(src: String) -> Vec<String> {
+    let toks = Lexer::new(&src).tokenize().expect("lex");
+    let (_, errs) = Parser::new(&toks).program();
+    errs.iter().map(|e| e.msg.clone()).collect()
+}
+
+#[test]
+fn deep_paren_nesting_is_rejected_not_crashed() {
+    let errs = parse_errors_of(format!("fn f() {{ x := {}1; }}", "(".repeat(5_000)));
+    assert!(!errs.is_empty(), "deep parens must produce errors");
+    assert!(
+        errs.iter().any(|m| m.contains("expression nesting too deep")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn deep_unary_chain_is_rejected_not_crashed() {
+    let errs = parse_errors_of(format!("fn f() {{ x := {}1; }}", "-".repeat(50_000)));
+    assert!(
+        errs.iter().any(|m| m.contains("expression nesting too deep")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn deep_block_nesting_is_rejected_not_crashed() {
+    let src = format!("fn f() {{ {} let a := 1; {} }}", "{".repeat(50_000), "}".repeat(50_000));
+    let errs = parse_errors_of(src);
+    assert!(
+        errs.iter().any(|m| m.contains("block nesting too deep")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn deep_type_nesting_is_rejected_not_crashed() {
+    let errs = parse_errors_of(format!("fn f(x: {}int) {{ return 0; }}", "[".repeat(5_000)));
+    assert!(
+        errs.iter().any(|m| m.contains("type nesting too deep")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn nesting_under_the_limit_still_parses() {
+    // 100 paren levels (200 counted bumps: expr+unary per level) — legal
+    let src = format!("fn f() -> int {{ return {}1{}; }}", "(".repeat(100), ")".repeat(100));
+    let errs = parse_errors_of(src);
+    assert!(errs.is_empty(), "100-deep parens must parse: {errs:?}");
+}
