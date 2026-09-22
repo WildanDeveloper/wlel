@@ -1,16 +1,19 @@
 use crate::span::{Span, Spanned};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub uses: Vec<UseDecl>,
     pub structs: Vec<StructDef>,
     /// tagged enums: `enum Shape { Circle(float), Point }`
     pub enums: Vec<EnumDef>,
+    /// `impl Name[T, ...] { fn method(self, ...) { ... } }` blocks —
+    /// desugared by the checker into plain functions (`Name__method`)
+    pub impls: Vec<ImplDef>,
     pub funcs: Vec<FuncDef>,
     /// `test "name" { ... }` blocks, merged from this file and its imports
     pub tests: Vec<TestDef>,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UseDecl {
     /// None = std
     pub path: Option<String>,
@@ -84,9 +87,28 @@ pub struct Param {
     pub span: Span,
 }
 
+/// `impl Name[T, ...] { fn method(self, ...) { ... } }` — a group of methods
+/// attached to a struct or enum. The checker lowers every method into a
+/// plain function named `Name__method` whose first parameter is the
+/// receiver; `recv.method(args)` resolves through the method table and
+/// rewrites into that call.
+#[derive(Debug, Clone)]
+pub struct ImplDef {
+    /// the struct/enum being implemented (source name: "Pt", "Vec")
+    pub type_name: String,
+    /// type parameters of the impl — must repeat the type's own parameters
+    /// verbatim for a generic type, and be empty for a concrete one
+    pub type_params: Vec<String>,
+    pub methods: Vec<FuncDef>,
+    pub span: Span,
+    /// absolute path of the source file this impl was parsed from
+    /// (used for unused-import detection)
+    pub file: String,
+}
+
 /// `test "name" { ... }` — a void body run by `wlel test`; a failed
 /// `assert`/`assert_eq` aborts the test and is reported with file:line
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TestDef {
     pub name: String,
     pub body: Block,
@@ -249,6 +271,10 @@ pub enum ExprKind {
     Deref(Box<Expr>),
     /// obj.field (auto-derefs one pointer level, decided by the checker)
     Field(Box<Expr>, String),
+    /// recv.method(args) — resolved by the checker into a call to the
+    /// impl's desugared function (`Pt__len(recv, ...)`); the receiver
+    /// adapts to the declared self form (auto-deref / auto-address)
+    MethodCall(Box<Expr>, String, Vec<Expr>),
     /// Point { x: 1.0, y: 2.0 }
     StructLit(String, Vec<(String, Expr)>),
     /// expr as T
@@ -271,6 +297,30 @@ pub enum ExprKind {
     /// checker from a call to a variant name; enum is the (possibly
     /// mangled) enum type, tag the variant index, payload the variant name
     EnumLit(String, usize, String, Vec<Expr>),
+    /// expr? — the try operator on a Result/Option: propagate the error
+    /// variant out of the enclosing function, yield the success payload.
+    /// Only directly as the value of a let/assignment/return or as a
+    /// statement (the checker rejects it anywhere else; codegen hoists it).
+    /// ret_name/err_tag/err_variant/err_arity/ok_variant are filled in by
+    /// the checker from the two enum instances involved
+    Try(TryExpr),
+}
+
+/// the checker-validated shape of `expr?`: `inner` is a std Result[T, E] or
+/// Option[T]; the enclosing function returns a Result/Option sharing the
+/// same error variant, whose instance is `ret_name`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TryExpr {
+    pub inner: Box<Expr>,
+    /// mangled enum instance of the enclosing function's return type
+    pub ret_name: String,
+    /// tag of the error variant ("Err" / "None") in both instances
+    pub err_tag: usize,
+    pub err_variant: String,
+    /// payload count of the error variant (0 for Option::None)
+    pub err_arity: usize,
+    /// success variant name of the inner enum ("Ok" / "Some")
+    pub ok_variant: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

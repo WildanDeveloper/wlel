@@ -81,10 +81,10 @@ fn main() -> int {
 
     // 3. strings: str_cmp is the ready-made comparator from the stdlib
     words := vec_new[string]();
-    vec_push(&words, "pear");
-    vec_push(&words, "apple");
-    vec_push(&words, "fig");
-    vec_push(&words, "banana");
+    words.push("pear");
+    words.push("apple");
+    words.push("fig");
+    words.push("banana");
     std::sort(words, str_cmp);
     std::print_str("strings: ");
     for s in words {
@@ -94,9 +94,9 @@ fn main() -> int {
 
     // 4. structs by a field
     items := vec_new[Item]();
-    vec_push(&items, Item { key: 3, tag: "three" });
-    vec_push(&items, Item { key: 1, tag: "one" });
-    vec_push(&items, Item { key: 2, tag: "two" });
+    items.push(Item { key: 3, tag: "three" });
+    items.push(Item { key: 1, tag: "one" });
+    items.push(Item { key: 2, tag: "two" });
     std::sort(items, by_key);
     std::print_str("structs: ");
     for it in items {
@@ -150,9 +150,9 @@ test "sort floats and strings" {
     std::sort(f, asc_f);
     assert(f[0] < f[1] && f[1] < f[2] && f[2] < f[3]);
     w := vec_new[string]();
-    vec_push(&w, "pear");
-    vec_push(&w, "apple");
-    vec_push(&w, "fig");
+    w.push("pear");
+    w.push("apple");
+    w.push("fig");
     std::sort(w, str_cmp);
     assert_eq(w.data[0], "apple");
     assert_eq(w.data[1], "fig");
@@ -204,9 +204,9 @@ test "duplicates and degenerate inputs" {
 
 test "sort structs by a field" {
     items := vec_new[Item]();
-    vec_push(&items, Item { key: 3, tag: "c" });
-    vec_push(&items, Item { key: 1, tag: "a" });
-    vec_push(&items, Item { key: 2, tag: "b" });
+    items.push(Item { key: 3, tag: "c" });
+    items.push(Item { key: 1, tag: "a" });
+    items.push(Item { key: 2, tag: "b" });
     std::sort(items, by_key);
     assert_eq(items.data[0].key, 1);
     assert_eq(items.data[1].key, 2);

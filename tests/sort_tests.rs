@@ -10,22 +10,14 @@ use wlel::checker::Checker;
 use wlel::codegen::gen_program;
 use wlel::lexer::Lexer;
 use wlel::parser::Parser;
-use wlel::stdsrc::{parse_std, STD_FILE};
+use wlel::stdsrc::splice_std;
 
 /// full pipeline including the `use std` splice, exactly like the CLI
 fn front(src: &str) -> Result<String, String> {
     let toks = Lexer::new(src).tokenize().map_err(|e| e.to_string())?;
     let (mut p, errs) = Parser::new(&toks).program();
     assert!(errs.is_empty(), "parse errors: {errs:?}");
-    let mut std_prog = parse_std();
-    for f in std_prog.funcs.iter_mut() {
-        f.file = STD_FILE.into();
-    }
-    for s in std_prog.structs.iter_mut() {
-        s.file = STD_FILE.into();
-    }
-    p.structs.splice(0..0, std_prog.structs);
-    p.funcs.splice(0..0, std_prog.funcs);
+    splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
             f.file = "sort.wl".into();
@@ -39,15 +31,7 @@ fn check_err_msg(src: &str) -> String {
     let toks = Lexer::new(src).tokenize().expect("lex");
     let (mut p, errs) = Parser::new(&toks).program();
     assert!(errs.is_empty(), "parse errors: {errs:?}");
-    let mut std_prog = parse_std();
-    for f in std_prog.funcs.iter_mut() {
-        f.file = STD_FILE.into();
-    }
-    for s in std_prog.structs.iter_mut() {
-        s.file = STD_FILE.into();
-    }
-    p.structs.splice(0..0, std_prog.structs);
-    p.funcs.splice(0..0, std_prog.funcs);
+    splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
             f.file = "sort.wl".into();

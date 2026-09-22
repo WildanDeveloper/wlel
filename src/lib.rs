@@ -1,10 +1,14 @@
 pub mod ast;
 pub mod checker;
 pub mod codegen;
+pub mod doc;
 pub mod fmt;
 pub mod lexer;
+pub mod lsp;
 pub mod parser;
 pub mod project;
+pub mod qbe;
+pub mod registry;
 pub mod span;
 pub mod stdsrc;
 pub mod token;

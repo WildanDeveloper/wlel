@@ -17,6 +17,7 @@ pub enum Token {
     Extern,
     Struct,
     Enum,
+    Impl,
     Match,
     Defer,
     Arena,
@@ -77,6 +78,7 @@ pub enum Token {
     OrOr,
     Arrow,   // ->
     FatArrow, // =>
+    Question, // ?
     Eof,
 }
 

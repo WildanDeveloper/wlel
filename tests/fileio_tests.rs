@@ -9,22 +9,14 @@ use wlel::checker::Checker;
 use wlel::codegen::gen_program;
 use wlel::lexer::Lexer;
 use wlel::parser::Parser;
-use wlel::stdsrc::{parse_std, STD_FILE};
+use wlel::stdsrc::splice_std;
 
 /// full pipeline including the `use std` splice, exactly like the CLI
 fn front(src: &str) -> Result<String, String> {
     let toks = Lexer::new(src).tokenize().map_err(|e| e.to_string())?;
     let (mut p, errs) = Parser::new(&toks).program();
     assert!(errs.is_empty(), "parse errors: {errs:?}");
-    let mut std_prog = parse_std();
-    for f in std_prog.funcs.iter_mut() {
-        f.file = STD_FILE.into();
-    }
-    for s in std_prog.structs.iter_mut() {
-        s.file = STD_FILE.into();
-    }
-    p.structs.splice(0..0, std_prog.structs);
-    p.funcs.splice(0..0, std_prog.funcs);
+    splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
             f.file = "fio.wl".into();
@@ -38,15 +30,7 @@ fn check_err_msg(src: &str) -> String {
     let toks = Lexer::new(src).tokenize().expect("lex");
     let (mut p, errs) = Parser::new(&toks).program();
     assert!(errs.is_empty(), "parse errors: {errs:?}");
-    let mut std_prog = parse_std();
-    for f in std_prog.funcs.iter_mut() {
-        f.file = STD_FILE.into();
-    }
-    for s in std_prog.structs.iter_mut() {
-        s.file = STD_FILE.into();
-    }
-    p.structs.splice(0..0, std_prog.structs);
-    p.funcs.splice(0..0, std_prog.funcs);
+    splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
             f.file = "fio.wl".into();
@@ -89,12 +73,15 @@ fn helpers_emitted_and_calls_rewritten() {
              if sys::read_file(\"x.txt\", &content) {
                  sys::write_file(\"y.txt\", content);
              }
-             f := std::fs::open(\"x.txt\", \"rb\");
-             if f != 0 as *File {
-                 buf := new(u8, 8);
-                 n := std::fs::read(f, buf, 8);
-                 n = std::fs::write(f, buf, n);
-                 std::fs::close(f);
+             r := std::fs::open(\"x.txt\", \"rb\");
+             match r {
+                 Ok(f) => {
+                     buf := new(u8, 8);
+                     m := std::fs::read(f, buf, 8);
+                     m = std::fs::write(f, buf, 8);
+                     std::fs::close(f);
+                 }
+                 Err(_) => { }
              }
              return 0;
          }",
@@ -104,15 +91,18 @@ fn helpers_emitted_and_calls_rewritten() {
     assert!(c.contains("typedef struct File { void* h; } File;"), "{c}");
     assert!(c.contains("static _Bool _wlel_read_file(const char* path, const char** out)"), "{c}");
     assert!(c.contains("static _Bool _wlel_write_file(const char* path, const char* contents)"), "{c}");
-    assert!(c.contains("static File* _wlel_fs_open(const char* path, const char* mode)"), "{c}");
-    assert!(c.contains("static long long _wlel_fs_read(File* f, unsigned char* buf, long long cap)"), "{c}");
-    assert!(c.contains("static long long _wlel_fs_write(File* f, const unsigned char* buf, long long n)"), "{c}");
     assert!(c.contains("static void _wlel_fs_close(File* f)"), "{c}");
-    // call sites rewritten to the helpers with exact C types
+    // the Result helper is spliced in only when called, and returns the
+    // checker-registered enum instance by value
+    assert!(c.contains("static Result__pFile__string _wlel_fs_open_r(const char* path, const char* mode)"), "{c}");
+    assert!(c.contains("struct Result__pFile__string {"), "{c}");
     assert!(c.contains("_wlel_read_file(\"x.txt\", &content)"), "{c}");
-    assert!(c.contains("_wlel_fs_open(\"x.txt\", \"rb\")"), "{c}");
-    assert!(c.contains("_wlel_fs_read(f, buf, 8)"), "{c}");
+    assert!(c.contains("_wlel_fs_open_r(\"x.txt\", \"rb\")"), "{c}");
+    assert!(c.contains("_wlel_fs_read_r(f, buf, 8)"), "{c}");
     assert!(c.contains("_wlel_fs_close(f)"), "{c}");
+    // a program that never touches std::fs must not carry the helpers
+    let minimal = front("fn main() -> int { return 0; }").expect("typecheck");
+    assert!(!minimal.contains("_wlel_fs_open_r"), "{minimal}");
 }
 
 #[test]
@@ -154,23 +144,31 @@ fn fs_argument_type_errors() {
             "std::fs::read: f must be *File",
         ),
         (
-            "f := std::fs::open(\"x\", \"r\");
+            "f := result_unwrap(std::fs::open(\"x\", \"r\"));
              std::fs::read(f, \"str\", 1);",
             "std::fs::read: buf must be *u8",
         ),
         (
-            "f := std::fs::open(\"x\", \"r\");
+            "f := result_unwrap(std::fs::open(\"x\", \"r\"));
              std::fs::read(f, new(u8, 1), \"n\");",
             "std::fs::read: n must be int",
         ),
         (
-            "f := std::fs::open(\"x\", \"r\");
+            "f := result_unwrap(std::fs::open(\"x\", \"r\"));
              std::fs::write(f, \"str\", 1);",
             "std::fs::write: buf must be *u8",
         ),
         (
             "std::fs::close(\"x\");",
             "std::fs::close: f must be *File",
+        ),
+        (
+            "std::fs::read_all(5);",
+            "std::fs::read_all: path must be string",
+        ),
+        (
+            "std::fs::write_all(\"x\", 5);",
+            "std::fs::write_all: contents must be string",
         ),
     ];
     for (call, want) in cases {
@@ -298,23 +296,21 @@ fn fs_handles_stream_end_to_end() {
         "{}\n{}",
         head,
         r#"               if !sys::write_file(p, "abcdefgh") { return 1; }
-               f := std::fs::open(p, "rb");
-               if f == 0 as *File { std::println_str("open fail"); return 1; }
+               f := result_unwrap(std::fs::open(p, "rb"));
                defer std::fs::close(f);
                buf := new(u8, 8);
-               if std::fs::read(f, buf, 4) != 4 { return 1; }
+               if result_unwrap(std::fs::read(f, buf, 4)) != 4 { return 1; }
                buf[4] = 0;
                std::println_str(buf as string);
-               if std::fs::read(f, buf, 99) != 4 { return 1; }
+               if result_unwrap(std::fs::read(f, buf, 99)) != 4 { return 1; }
                buf[4] = 0;
                std::println_str(buf as string);
-               if std::fs::read(f, buf, 4) != 0 { std::println_str("expected eof"); return 1; }
+               if result_unwrap(std::fs::read(f, buf, 4)) != 0 { std::println_str("expected eof"); return 1; }
                std::println_str("eof ok");
-               if std::fs::read(f, buf, -1) != -1 { return 1; }
+               if result_is_err(std::fs::read(f, buf, -1)) == false { return 1; }
                // append, then a fresh handle sees the grown file
-               g := std::fs::open(p, "ab");
-               if g == 0 as *File { return 1; }
-               if std::fs::write(g, "XY" as *u8, 2) != 2 { return 1; }
+               g := result_unwrap(std::fs::open(p, "ab"));
+               if result_unwrap(std::fs::write(g, "XY" as *u8, 2)) != 2 { return 1; }
                std::fs::close(g);
                whole := "";
                if !sys::read_file(p, &whole) { return 1; }
@@ -333,23 +329,27 @@ fn fs_handles_stream_end_to_end() {
 }
 
 #[test]
-fn fs_open_missing_file_yields_null_end_to_end() {
+fn fs_open_missing_file_yields_err_end_to_end() {
     let (ok, out, err) = run_cli(
         "missing",
         r#"use std;
            fn main() -> int {
-               f := std::fs::open("/no/such/fio-target", "rb");
-               if f == 0 as *File {
-                   std::println_str("null handle");
-                   return 0;
+               r := std::fs::open("/no/such/fio-target", "rb");
+               match r {
+                   Ok(f) => {
+                       std::fs::close(f);
+                       return 1;
+                   }
+                   Err(e) => {
+                       std::println_str("err: " + e);
+                       return 0;
+                   }
                }
-               std::fs::close(f);
-               return 1;
            }"#,
         &[],
     );
     assert!(ok, "{err}");
-    assert!(out.contains("null handle"), "{out}");
+    assert!(out.contains("err: "), "{out}");
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +370,7 @@ fn example_fileio_test_blocks_pass() {
         .expect("spawn wlel");
     assert!(test.status.success(), "{}", String::from_utf8_lossy(&test.stderr));
     let out = String::from_utf8_lossy(&test.stdout);
-    assert!(out.contains("4 passed, 0 failed"), "{out}");
+    assert!(out.contains("5 passed, 0 failed"), "{out}");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -396,11 +396,10 @@ fn file_io_program_is_asan_clean() {
         "{}\n{}",
         src,
         r#"                   if !sys::write_file(p, "asan arena file\n") { return 1; }
-                   f := std::fs::open(p, "rb");
-                   if f == 0 as *File { return 1; }
+                   f := result_unwrap(std::fs::open(p, "rb"));
                    defer std::fs::close(f);
                    buf := new(u8, 64);
-                   n := std::fs::read(f, buf, 63);
+                   n := result_unwrap(std::fs::read(f, buf, 63));
                    if n <= 0 { return 1; }
                    buf[n] = 0;
                    s := buf as string;
@@ -412,11 +411,10 @@ fn file_io_program_is_asan_clean() {
                    // their arena, close runs through the defer stack
                    for i in 0..200 {
                        arena(256) {
-                           g := std::fs::open(p, "rb");
-                           assert(g != 0 as *File);
+                           g := result_unwrap(std::fs::open(p, "rb"));
                            defer std::fs::close(g);
-                           n := std::fs::read(g, buf, 4);
-                           assert(n == 4);
+                           m := result_unwrap(std::fs::read(g, buf, 4));
+                           assert(m == 4);
                        }
                    }
                }
@@ -441,22 +439,17 @@ fn release_build_has_no_check_overhead_for_file_calls() {
                fn main() -> int {
                    content := \"\";
                    if sys::read_file(\"x\", &content) { }
-                   f := std::fs::open(\"x\", \"rb\");
-                   if f != 0 as *File { std::fs::close(f); }
+                   r := std::fs::open(\"x\", \"rb\");
+                   match r {
+                       Ok(f) => { std::fs::close(f); }
+                       Err(_) => { }
+                   }
                    return 0;
                }";
     let toks = Lexer::new(src).tokenize().unwrap();
     let (mut p, errs) = Parser::new(&toks).program();
     assert!(errs.is_empty(), "{errs:?}");
-    let mut std_prog = parse_std();
-    for f in std_prog.funcs.iter_mut() {
-        f.file = STD_FILE.into();
-    }
-    for s in std_prog.structs.iter_mut() {
-        s.file = STD_FILE.into();
-    }
-    p.structs.splice(0..0, std_prog.structs);
-    p.funcs.splice(0..0, std_prog.funcs);
+    splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
             f.file = "fio.wl".into();
@@ -466,6 +459,7 @@ fn release_build_has_no_check_overhead_for_file_calls() {
     let release = gen_program(&p);
     // plain direct calls in release: no dev-mode checking anywhere
     assert!(release.contains("_wlel_read_file(\"x\", &content)"), "{release}");
+    assert!(release.contains("_wlel_fs_open_r(\"x\", \"rb\")"), "{release}");
     assert!(!release.contains("_wlel_arr_at"), "release must be check-free: {release}");
     assert!(!release.contains("_wlel_divz"), "{release}");
 }

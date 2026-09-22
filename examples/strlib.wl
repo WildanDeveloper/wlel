@@ -66,19 +66,19 @@ test "trim removes ascii whitespace" {
 
 test "split yields empty pieces" {
     parts := str_split("a,b,,c", ",");
-    assert_eq(vec_len(&parts), 4);
-    assert_eq(vec_get(&parts, 0), "a");
-    assert_eq(vec_get(&parts, 2), "");
-    assert_eq(vec_get(&parts, 3), "c");
+    assert_eq(parts.len(), 4);
+    assert_eq(parts.get(0), "a");
+    assert_eq(parts.get(2), "");
+    assert_eq(parts.get(3), "c");
     one := str_split("solo", ",");
-    assert_eq(vec_len(&one), 1);
-    assert_eq(vec_get(&one, 0), "solo");
+    assert_eq(one.len(), 1);
+    assert_eq(one.get(0), "solo");
     empty := str_split("", ",");
-    assert_eq(vec_len(&empty), 1);
-    assert_eq(vec_get(&empty, 0), "");
+    assert_eq(empty.len(), 1);
+    assert_eq(empty.get(0), "");
     trail := str_split("x,", ",");
-    assert_eq(vec_len(&trail), 2);
-    assert_eq(vec_get(&trail, 1), "");
+    assert_eq(trail.len(), 2);
+    assert_eq(trail.get(1), "");
 }
 
 test "parse_int strict and overflow-safe" {

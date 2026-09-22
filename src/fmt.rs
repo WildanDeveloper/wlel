@@ -37,11 +37,12 @@ pub fn format_source(src: &str) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 /// one top-level declaration, tagged with its source line so the original
-/// interleaving of uses/structs/enums/funcs/tests is preserved
+/// interleaving of uses/structs/enums/impls/funcs/tests is preserved
 enum Decl<'a> {
     Use(&'a UseDecl),
     Struct(&'a StructDef),
     Enum(&'a EnumDef),
+    Impl(&'a ImplDef),
     Func(&'a FuncDef),
     Test(&'a TestDef),
 }
@@ -52,6 +53,7 @@ impl Decl<'_> {
             Decl::Use(u) => u.span.start.line,
             Decl::Struct(s) => s.span.start.line,
             Decl::Enum(e) => e.span.start.line,
+            Decl::Impl(i) => i.span.start.line,
             Decl::Func(f) => f.span.start.line,
             Decl::Test(t) => t.span.start.line,
         }
@@ -62,6 +64,7 @@ impl Decl<'_> {
             Decl::Use(u) => u.span.end.line,
             Decl::Struct(s) => s.span.end.line,
             Decl::Enum(e) => e.span.end.line,
+            Decl::Impl(i) => i.span.end.line,
             Decl::Func(f) => f.span.end.line,
             Decl::Test(t) => t.span.end.line,
         }
@@ -94,6 +97,9 @@ impl Printer {
         for e in &program.enums {
             decls.push(Decl::Enum(e));
         }
+        for i in &program.impls {
+            decls.push(Decl::Impl(i));
+        }
         for f in &program.funcs {
             decls.push(Decl::Func(f));
         }
@@ -115,6 +121,7 @@ impl Printer {
                 Decl::Use(u) => self.use_decl(u),
                 Decl::Struct(s) => self.struct_def(s),
                 Decl::Enum(e) => self.enum_def(e),
+                Decl::Impl(i) => self.impl_def(i),
                 Decl::Func(f) => self.func_def(f),
                 Decl::Test(t) => self.test_def(t),
             }
@@ -247,6 +254,25 @@ impl Printer {
             self.put("}");
         }
         self.last_src = e.span.end.line;
+    }
+
+    /// `impl Name[T, ...] { fn method ... }` — methods print like top-level
+    /// functions, one blank line between them
+    fn impl_def(&mut self, i: &ImplDef) {
+        let mut head = format!("impl {}", i.type_name);
+        if !i.type_params.is_empty() {
+            head.push_str(&format!("[{}]", i.type_params.join(", ")));
+        }
+        self.put(&format!("{head} {{"));
+        self.last_src = i.span.start.line;
+        self.indent += 1;
+        for m in &i.methods {
+            self.blank();
+            self.func_def(m);
+        }
+        self.indent -= 1;
+        self.put("}");
+        self.last_src = i.span.end.line;
     }
 
     fn func_def(&mut self, f: &FuncDef) {
@@ -617,6 +643,14 @@ impl Printer {
                 format!("{s}({a})")
             }
             ExprKind::Field(base, name) => format!("{}.{}", self.expr(base, 100), name),
+            ExprKind::MethodCall(base, name, args) => {
+                let a = args
+                    .iter()
+                    .map(|x| self.expr(x, 0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}.{}({})", self.expr(base, 100), name, a)
+            }
             ExprKind::StructLit(name, fields) => {
                 if fields.is_empty() {
                     format!("{name} {{ }}")
@@ -667,6 +701,7 @@ impl Printer {
             // accepts it as a statement or a let/return initializer, both
             // printed by their own arms above)
             ExprKind::Match(_) => unreachable!("match outside statement position"),
+            ExprKind::Try(t) => format!("{}?", self.expr(&t.inner, 100)),
         }
     }
 }

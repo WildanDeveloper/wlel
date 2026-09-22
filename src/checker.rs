@@ -263,6 +263,9 @@ pub struct Checker {
     /// variant name -> owning enum's source name ("Circle" -> "Shape";
     /// for generics the TEMPLATE name: "Ok" -> "Result")
     variant_owner: HashMap<String, String>,
+    /// method table: (impl type name, method name) -> the desugared
+    /// template function ("Vec", "push") -> `fn Vec__push[T](self: *Vec[T], x: T)`
+    methods: HashMap<(String, String), FuncDef>,
     /// positive while checking a `defer { ... }` block: control flow out of
     /// it is forbidden, because the block runs during scope unwinding
     defer_depth: usize,
@@ -279,6 +282,10 @@ pub struct Checker {
     generic_structs: HashMap<String, StructDef>,
     /// generic enum templates, keyed by source name
     generic_enums: HashMap<String, EnumDef>,
+    /// builtin channel instances: mangled struct name -> element type
+    /// ("Chan__int" -> int), filled by sys::chan_new[T] so chan_send/recv
+    /// can validate the value/out types against the channel's element
+    chan_elems: HashMap<String, Type>,
     /// mangled struct name -> concrete type arguments (for inference)
     struct_args: HashMap<String, Vec<Type>>,
     /// mangled struct name -> the generic struct it was instantiated from
@@ -321,6 +328,7 @@ impl Checker {
             used_structs: HashSet::new(),
             used_enums: HashSet::new(),
             variant_owner: HashMap::new(),
+            methods: HashMap::new(),
             defer_depth: 0,
             block_terminated: false,
             current_file: String::new(),
@@ -328,6 +336,7 @@ impl Checker {
             generic_funcs: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_enums: HashMap::new(),
+            chan_elems: HashMap::new(),
             struct_args: HashMap::new(),
             struct_origin: HashMap::new(),
             enum_args: HashMap::new(),
@@ -337,6 +346,143 @@ impl Checker {
             pending_enums: Vec::new(),
             expected: None,
         };
+
+        // the builtin `Chan[T]` channel template is reserved up front: a
+        // user declaration of the same name collides here, before any
+        // instantiation path exists
+        cx.generic_structs.insert(
+            "Chan".into(),
+            StructDef {
+                name: "Chan".into(),
+                fields: Vec::new(),
+                type_params: vec!["T".into()],
+                span: Span::point(1, 1),
+                file: STD_FILE.into(),
+            },
+        );
+
+        // pass -1: desugar `impl` blocks into plain functions plus the
+        // method table. `impl Pt { fn len(self) -> f64 { ... } }` becomes
+        // the function `Pt__len(self: Pt) -> f64` (appended to the function
+        // list below, so it flows through the normal passes); methods of a
+        // generic impl carry the impl's type parameters and monomorphize
+        // per receiver like any generic function.
+        let empty_params: Vec<String> = Vec::new();
+        let mut generic_ty_params: HashMap<&str, &Vec<String>> = HashMap::new();
+        let mut concrete_tys: HashSet<&str> = HashSet::new();
+        for s in &program.structs {
+            if s.type_params.is_empty() {
+                concrete_tys.insert(s.name.as_str());
+            } else {
+                generic_ty_params.insert(s.name.as_str(), &s.type_params);
+            }
+        }
+        for e in &program.enums {
+            if e.type_params.is_empty() {
+                concrete_tys.insert(e.name.as_str());
+            } else {
+                generic_ty_params.insert(e.name.as_str(), &e.type_params);
+            }
+        }
+        // built-in result types of arena_stats() and std::fs::open()
+        concrete_tys.insert("ArenaStats");
+        concrete_tys.insert("File");
+        // built-in handle types of the concurrency layer: Thread (sys::thread)
+        // and Mutex (sys::mutex_new) are opaque — no fields, no construction
+        concrete_tys.insert("Thread");
+        concrete_tys.insert("Mutex");
+        let mut desugared: Vec<FuncDef> = Vec::new();
+        for imp in std::mem::take(&mut program.impls) {
+            let type_params: &Vec<String> = match generic_ty_params.get(imp.type_name.as_str()) {
+                Some(p) => p,
+                None => {
+                    if !concrete_tys.contains(imp.type_name.as_str()) {
+                        return err_at(
+                            imp.span,
+                            format!("impl on unknown type '{}'", imp.type_name),
+                        );
+                    }
+                    if !imp.type_params.is_empty() {
+                        return err_at(
+                            imp.span,
+                            format!(
+                                "impl of non-generic type '{}' cannot take type parameters",
+                                imp.type_name
+                            ),
+                        );
+                    }
+                    &empty_params
+                }
+            };
+            if imp.type_params.len() != type_params.len() {
+                return err_at(
+                    imp.span,
+                    format!(
+                        "impl {}[{}] must repeat the type's own parameters: impl {}[{}]",
+                        imp.type_name,
+                        imp.type_params.join(", "),
+                        imp.type_name,
+                        type_params.join(", ")
+                    ),
+                );
+            }
+            if imp.type_params.iter().zip(type_params.iter()).any(|(a, b)| a != b) {
+                return err_at(
+                    imp.span,
+                    format!(
+                        "impl parameters must use the type's own names: impl {}[{}]",
+                        imp.type_name,
+                        type_params.join(", ")
+                    ),
+                );
+            }
+            for mut m in imp.methods {
+                if !m.type_params.is_empty() {
+                    return err_at(
+                        m.span,
+                        format!(
+                            "method '{}' cannot declare its own type parameters — use the impl's [{}]",
+                            m.name,
+                            imp.type_params.join(", ")
+                        ),
+                    );
+                }
+                if m.params.is_empty() || m.params[0].name != "self" {
+                    return err_at(
+                        m.span,
+                        format!(
+                            "method '{}' must take 'self' as its first parameter",
+                            m.name
+                        ),
+                    );
+                }
+                // an unannotated self means the impl type itself
+                if m.params[0].ty.is_none() {
+                    let self_ty = if type_params.is_empty() {
+                        imp.type_name.clone()
+                    } else {
+                        format!("{}[{}]", imp.type_name, type_params.join(", "))
+                    };
+                    m.params[0].ty = Some(self_ty);
+                }
+                let short = m.name.clone();
+                m.name = format!("{}__{}", imp.type_name, short);
+                m.type_params = type_params.clone();
+                if cx
+                    .methods
+                    .insert((imp.type_name.clone(), short.clone()), m.clone())
+                    .is_some()
+                {
+                    return err_at(
+                        m.span,
+                        format!("duplicate method '{}.{}'", imp.type_name, short),
+                    );
+                }
+                m.file = imp.file.clone();
+                desugared.push(m);
+            }
+        }
+        program.funcs.extend(desugared);
 
         // split generic templates out of the program: they are never checked
         // or emitted directly — each use produces a monomorphized copy
@@ -384,6 +530,10 @@ impl Checker {
             "File".into(),
             vec![("h".into(), Type::Ptr(Box::new(Type::Void)))],
         );
+        // concurrency handles are fully opaque: registering them with no
+        // fields makes every field access / struct literal a type error
+        cx.structs.insert("Thread".into(), Vec::new());
+        cx.structs.insert("Mutex".into(), Vec::new());
         for st in &program.structs {
             if cx.structs.insert(st.name.clone(), Vec::new()).is_some() {
                 if st.name == "ArenaStats" {
@@ -396,6 +546,24 @@ impl Checker {
                     return err_at(
                         st.span,
                         "struct 'File' is reserved (built-in handle type of std::fs::open())",
+                    );
+                }
+                if st.name == "Thread" {
+                    return err_at(
+                        st.span,
+                        "struct 'Thread' is reserved (built-in handle type of sys::thread())",
+                    );
+                }
+                if st.name == "Mutex" {
+                    return err_at(
+                        st.span,
+                        "struct 'Mutex' is reserved (built-in handle type of sys::mutex_new())",
+                    );
+                }
+                if st.name == "Chan" {
+                    return err_at(
+                        st.span,
+                        "struct 'Chan' is reserved (built-in channel type of sys::chan_new[T]())",
                     );
                 }
                 return err_at(st.span, format!("duplicate struct '{}'", st.name));
@@ -737,9 +905,16 @@ impl Checker {
             }
         }
         let span = s.span;
-        if self.generic_structs.insert(s.name.clone(), s).is_some() {
-            return err_at(span, "duplicate struct");
+        if self.generic_structs.contains_key(&s.name) {
+            if s.name == "Chan" {
+                return err_at(
+                    span,
+                    "struct 'Chan' is reserved (built-in channel type of sys::chan_new[T]())",
+                );
+            }
+            return err_at(span, format!("duplicate struct '{}'", s.name));
         }
+        self.generic_structs.insert(s.name.clone(), s);
         Ok(())
     }
 
@@ -963,6 +1138,53 @@ impl Checker {
                 continue;
             }
             if !ident.is_empty() {
+                if c == '[' && ident == "Chan" {
+                    // builtin channel: canonize the element type and emit the
+                    // mangled instance name directly (never a real Wlel
+                    // struct — codegen splices the runtime layout)
+                    let mut depth = 0usize;
+                    let mut j = i;
+                    while j < chars.len() {
+                        if chars[j] == '[' {
+                            depth += 1;
+                        } else if chars[j] == ']' {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        j += 1;
+                    }
+                    if j >= chars.len() {
+                        return err_at(sp, format!("bad type '{ty}'"));
+                    }
+                    let inner: String = chars[i + 1..j].iter().collect();
+                    let raw_args = split_top_level_args(&inner);
+                    if raw_args.len() != 1 {
+                        return err_at(
+                            sp,
+                            format!("Chan takes exactly 1 type argument, got {}", raw_args.len()),
+                        );
+                    }
+                    let arg = self.canon_type(raw_args[0].trim(), map, sp)?;
+                    let t = self.resolve_type_str(&arg, sp)?;
+                    if t == Type::Void {
+                        return err_at(sp, "Chan element type cannot be void");
+                    }
+                    if matches!(t, Type::Array(..)) {
+                        return err_at(
+                            sp,
+                            "Chan element cannot be an array — wrap the array in a struct",
+                        );
+                    }
+                    let mangled = format!("Chan__{}", mangle_ty(&t.name()));
+                    self.structs.entry(mangled.clone()).or_default();
+                    self.chan_elems.insert(mangled.clone(), t);
+                    out.push_str(&mangled);
+                    ident.clear();
+                    i = j + 1;
+                    continue;
+                }
                 if c == '[' && self.generic_structs.contains_key(&ident) {
                     // find the matching close bracket
                     let mut depth = 0usize;
@@ -1277,7 +1499,8 @@ impl Checker {
             binds.insert(base_full.to_string(), arg_inner);
             return Ok(());
         }
-        // pattern instantiates another generic struct: Box[T] vs Box__int
+        // pattern instantiates another generic struct or enum: Box[T] vs
+        // Box__int, Result[T, E] vs Result__int__string
         if let Some(i) = base_full.find('[') {
             let base = &base_full[..i];
             let inner = base_full[i..]
@@ -1285,17 +1508,20 @@ impl Checker {
                 .and_then(|r| r.strip_suffix(']'))
                 .unwrap_or("");
             let pat_args = split_top_level_args(inner);
-            let Type::Struct(mangled) = &arg_inner else {
-                return err_at(
-                    sp,
-                    format!("generic argument: expected '{pattern}', got '{}'", arg_inner.name()),
-                );
+            let (origin_ok, concrete_args) = match &arg_inner {
+                Type::Struct(mangled) => (
+                    self.struct_origin.get(mangled).map(|o| o == base).unwrap_or(false),
+                    self.struct_args.get(mangled).cloned(),
+                ),
+                Type::Enum(mangled) => (
+                    self.enum_origin.get(mangled).map(|o| o == base).unwrap_or(false),
+                    self.enum_args.get(mangled).cloned(),
+                ),
+                _ => (false, None),
             };
-            let origin_ok = self.struct_origin.get(mangled).map(|o| o == base).unwrap_or(false);
-            let concrete_args = self.struct_args.get(mangled);
             match (origin_ok, concrete_args) {
                 (true, Some(cargs)) if cargs.len() == pat_args.len() => {
-                    for (pa, ca) in pat_args.iter().zip(cargs) {
+                    for (pa, ca) in pat_args.iter().zip(cargs.iter()) {
                         self.unify_pattern(pa, ca, params, binds, sp)?;
                     }
                     Ok(())
@@ -1367,6 +1593,34 @@ impl Checker {
             let args = split_top_level_args(inner);
             if Type::from_builtin(base).is_some() {
                 return err_at(span, format!("type '{base}' takes no type parameters"));
+            }
+            // builtin channel: sys::chan_new[T] registers the instance as an
+            // opaque struct ("Chan[int]" -> "Chan__int"); no user fields
+            if base == "Chan" {
+                if args.len() != 1 {
+                    return err_at(
+                        span,
+                        format!("Chan takes exactly 1 type argument, got {}", args.len()),
+                    );
+                }
+                let t = self.resolve_type_str(args[0].trim(), span)?;
+                if t == Type::Void {
+                    return err_at(span, "Chan element type cannot be void");
+                }
+                if matches!(t, Type::Array(..)) {
+                    return err_at(
+                        span,
+                        "Chan element cannot be an array — wrap the array in a struct",
+                    );
+                }
+                let mangled = format!("Chan__{}", mangle_ty(&t.name()));
+                self.structs.entry(mangled.clone()).or_default();
+                self.chan_elems.insert(mangled.clone(), t);
+                let mut out = Type::Struct(mangled);
+                for _ in 0..stars {
+                    out = Type::Ptr(Box::new(out));
+                }
+                return Ok(out);
             }
             if self.generic_structs.contains_key(base) {
                 let mangled = self.instantiate_struct(base, args, span)?;
@@ -1489,8 +1743,30 @@ impl Checker {
         }
     }
 
-    fn struct_field(&self, sname: &str, field: &str, span: Span) -> CResult<Type> {
-        let fields = self.structs.get(sname).ok_or_else(|| CheckError {
+    /// origin type name + concrete type arguments of a (possibly mangled
+    /// generic instance) struct/enum type: "Vec__int" -> ("Vec", [int]),
+    /// a plain "Pt" -> ("Pt", [])
+    fn type_instance(&self, mangled: &str, is_struct: bool) -> (String, Vec<Type>) {
+        if is_struct {
+            match self.struct_origin.get(mangled) {
+                Some(o) => (
+                    o.clone(),
+                    self.struct_args.get(mangled).cloned().unwrap_or_default(),
+                ),
+                None => (mangled.to_string(), Vec::new()),
+            }
+        } else {
+            match self.enum_origin.get(mangled) {
+                Some(o) => (
+                    o.clone(),
+                    self.enum_args.get(mangled).cloned().unwrap_or_default(),
+                ),
+                None => (mangled.to_string(), Vec::new()),
+            }
+        }
+    }
+
+    fn struct_field(&self, sname: &str, field: &str, span: Span) -> CResult<Type> {        let fields = self.structs.get(sname).ok_or_else(|| CheckError {
             msg: format!("unknown struct '{sname}'"),
             span,
         })?;
@@ -1627,6 +1903,81 @@ impl Checker {
                     }
                 };
                 self.struct_field(&sname, field, sp)
+            }
+            ExprKind::MethodCall(recv, mname, args) => {
+                let rt = self.expr_ty(recv)?;
+                // the receiver names the impl type: peel one pointer layer
+                // if present (value methods auto-deref, pointer methods do
+                // not) and map a mangled generic instance back to its origin
+                let (origin, targs) = match &rt {
+                    Type::Struct(m) => self.type_instance(m, true),
+                    Type::Enum(m) => self.type_instance(m, false),
+                    Type::Ptr(inner) => match &**inner {
+                        Type::Struct(m) => self.type_instance(m, true),
+                        Type::Enum(m) => self.type_instance(m, false),
+                        other => {
+                            return err_at(
+                                sp,
+                                format!("type '{}' has no methods", other.name()),
+                            )
+                        }
+                    },
+                    other => {
+                        return err_at(
+                            sp,
+                            format!("type '{}' has no methods", other.name()),
+                        )
+                    }
+                };
+                let Some(tmpl) = self.methods.get(&(origin.clone(), mname.clone())).cloned()
+                else {
+                    return err_at(
+                        sp,
+                        format!("type '{origin}' has no method '{mname}'"),
+                    );
+                };
+                let self_pat = tmpl
+                    .params
+                    .first()
+                    .and_then(|p| p.ty.clone())
+                    .unwrap_or_default();
+                let ptr_recv = self_pat.starts_with('*');
+                let recv_is_ptr = matches!(&rt, Type::Ptr(_));
+                if ptr_recv && !recv_is_ptr {
+                    // value receiver into a pointer-taking method: borrow it
+                    if !is_lvalue(recv) {
+                        return err_at(
+                            sp,
+                            format!(
+                                "method '{origin}.{mname}' takes self by pointer — assign the value to a variable first"
+                            ),
+                        );
+                    }
+                    let inner = (**recv).clone();
+                    **recv = Spanned::new(ExprKind::AddrOf(Box::new(inner)), recv.span);
+                } else if !ptr_recv && recv_is_ptr {
+                    // pointer receiver into a value-taking method: deref it
+                    let inner = (**recv).clone();
+                    **recv = Spanned::new(ExprKind::Deref(Box::new(inner)), recv.span);
+                }
+                // the receiver's concrete type arguments bind the impl's
+                // type parameters (the method table is keyed by origin, so
+                // the shapes always agree)
+                let fname = if tmpl.type_params.is_empty() {
+                    tmpl.name.clone()
+                } else {
+                    let mut binds = HashMap::new();
+                    for (tp, ta) in tmpl.type_params.iter().zip(targs.iter()) {
+                        binds.insert(tp.clone(), ta.clone());
+                    }
+                    self.instantiate_fn(&tmpl.name, &binds, sp)?
+                };
+                self.called_funcs.insert(tmpl.name.clone());
+                let mut all_args = Vec::with_capacity(args.len() + 1);
+                all_args.push(std::mem::replace(&mut **recv, dummy_expr(sp)));
+                all_args.extend(std::mem::take(args));
+                *e = Spanned::new(ExprKind::Call(fname, vec![], all_args), sp);
+                self.expr_ty(e)
             }
             ExprKind::StructLit(name, fields) => {
                 // generic struct literal: infer type arguments from the
@@ -2000,6 +2351,10 @@ impl Checker {
                 sp,
                 "match may only appear directly as a let/return value or as a statement",
             ),
+            ExprKind::Try(_) => err_at(
+                sp,
+                "'?' may only appear directly on the value of a let, assignment, return, or as a statement",
+            ),
             ExprKind::ArrayLit(elems) => {
                 if elems.is_empty() {
                     return err_at(
@@ -2148,6 +2503,401 @@ impl Checker {
                             );
                             return Ok(Type::Bool);
                         }
+                        // sys::thread(work, data) -> *Thread — spawns an OS
+                        // thread running work(data). Wlel has no function
+                        // pointers: the worker is resolved by name (exactly
+                        // one typed parameter, void return) and codegen
+                        // emits a specialized trampoline that boxes the
+                        // argument. Each thread owns a fresh arena.
+                        "thread" => {
+                            if args.len() != 2 {
+                                return err_at(
+                                    sp,
+                                    "sys::thread(work, data) takes exactly 2 arguments",
+                                );
+                            }
+                            let work_name = match &args[0].node {
+                                ExprKind::Ident(n) => n.clone(),
+                                _ => {
+                                    return err_at(
+                                        sp,
+                                        "sys::thread: the first argument must be a function name, e.g. sys::thread(worker, job)",
+                                    )
+                                }
+                            };
+                            let sig = match self.sigs.get(&work_name).cloned() {
+                                Some(s) => s,
+                                None => {
+                                    if self.generic_funcs.contains_key(&work_name) {
+                                        return err_at(
+                                            sp,
+                                            format!(
+                                                "sys::thread: '{work_name}' is generic — wrap it in a concrete function"
+                                            ),
+                                        );
+                                    }
+                                    return err_at(
+                                        sp,
+                                        format!("sys::thread: unknown function '{work_name}'"),
+                                    );
+                                }
+                            };
+                            if sig.ret != Type::Void {
+                                return err_at(
+                                    sp,
+                                    format!(
+                                        "sys::thread: '{}' must return void — a thread's result is only observable through a channel or shared memory",
+                                        work_name
+                                    ),
+                                );
+                            }
+                            if sig.params.len() != 1 {
+                                return err_at(
+                                    sp,
+                                    format!(
+                                        "sys::thread: '{}' must take exactly 1 parameter (the data passed to it), got {}",
+                                        work_name,
+                                        sig.params.len()
+                                    ),
+                                );
+                            }
+                            let dt = self.expr_ty(&mut args[1])?;
+                            if !assignable_checked(&sig.params[0], &args[1], &dt, sp)? {
+                                return err_at(
+                                    sp,
+                                    format!(
+                                        "sys::thread: data must be {}, got {}",
+                                        sig.params[0].name(),
+                                        dt.name()
+                                    ),
+                                );
+                            }
+                            self.called_funcs.insert(work_name.clone());
+                            let param_ty = sig.params[0].name();
+                            let data = std::mem::replace(&mut args[1], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call(
+                                    "_wlel_thread_spawn".into(),
+                                    vec![],
+                                    vec![
+                                        Spanned::new(ExprKind::Str(work_name), sp),
+                                        Spanned::new(ExprKind::Str(param_ty), sp),
+                                        data,
+                                    ],
+                                ),
+                                sp,
+                            );
+                            return Ok(Type::Ptr(Box::new(Type::Struct("Thread".into()))));
+                        }
+                        // sys::join(t: *Thread) — block until the thread
+                        // finishes, then release its handle (join once)
+                        "join" => {
+                            if args.len() != 1 {
+                                return err_at(sp, "sys::join(t) takes exactly 1 argument");
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Ptr(Box::new(Type::Struct("Thread".into()))) {
+                                return err_at(
+                                    sp,
+                                    format!("sys::join: t must be *Thread, got {}", t.name()),
+                                );
+                            }
+                            return Ok(Type::Void);
+                        }
+                        // sys::mutex_* — dynamic mutual exclusion. Lock/unlock
+                        // discipline is the user's responsibility (like C);
+                        // the safe-debug/ASAN mode catches the fallout.
+                        "mutex_new" => {
+                            if !args.is_empty() {
+                                return err_at(sp, "sys::mutex_new() takes no arguments");
+                            }
+                            return Ok(Type::Ptr(Box::new(Type::Struct("Mutex".into()))));
+                        }
+                        "mutex_lock" | "mutex_unlock" | "mutex_free" => {
+                            if args.len() != 1 {
+                                return err_at(
+                                    sp,
+                                    format!("sys::{rest}(m) takes exactly 1 argument"),
+                                );
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Ptr(Box::new(Type::Struct("Mutex".into()))) {
+                                return err_at(
+                                    sp,
+                                    format!("sys::{rest}: m must be *Mutex, got {}", t.name()),
+                                );
+                            }
+                            return Ok(Type::Void);
+                        }
+                        // sys::chan_new[T]() -> *Chan[T] — unbounded FIFO of T
+                        "chan_new" => {
+                            if !args.is_empty() {
+                                return err_at(sp, "sys::chan_new[T]() takes no arguments");
+                            }
+                            if ty_args.len() != 1 {
+                                return err_at(
+                                    sp,
+                                    "sys::chan_new takes exactly 1 type argument — sys::chan_new[int]()",
+                                );
+                            }
+                            let t = self.resolve_type_str(ty_args[0].trim(), sp)?;
+                            if t == Type::Void {
+                                return err_at(sp, "sys::chan_new: element type cannot be void");
+                            }
+                            if matches!(t, Type::Array(..)) {
+                                return err_at(
+                                    sp,
+                                    "sys::chan_new: element cannot be an array — wrap the array in a struct",
+                                );
+                            }
+                            let mangled = format!("Chan__{}", mangle_ty(&t.name()));
+                            self.structs.entry(mangled.clone()).or_default();
+                            self.chan_elems.insert(mangled.clone(), t.clone());
+                            *e = Spanned::new(
+                                ExprKind::Call(
+                                    "_wlel_chan_new".into(),
+                                    vec![],
+                                    vec![Spanned::new(ExprKind::Str(t.name()), sp)],
+                                ),
+                                sp,
+                            );
+                            return Ok(Type::Ptr(Box::new(Type::Struct(mangled))));
+                        }
+                        // sys::chan_send(ch, v) -> bool — enqueue v; false
+                        // when the channel is closed (v is dropped)
+                        "chan_send" => {
+                            if args.len() != 2 {
+                                return err_at(
+                                    sp,
+                                    "sys::chan_send(ch, v) takes exactly 2 arguments",
+                                );
+                            }
+                            let ct = self.expr_ty(&mut args[0])?;
+                            let elem = match &ct {
+                                Type::Ptr(inner) => match inner.as_ref() {
+                                    Type::Struct(m) if self.chan_elems.contains_key(m) => {
+                                        self.chan_elems[m].clone()
+                                    }
+                                    _ => {
+                                        return err_at(
+                                            sp,
+                                            format!(
+                                                "sys::chan_send: ch must be *Chan[T] (from sys::chan_new[T]), got {}",
+                                                ct.name()
+                                            ),
+                                        )
+                                    }
+                                },
+                                _ => {
+                                    return err_at(
+                                        sp,
+                                        format!(
+                                            "sys::chan_send: ch must be *Chan[T] (from sys::chan_new[T]), got {}",
+                                            ct.name()
+                                        ),
+                                    )
+                                }
+                            };
+                            let vt = self.expr_ty(&mut args[1])?;
+                            if !assignable_checked(&elem, &args[1], &vt, sp)? {
+                                return err_at(
+                                    sp,
+                                    format!(
+                                        "sys::chan_send: value must be {}, got {}",
+                                        elem.name(),
+                                        vt.name()
+                                    ),
+                                );
+                            }
+                            let ch = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            let v = std::mem::replace(&mut args[1], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call(
+                                    "_wlel_chan_send".into(),
+                                    vec![],
+                                    vec![
+                                        ch,
+                                        v,
+                                        Spanned::new(ExprKind::Str(elem.name()), sp),
+                                    ],
+                                ),
+                                sp,
+                            );
+                            return Ok(Type::Bool);
+                        }
+                        // sys::chan_recv(ch, &out) -> bool — blocks until a
+                        // value arrives; false means closed AND drained (*out
+                        // untouched), following the read_file/parse_float
+                        // bool+out-param idiom
+                        "chan_recv" => {
+                            if args.len() != 2 {
+                                return err_at(
+                                    sp,
+                                    "sys::chan_recv(ch, &out) takes exactly 2 arguments",
+                                );
+                            }
+                            let ct = self.expr_ty(&mut args[0])?;
+                            let elem = match &ct {
+                                Type::Ptr(inner) => match inner.as_ref() {
+                                    Type::Struct(m) if self.chan_elems.contains_key(m) => {
+                                        self.chan_elems[m].clone()
+                                    }
+                                    _ => {
+                                        return err_at(
+                                            sp,
+                                            format!(
+                                                "sys::chan_recv: ch must be *Chan[T] (from sys::chan_new[T]), got {}",
+                                                ct.name()
+                                            ),
+                                        )
+                                    }
+                                },
+                                _ => {
+                                    return err_at(
+                                        sp,
+                                        format!(
+                                            "sys::chan_recv: ch must be *Chan[T] (from sys::chan_new[T]), got {}",
+                                            ct.name()
+                                        ),
+                                    )
+                                }
+                            };
+                            let ot = self.expr_ty(&mut args[1])?;
+                            if ot != Type::Ptr(Box::new(elem.clone())) {
+                                return err_at(
+                                    sp,
+                                    format!(
+                                        "sys::chan_recv: out must be *{}, got {}",
+                                        elem.name(),
+                                        ot.name()
+                                    ),
+                                );
+                            }
+                            let ch = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            let out = std::mem::replace(&mut args[1], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call(
+                                    "_wlel_chan_recv".into(),
+                                    vec![],
+                                    vec![
+                                        ch,
+                                        out,
+                                        Spanned::new(ExprKind::Str(elem.name()), sp),
+                                    ],
+                                ),
+                                sp,
+                            );
+                            return Ok(Type::Bool);
+                        }
+                        // sys::chan_close(ch) — no more sends; after the
+                        // buffer drains, every recv returns false
+                        "chan_close" => {
+                            if args.len() != 1 {
+                                return err_at(sp, "sys::chan_close(ch) takes exactly 1 argument");
+                            }
+                            let ct = self.expr_ty(&mut args[0])?;
+                            let elem = match &ct {
+                                Type::Ptr(inner) => match inner.as_ref() {
+                                    Type::Struct(m) if self.chan_elems.contains_key(m) => {
+                                        self.chan_elems[m].clone()
+                                    }
+                                    _ => {
+                                        return err_at(
+                                            sp,
+                                            format!(
+                                                "sys::chan_close: ch must be *Chan[T] (from sys::chan_new[T]), got {}",
+                                                ct.name()
+                                            ),
+                                        )
+                                    }
+                                },
+                                _ => {
+                                    return err_at(
+                                        sp,
+                                        format!(
+                                            "sys::chan_close: ch must be *Chan[T] (from sys::chan_new[T]), got {}",
+                                            ct.name()
+                                        ),
+                                    )
+                                }
+                            };
+                            let ch = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call(
+                                    "_wlel_chan_close".into(),
+                                    vec![],
+                                    vec![
+                                        ch,
+                                        Spanned::new(ExprKind::Str(elem.name()), sp),
+                                    ],
+                                ),
+                                sp,
+                            );
+                            return Ok(Type::Void);
+                        }
+                        // sys::chan_free(ch) — frees queued values and the
+                        // channel; no other thread may touch it afterwards
+                        "chan_free" => {
+                            if args.len() != 1 {
+                                return err_at(sp, "sys::chan_free(ch) takes exactly 1 argument");
+                            }
+                            let ct = self.expr_ty(&mut args[0])?;
+                            let elem = match &ct {
+                                Type::Ptr(inner) => match inner.as_ref() {
+                                    Type::Struct(m) if self.chan_elems.contains_key(m) => {
+                                        self.chan_elems[m].clone()
+                                    }
+                                    _ => {
+                                        return err_at(
+                                            sp,
+                                            format!(
+                                                "sys::chan_free: ch must be *Chan[T] (from sys::chan_new[T]), got {}",
+                                                ct.name()
+                                            ),
+                                        )
+                                    }
+                                },
+                                _ => {
+                                    return err_at(
+                                        sp,
+                                        format!(
+                                            "sys::chan_free: ch must be *Chan[T] (from sys::chan_new[T]), got {}",
+                                            ct.name()
+                                        ),
+                                    )
+                                }
+                            };
+                            let ch = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call(
+                                    "_wlel_chan_free".into(),
+                                    vec![],
+                                    vec![
+                                        ch,
+                                        Spanned::new(ExprKind::Str(elem.name()), sp),
+                                    ],
+                                ),
+                                sp,
+                            );
+                            return Ok(Type::Void);
+                        }
+                        // sys::sleep_ms(ms) — park the current thread
+                        "sleep_ms" => {
+                            if args.len() != 1 {
+                                return err_at(
+                                    sp,
+                                    "sys::sleep_ms(ms) takes exactly 1 argument",
+                                );
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if !is_int(&t) {
+                                return err_at(
+                                    sp,
+                                    format!("sys::sleep_ms: ms must be int, got {}", t.name()),
+                                );
+                            }
+                            return Ok(Type::Void);
+                        }
                         other => {
                             return err_at(sp, format!("unknown sys function 'sys::{other}'"))
                         }
@@ -2211,10 +2961,11 @@ impl Checker {
                         );
                         return Ok(Type::Str);
                     }
-                    // std::fs::* — defer-friendly file handles. `File` is the
-                    // built-in wrapper of a C FILE*; open returns 0 (null) on
-                    // failure, read/write return byte counts (-1 on error),
-                    // close is idempotent (safe to defer and to call again)
+                    // std::fs::* — defer-friendly file handles behind
+                    // std::Result[*File / int, string]. Every fallible
+                    // operation reports a Result whose Err payload is a C
+                    // strerror message or a short literal — never a panic;
+                    // close is idempotent (safe to defer and call again)
                     if let Some(fs_fn) = rest.strip_prefix("fs::") {
                         let file_ptr = Type::Ptr(Box::new(Type::Struct("File".into())));
                         match fs_fn {
@@ -2245,12 +2996,73 @@ impl Checker {
                                         ),
                                     );
                                 }
+                                let inst = self.result_instance(file_ptr, Type::Str);
                                 let taken = std::mem::take(args);
                                 *e = Spanned::new(
-                                    ExprKind::Call("_wlel_fs_open".into(), vec![], taken),
+                                    ExprKind::Call("_wlel_fs_open_r".into(), vec![], taken),
                                     sp,
                                 );
-                                return Ok(file_ptr);
+                                return Ok(Type::Enum(inst));
+                            }
+                            "read_all" => {
+                                if args.len() != 1 {
+                                    return err_at(
+                                        sp,
+                                        "std::fs::read_all(path) takes exactly 1 argument",
+                                    );
+                                }
+                                let t = self.expr_ty(&mut args[0])?;
+                                if t != Type::Str {
+                                    return err_at(
+                                        sp,
+                                        format!(
+                                            "std::fs::read_all: path must be string, got {}",
+                                            t.name()
+                                        ),
+                                    );
+                                }
+                                let inst = self.result_instance(Type::Str, Type::Str);
+                                let taken = std::mem::take(args);
+                                *e = Spanned::new(
+                                    ExprKind::Call("_wlel_fs_read_all_r".into(), vec![], taken),
+                                    sp,
+                                );
+                                return Ok(Type::Enum(inst));
+                            }
+                            "write_all" => {
+                                if args.len() != 2 {
+                                    return err_at(
+                                        sp,
+                                        "std::fs::write_all(path, contents) takes exactly 2 arguments",
+                                    );
+                                }
+                                let t = self.expr_ty(&mut args[0])?;
+                                if t != Type::Str {
+                                    return err_at(
+                                        sp,
+                                        format!(
+                                            "std::fs::write_all: path must be string, got {}",
+                                            t.name()
+                                        ),
+                                    );
+                                }
+                                let t = self.expr_ty(&mut args[1])?;
+                                if t != Type::Str {
+                                    return err_at(
+                                        sp,
+                                        format!(
+                                            "std::fs::write_all: contents must be string, got {}",
+                                            t.name()
+                                        ),
+                                    );
+                                }
+                                let inst = self.result_instance(Type::Int(IntW::I64), Type::Str);
+                                let taken = std::mem::take(args);
+                                *e = Spanned::new(
+                                    ExprKind::Call("_wlel_fs_write_all_r".into(), vec![], taken),
+                                    sp,
+                                );
+                                return Ok(Type::Enum(inst));
                             }
                             "read" | "write" => {
                                 if args.len() != 3 {
@@ -2292,16 +3104,17 @@ impl Checker {
                                     );
                                 }
                                 let helper = if fs_fn == "read" {
-                                    "_wlel_fs_read"
+                                    "_wlel_fs_read_r"
                                 } else {
-                                    "_wlel_fs_write"
+                                    "_wlel_fs_write_r"
                                 };
+                                let inst = self.result_instance(Type::Int(IntW::I64), Type::Str);
                                 let taken = std::mem::take(args);
                                 *e = Spanned::new(
                                     ExprKind::Call(helper.into(), vec![], taken),
                                     sp,
                                 );
-                                return Ok(Type::Int(IntW::I64));
+                                return Ok(Type::Enum(inst));
                             }
                             "close" => {
                                 if args.len() != 1 {
@@ -2804,6 +3617,24 @@ impl Checker {
                     *e = self.wlel_assert_call(eq, sp);
                     return Ok(Type::Void);
                 }
+                // panic(msg) — builtin: abort with a message and the .wl
+                // position; never returns, so code after it is unreachable
+                // and functions ending in it need no further return
+                if name == "panic" {
+                    if args.len() != 1 {
+                        return err_at(sp, "panic() takes exactly 1 argument");
+                    }
+                    let t = self.expr_ty(&mut args[0])?;
+                    if t != Type::Str {
+                        return err_at(
+                            sp,
+                            format!("panic() expects a string message, got {}", t.name()),
+                        );
+                    }
+                    let msg = std::mem::replace(&mut args[0], dummy_expr(sp));
+                    *e = self.wlel_panic_call(msg, sp);
+                    return Ok(Type::Void);
+                }
                 // arena_stats() — builtin: statistics of the active arena
                 // (root when no arena block is open) as a built-in struct
                 if name == "arena_stats" {
@@ -2838,6 +3669,25 @@ impl Checker {
                     let taken = std::mem::take(args);
                     *e = Spanned::new(ExprKind::Call(helper.into(), vec![], taken), sp);
                     return Ok(Type::Int(IntW::U64));
+                }
+                // std::fs Result helpers: the std::fs::* call was already
+                // type-checked and rewritten; generic instantiation re-runs
+                // expr_ty on taken arguments, so the helper name resolves
+                // here with its recorded Result type
+                if ty_args.is_empty() {
+                    if let Some((ok_ty, arity)) = fs_helper_result(name) {
+                        if args.len() != arity {
+                            return err_at(
+                                sp,
+                                format!("'{name}' takes {arity} argument(s), got {}", args.len()),
+                            );
+                        }
+                        for a in args.iter_mut() {
+                            self.expr_ty(a)?;
+                        }
+                        let inst = self.result_instance(ok_ty, Type::Str);
+                        return Ok(Type::Enum(inst));
+                    }
                 }
                 // generic function call. With explicit type arguments
                 // (`vec_new[int]()`) the bindings come straight from the
@@ -3066,6 +3916,13 @@ impl Checker {
                         init.ty = Some(t.name());
                         t
                     }
+                    // expr? — the try operator hoists to a propagate-or-bind
+                    // sequence; its value is the success payload
+                    ExprKind::Try(t) => {
+                        let unwrapped = self.check_try(t, init.span)?;
+                        init.ty = Some(unwrapped.name());
+                        unwrapped
+                    }
                     _ => self.expr_ty(init)?,
                 };
                 self.expected = None;
@@ -3163,7 +4020,14 @@ impl Checker {
                         );
                     }
                 }
-                let value_ty = self.expr_ty(&mut a.value)?;
+                let value_ty = match &mut a.value.node {
+                    ExprKind::Try(t) => {
+                        let unwrapped = self.check_try(t, a.value.span)?;
+                        a.value.ty = Some(unwrapped.name());
+                        unwrapped
+                    }
+                    _ => self.expr_ty(&mut a.value)?,
+                };
                 if !assignable_checked(&target_ty, &a.value, &value_ty, sp)? {
                     return err_at(
                         sp,
@@ -3315,6 +4179,50 @@ impl Checker {
                 if self.defer_depth > 0 {
                     return err_at(sp, "'return' inside a defer block is not allowed");
                 }
+                // return expr? — propagate the error variant, return the
+                // success payload (which must fit the Ok payload of the
+                // function's return type)
+                if let Some(e) = e {
+                    if let ExprKind::Try(t) = &mut e.node {
+                        let tsp = e.span;
+                        let unwrapped = self.check_try(t, tsp)?;
+                        e.ty = Some(unwrapped.name());
+                        self.block_terminated = true;
+                        let Type::Enum(ret_inst) = self.current_ret.clone() else {
+                            return err_at(
+                                tsp,
+                                format!(
+                                    "'?' needs the enclosing function to return a Result or Option — it returns {}",
+                                    self.current_ret.name()
+                                ),
+                            );
+                        };
+                        let rvariants =
+                            self.enums.get(&ret_inst).cloned().ok_or_else(|| CheckError {
+                                msg: format!("unknown enum '{ret_inst}'"),
+                                span: tsp,
+                            })?;
+                        let r_ok_i = rvariants
+                            .iter()
+                            .position(|(n, _)| n == "Ok" || n == "Some")
+                            .ok_or_else(|| CheckError {
+                                msg: format!("enum '{ret_inst}' has no success variant"),
+                                span: tsp,
+                            })?;
+                        let r_ok_ty = rvariants[r_ok_i].1[0].clone();
+                        if !assignable_checked(&r_ok_ty, e, &unwrapped, tsp)? {
+                            return err_at(
+                                tsp,
+                                format!(
+                                    "return type mismatch: the function's success type is {}, found {}",
+                                    r_ok_ty.name(),
+                                    unwrapped.name()
+                                ),
+                            );
+                        }
+                        return Ok(());
+                    }
+                }
                 let actual = match e {
                     Some(e) => {
                         // seed the expected-type hint from the function's
@@ -3361,7 +4269,16 @@ impl Checker {
                 Ok(())
             }
             StmtKind::ExprStmt(e) => {
+                // expr?; — propagate the error variant, discard the value
+                if let ExprKind::Try(t) = &mut e.node {
+                    let unwrapped = self.check_try(t, e.span)?;
+                    e.ty = Some(unwrapped.name());
+                    return Ok(());
+                }
                 self.expr_ty(e)?;
+                if is_panic_call(e) {
+                    self.block_terminated = true;
+                }
                 Ok(())
             }
             StmtKind::Match(ms) => {
@@ -3837,6 +4754,216 @@ impl Checker {
         )
     }
 
+    /// `panic(msg)` → `_wlel_panic(msg, file, line)` — aborts with the
+    /// message and the .wl position (a test run fails instead of exiting)
+    fn wlel_panic_call(&self, msg: Expr, sp: Span) -> Expr {
+        Spanned::new(
+            ExprKind::Call(
+                "_wlel_panic".into(),
+                vec![],
+                vec![
+                    msg,
+                    Spanned::new(ExprKind::Str(self.current_file.clone()), sp),
+                    Spanned::new(ExprKind::Int(sp.start.line as i64), sp),
+                ],
+            ),
+            sp,
+        )
+    }
+
+    /// register (or look up) the concrete std::Result[ok, err] instance the
+    /// fs helpers return; the payloads are built-in types ("*File" is not a
+    /// user-writable type string), so instantiation is done directly instead
+    /// of through resolve_type_str. Returns the mangled enum name.
+    fn result_instance(&mut self, ok: Type, err: Type) -> String {
+        let name = format!(
+            "Result__{}__{}",
+            mangle_ty(&ok.name()),
+            mangle_ty(&err.name())
+        );
+        if !self.enums.contains_key(&name) {
+            self.pending_enums.push(EnumDef {
+                name: name.clone(),
+                variants: vec![
+                    VariantDef {
+                        name: "Ok".to_string(),
+                        payloads: vec![ok.name()],
+                    },
+                    VariantDef {
+                        name: "Err".to_string(),
+                        payloads: vec![err.name()],
+                    },
+                ],
+                type_params: Vec::new(),
+                span: Span::new(1, 1, 1, 1),
+                file: STD_FILE.to_string(),
+            });
+            self.enums.insert(
+                name.clone(),
+                vec![
+                    ("Ok".to_string(), vec![ok.clone()]),
+                    ("Err".to_string(), vec![err.clone()]),
+                ],
+            );
+            self.enum_args.insert(name.clone(), vec![ok, err]);
+            self.enum_origin.insert(name.clone(), "Result".to_string());
+            self.used_enums.insert(name.clone());
+        }
+        name
+    }
+
+    /// type-check `expr?` in one of the hoisted statement positions: the
+    /// inner value must be a std Result[T, E] or Option[T], the enclosing
+    /// function must return a Result/Option with the same error variant,
+    /// and the unwrapped success payload is the operator's value
+    fn check_try(&mut self, t: &mut TryExpr, sp: Span) -> CResult<Type> {
+        if self.defer_depth > 0 {
+            return err_at(sp, "'?' inside a defer block is not allowed");
+        }
+        let inner_ty = self.expr_ty(&mut t.inner)?;
+        let Type::Enum(inst) = &inner_ty else {
+            return err_at(
+                sp,
+                format!(
+                    "'?' expects a Result or Option value, got {}",
+                    inner_ty.name()
+                ),
+            );
+        };
+        let inst = inst.clone();
+        let origin = self.enum_origin.get(&inst).cloned();
+        match origin.as_deref() {
+            Some("Result") => {
+                let variants = self.enums.get(&inst).cloned().ok_or_else(|| CheckError {
+                    msg: format!("unknown enum '{inst}'"),
+                    span: sp,
+                })?;
+                let ok_i = variants
+                    .iter()
+                    .position(|(n, _)| n == "Ok")
+                    .ok_or_else(|| CheckError {
+                        msg: format!("enum '{inst}' has no variant 'Ok'"),
+                        span: sp,
+                    })?;
+                let err_i = variants
+                    .iter()
+                    .position(|(n, _)| n == "Err")
+                    .ok_or_else(|| CheckError {
+                        msg: format!("enum '{inst}' has no variant 'Err'"),
+                        span: sp,
+                    })?;
+                let ok_ty = variants[ok_i].1[0].clone();
+                let err_ty = variants[err_i].1[0].clone();
+                // the enclosing function must return Result[.., err_ty]
+                let Type::Enum(ret_inst) = self.current_ret.clone() else {
+                    return err_at(
+                        sp,
+                        format!(
+                            "'?' needs the enclosing function to return a Result with the error type {} — it returns {}",
+                            err_ty.name(),
+                            self.current_ret.name()
+                        ),
+                    );
+                };
+                let ret_origin = self.enum_origin.get(&ret_inst).cloned();
+                if ret_origin.as_deref() != Some("Result") {
+                    return err_at(
+                        sp,
+                        format!(
+                            "'?' needs the enclosing function to return a Result with the error type {} — it returns {}",
+                            err_ty.name(),
+                            self.current_ret.name()
+                        ),
+                    );
+                }
+                let rvariants =
+                    self.enums.get(&ret_inst).cloned().ok_or_else(|| CheckError {
+                        msg: format!("unknown enum '{ret_inst}'"),
+                        span: sp,
+                    })?;
+                let r_err_i = rvariants
+                    .iter()
+                    .position(|(n, _)| n == "Err")
+                    .ok_or_else(|| CheckError {
+                        msg: format!("enum '{ret_inst}' has no variant 'Err'"),
+                        span: sp,
+                    })?;
+                let r_err_ty = rvariants[r_err_i].1[0].clone();
+                if r_err_ty != err_ty {
+                    return err_at(
+                        sp,
+                        format!(
+                            "'?' error type mismatch: the function fails with {} but this expression fails with {}",
+                            r_err_ty.name(),
+                            err_ty.name()
+                        ),
+                    );
+                }
+                t.ret_name = ret_inst;
+                t.err_tag = err_i;
+                t.err_variant = "Err".to_string();
+                t.err_arity = 1;
+                t.ok_variant = "Ok".to_string();
+                Ok(ok_ty)
+            }
+            Some("Option") => {
+                let variants = self.enums.get(&inst).cloned().ok_or_else(|| CheckError {
+                    msg: format!("unknown enum '{inst}'"),
+                    span: sp,
+                })?;
+                let some_i = variants
+                    .iter()
+                    .position(|(n, _)| n == "Some")
+                    .ok_or_else(|| CheckError {
+                        msg: format!("enum '{inst}' has no variant 'Some'"),
+                        span: sp,
+                    })?;
+                let none_i = variants
+                    .iter()
+                    .position(|(n, _)| n == "None")
+                    .ok_or_else(|| CheckError {
+                        msg: format!("enum '{inst}' has no variant 'None'"),
+                        span: sp,
+                    })?;
+                let some_ty = variants[some_i].1[0].clone();
+                // the enclosing function must return an Option (any payload)
+                let Type::Enum(ret_inst) = self.current_ret.clone() else {
+                    return err_at(
+                        sp,
+                        format!(
+                            "'?' needs the enclosing function to return an Option — it returns {}",
+                            self.current_ret.name()
+                        ),
+                    );
+                };
+                let ret_origin = self.enum_origin.get(&ret_inst).cloned();
+                if ret_origin.as_deref() != Some("Option") {
+                    return err_at(
+                        sp,
+                        format!(
+                            "'?' needs the enclosing function to return an Option — it returns {}",
+                            self.current_ret.name()
+                        ),
+                    );
+                }
+                t.ret_name = ret_inst;
+                t.err_tag = none_i;
+                t.err_variant = "None".to_string();
+                t.err_arity = 0;
+                t.ok_variant = "Some".to_string();
+                Ok(some_ty)
+            }
+            _ => err_at(
+                sp,
+                format!(
+                    "'?' expects a Result or Option value, got {}",
+                    inner_ty.name()
+                ),
+            ),
+        }
+    }
+
+    /// Comparison expression for `assert_eq(a, b)`: mirrors `==` semantics —
     /// Comparison expression for `assert_eq(a, b)`: mirrors `==` semantics —
     /// untyped literals adapt with range checks, mixed int widths need a
     /// cast, floats must match width, strings compare by content.
@@ -4042,7 +5169,7 @@ fn called_files(
 
 /// mangle a type string into a C identifier fragment:
 /// "*int" -> "pint", "Vec[int]" -> "Vec$int", "[int; 3]" -> "$int3"
-fn mangle_ty(t: &str) -> String {
+pub(crate) fn mangle_ty(t: &str) -> String {
     let mut out = String::new();
     for c in t.chars() {
         match c {
@@ -4055,6 +5182,19 @@ fn mangle_ty(t: &str) -> String {
     out
 }
 
+
+/// (ok payload, arity) of a rewritten std::fs Result helper, or None when
+/// the name is not one of them
+fn fs_helper_result(name: &str) -> Option<(Type, usize)> {
+    match name {
+        "_wlel_fs_open_r" => Some((Type::Ptr(Box::new(Type::Struct("File".into()))), 2)),
+        "_wlel_fs_read_all_r" => Some((Type::Str, 1)),
+        "_wlel_fs_write_all_r" => Some((Type::Int(IntW::I64), 2)),
+        "_wlel_fs_read_r" => Some((Type::Int(IntW::I64), 3)),
+        "_wlel_fs_write_r" => Some((Type::Int(IntW::I64), 3)),
+        _ => None,
+    }
+}
 
 fn is_lvalue(e: &Expr) -> bool {
     matches!(
@@ -4078,8 +5218,15 @@ fn guarantees_return(b: &Block) -> bool {
         // a statement-form match whose arms all return (the checker proved
         // exhaustiveness when it set all_arms_terminate)
         Some(StmtKind::Match(m)) => m.all_arms_terminate,
+        // panic(...) never returns
+        Some(StmtKind::ExprStmt(e)) => is_panic_call(e),
         _ => false,
     }
+}
+
+/// `panic(msg)` rewritten by the checker to the `_wlel_panic` helper call
+fn is_panic_call(e: &Expr) -> bool {
+    matches!(&e.node, ExprKind::Call(n, _, _) if n == "_wlel_panic")
 }
 
 fn if_guarantees(i: &IfStmt) -> bool {

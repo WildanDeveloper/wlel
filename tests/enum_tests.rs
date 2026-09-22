@@ -33,10 +33,7 @@ fn check(src: &str) -> Result<(), String> {
 fn check_std(src: &str) -> Result<(), String> {
     let mut p = parse(src);
     if p.uses.iter().any(|u| u.path.is_none()) {
-        let std_prog = stdsrc::parse_std();
-        p.structs.splice(0..0, std_prog.structs);
-        p.enums.splice(0..0, std_prog.enums);
-        p.funcs.splice(0..0, std_prog.funcs);
+        stdsrc::splice_std(&mut p);
     }
     Checker::check(&mut p).map(|_| ()).map_err(|e| e.msg)
 }

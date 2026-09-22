@@ -91,14 +91,33 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Lexer: hex/bin/oct/scientific/`_`-separated literals, strings with escapes + UTF-8
 - [x] Type checker: inference, annotations, return-path analysis, loop/arena depth tracking
 - [x] Generics: `fn id[T](x: T) -> T` and `struct Box[T] { val: T }` via checker-level monomorphization — type inference at call sites, per-type instantiation (mangled C like `Box__int`), no boxing, no vtables (see [Generics](#generics))
-- [x] Stdlib: `std::print*`/`println*`, `strlen`, `streq`, `abs`, `min`, `max`, `len`, `checked_add/sub/mul`, `format`, `parse_float`, `float_to_str`; collections `Vec[T]`, `HashMap[K,V]` + `for x in coll`; string library `str_find/sub/trim/split/parse_int`, `int_to_str`, `str_cmp`; sort & search `std::sort`, `std::binary_search`; file I/O `sys::read_file/write_file`, `std::fs::open/read/write/close`; `sys::argc/arg/exit`
+- [x] Methods: `impl Pt { fn len(self) -> float { ... } }` + `p.len()` — desugared to plain functions, generic impls monomorphize per receiver; std collections/Result/Option carry a method layer (see [Methods](#methods))
+- [x] Stdlib: `std::print*`/`println*`, `strlen`, `streq`, `abs`, `min`, `max`, `len`, `checked_add/sub/mul`, `format`, `parse_float`, `float_to_str`; collections `Vec[T]`, `HashMap[K,V]` + `for x in coll`; string library `str_find/sub/trim/split/parse_int`, `int_to_str`, `str_cmp`; sort & search `std::sort`, `std::binary_search`; file I/O `sys::read_file/write_file` + the Result layer `std::fs::open/read_all/write_all/read/write/close`; `sys::argc/arg/exit`
+- [x] Concurrency: `sys::thread/join` (name-resolved workers, per-thread arenas), `sys::mutex_new/lock/unlock/free`, `sys::chan_new[T]/send/recv/close/free`, `sys::sleep_ms` — data races are user discipline, like C (see [Concurrency](#concurrency))
+- [x] Tagged enums + exhaustive `match`, `std::Result[T,E]` / `std::Option[T]`, the `?` try operator and the `result_*`/`option_*` helpers, `panic(msg)` (see [Tagged enums](#tagged-enums--match) and [File I/O](#file-io))
 - [x] Projects: `wlel new`, `wlel.toml` manifests, path + git dependencies (auto-cloned, revision-pinned by `wlel.lock`), nested deps, `wlel run/build/check/test` in project mode (see [Projects](#projects))
+- [x] Package registry v0: `wlel add github:user/repo[@x.y.z]` — no central server, git tags are the registry; caret version requirements verified against each tag's own manifest, offline-friendly resolution (see [Projects](#projects))
 - [x] Formatter: `wlel fmt` — canonical, idempotent, comment-preserving; `wlel fmt` in a project formats every `.wl`; `-check` mode for CI (see [Formatting](#formatting))
+- [x] Language server: `wlel lsp` — diagnostics, hover types/signatures, go-to-definition (locals, methods, fields, imports), completion; hand-rolled LSP 3.17 over stdio, zero dependencies (see [Language server](#language-server))
+- [x] Documentation: `wlel doc` — markdown pages from `///` doc comments, one per module plus an index; the embedded stdlib documents itself (see [Documentation](#documentation))
 
 ### Not yet (planned, in order)
-- [ ] `wlel doc`
-- [ ] Tagged enums + `match`, `Result[T,E]`, method sugar, LSP, concurrency
-- [ ] Direct QBE backend (drops the C-compiler dependency), self-hosting
+- [ ] Self-hosting
+
+### Experimental
+- [x] QBE backend (`--backend qbe`): transpiles the arena-free core of the language straight to QBE IL — 75x faster builds on a 2k-function file (78 ms vs 5.9 s for gcc -O2 on generated C), runtime parity on straight-line/loop code, ~3x slower on gcc-transformed patterns like deep recursion (see [QBE backend](#qbe-backend-experimental))
+
+## Specification
+
+The normative language definition lives in [docs/spec.md](docs/spec.md) —
+**v1 draft for public review**. It pins down the load-bearing contracts:
+lexical structure, the full precedence table, evaluation order (what is
+guaranteed, what is inherited from C), conversion/literal rules, `defer` and
+`?` semantics, the memory model (arena lifetime, aliasing discipline,
+poison-fill behavior), overflow semantics, safe-debug vs release, the FFI
+type mapping, and a reference grammar. An [open questions](docs/spec.md#17-open-questions-for-review)
+section lists the as-implemented behaviors that are explicitly up for
+review before the 1.0 syntax freeze.
 
 ## Try it
 
@@ -113,6 +132,7 @@ cargo run --release -- run examples/fileio.wl -- examples/fileio.wl # cat demo (
 cargo run --release -- run examples/generics.wl          # generic fn/struct demo
 cargo run --release -- run examples/sort.wl              # sort & search demo + 1M int benchmark
 cargo run --release -- run examples/overflow.wl          # wrap + checked ops demo
+cargo run --release -- run examples/concurrency.wl       # worker pool demo (threads + mutex + channel)
 cargo run --release -- run examples/fib.wl               # fibonacci benchmark
 cargo run --release -- test examples/strings.wl          # run the test blocks in a file
 cargo run --release -- test examples/kitchen.wl          # tests from imports run too
@@ -128,6 +148,9 @@ wlel run                     # run the project (dev checks)
 wlel test                    # project + dependency tests
 wlel build                   # binary named after the package
 wlel fmt                     # canonical formatting for every .wl
+wlel doc                     # markdown docs for every .wl + the stdlib
+wlel lsp                     # language server over stdio (VS Code, Neovim)
+wlel add github:user/repo    # add a git dependency (git tags = the registry)
 ```
 
 ## A quick tour
@@ -171,6 +194,53 @@ let big: u64 = 18_000_000_000_000_000_000u64;
 let risky: u8 = small as u8;    // explicit cast required for narrowing
 ```
 
+## Tagged enums & match
+
+`enum` declares a closed tagged union; `match` destructures it — the checker
+rejects missing variants, duplicates, and arms after the wildcard:
+
+```wl
+enum Shape {
+    Circle(float),
+    Rect(float, float),
+    Point,
+}
+
+fn area(s: Shape) -> float {
+    return match s {
+        Circle(r) => 3.14159 * r * r,
+        Rect(w, h) => w * h,
+        Point => 0.0,
+    };
+}
+```
+
+`std::Result[T, E]` and `std::Option[T]` are ordinary enums in the stdlib, so
+`match` works on them — and `expr?` is the terse form: propagate the error
+variant out of the enclosing function, otherwise yield the payload. It is
+allowed directly as the value of a `let`, an assignment, a `return`, or as a
+statement:
+
+```wl
+fn parse_age(s: string) -> Result[int, string] {
+    n := 0;
+    if !str_parse_int(s, &n) { return Err("not a number"); }
+    return Ok(n);
+}
+
+fn double(s: string) -> Result[int, string] {
+    v := parse_age(s)?;          // on Err: return Err(e) out of double
+    return Ok(v * 2);
+}
+```
+
+Predicates, fallbacks and explicit unwraps live in the stdlib (written in Wlel
+itself): `result_is_ok/is_err/unwrap/unwrap_or/ok/err`,
+`option_is_some/is_none/unwrap/unwrap_or`. The unwraps `panic(msg)` — abort
+with the message and `.wl` position; a test run fails that one test and keeps
+going. Everything else in a Wlel program errors at compile time or returns a
+Result — implicit panics do not exist.
+
 ## Generics
 
 Functions and structs can be generic over types; each use is monomorphized to a
@@ -197,6 +267,69 @@ Type arguments are usually inferred from the call (`first(1, 2)` needs no
 a mangled name (`Box__int`, `Box__Box__int`), so nested generics and generics
 inside arenas/safe-mode compose naturally. A generic that is never called is
 never monomorphized — its body is not even checked.
+
+## Methods
+
+`impl` blocks attach methods to structs and enums. The checker lowers every
+method into a plain function (`Pt__len`) and `recv.method(args)` resolves into
+that call — no vtables, no dynamic dispatch, just sugar with compile-time
+resolution:
+
+```wl
+struct Pt {
+    x: float,
+    y: float,
+}
+
+impl Pt {
+    // value receiver: reads a copy
+    fn len(self) -> float {
+        return std::math::sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    // pointer receiver: mutates in place
+    fn scale(self: *Pt, k: float) {
+        self.x *= k;
+    }
+}
+
+fn main() -> int {
+    p := Pt { x: 3.0, y: 4.0 };
+    std::println_float(p.len()); // 5
+    p.scale(10.0);               // auto-borrow: &p for a pointer method
+    pp := &p;
+    std::println_float(pp.len()); // auto-deref: (*pp).len()
+    return 0;
+}
+```
+
+Receiver rules, in one sentence: the receiver adapts to the declared `self`
+form — a pointer method on a value auto-borrows (the value must be an lvalue),
+a value method on a pointer auto-derefs. Generic impls repeat the type's own
+parameters (`impl Box[T] { ... }`) and methods monomorphize per receiver like
+generic functions. Enums take methods too, destructured with `match` inside.
+
+The stdlib carries a method layer over the free functions — same operations,
+attached to their types:
+
+```wl
+v := vec_new[int]();
+v.push(2);
+v.push(3);
+std::println_int(v.len());        // 2
+
+m := map_new[string, int]();
+m.set("a", 1);
+std::println_int(m.get_or("a", 0)); // 1
+
+let r: Result[int, string] = Ok(17);
+if r.is_ok() {
+    std::println_int(r.unwrap()); // 17
+}
+```
+
+The free functions (`vec_push`, `map_get`, `result_unwrap`, ...) remain — std
+internals call them directly; methods are the idiomatic surface.
 
 ## Overflow semantics
 
@@ -237,14 +370,20 @@ Two layers, both arena-aware. **Whole-file helpers** for the common case:
 ```wl
 use std;
 
+fn cat(path: string) -> Result[int, string] {
+    content := std::fs::read_all(path)?;   // Err = strerror message
+    std::print_str(content);               // a cat in one fallible line
+    return Ok(0);
+}
+
 fn main() -> int {
-    content := "";
-    if !sys::read_file("notes.txt", &content) {   // false on any failure
-        std::println_str("cannot read notes.txt");
-        return 1;
+    match cat("notes.txt") {
+        Ok(_) => { return 0; }
+        Err(e) => {
+            std::println_str("cannot read notes.txt: " + e);
+            return 1;
+        }
     }
-    std::print_str(content);   // a cat in four lines
-    return 0;
 }
 ```
 
@@ -252,19 +391,26 @@ fn main() -> int {
 defer-friendly, handles die with their arena, so LeakSanitizer stays clean:
 
 ```wl
-f := std::fs::open("data.bin", "rb");
-if f == 0 as *File { return 1; }        // null on failure
+f := std::fs::open("data.bin", "rb")?;      // in a fn returning Result
 defer std::fs::close(f);
 buf := new(u8, 4096);
 while true {
-    n := std::fs::read(f, buf, 4096);   // bytes read; 0 = EOF, -1 = error
-    if n <= 0 { break; }
+    n := result_unwrap(std::fs::read(f, buf, 4096));  // bytes read; 0 = EOF
+    if n == 0 { break; }
     // ... process buf[0..n) ...
 }
 ```
 
-- `sys::read_file(path, &out) -> bool` / `sys::write_file(path, contents) -> bool` — no import required
-- `std::fs::open(path, mode) -> *File`, `fs::read(f, buf: *u8, n) -> int`, `fs::write(f, buf: *u8, n) -> int`, `fs::close(f)` — `use std;` required
+- `sys::read_file(path, &out) -> bool` / `sys::write_file(path, contents) -> bool` — the raw layer, no import required
+- `std::fs::*` — the Result layer, `use std;` required: `open(path, mode) -> Result[*File, string]`,
+  `read_all(path) -> Result[string, string]`, `write_all(path, contents) -> Result[int, string]`,
+  `read(f, buf: *u8, n) -> Result[int, string]`, `write(f, buf: *u8, n) -> Result[int, string]`,
+  `close(f)` — every Err payload is a C `strerror` message or a short literal;
+  file I/O never panics
+- `expr?` propagates the error out of any function returning Result/Option
+  (let, assignment, return, or as a statement); `match` destructures; the
+  `result_*` / `option_*` helpers cover predicates, fallbacks and the explicit
+  unwraps (which `panic` with a message when the value is absent)
 - Strings are NUL-terminated: after a partial read, set `buf[n] = 0` before
   treating the slice as a string; true binary data stays in `*u8` buffers
 
@@ -302,6 +448,49 @@ Three collection forms work for both functions: `(arr, cmp)`,
 `(ptr, n, cmp)` and `(vec, cmp)` — `binary_search` takes the needle before
 the comparator. Sorting is in-place, not stable (like C `qsort`); any
 element type works, structs included — write a comparator over a field.
+
+## Concurrency
+
+Threads, mutexes and channels, portable over pthreads / Win32 — and honest
+about the model: shared state is plain memory, data races are the user's
+responsibility, exactly like C. The language hands you the discipline
+tools and the sanitizer catches the fallout (`wlel build -sanitize` keeps
+the pool LeakSanitizer-clean; an OOB read inside any thread aborts with a
+`file:line` in dev mode).
+
+```wl
+fn worker(p: *Pool) {
+    job := 0;
+    while sys::chan_recv(p.jobs, &job) {   // blocks; false = closed + drained
+        sys::mutex_lock(p.mu);
+        *p.total = *p.total + job * job;
+        sys::mutex_unlock(p.mu);
+        sys::chan_send(p.done, job);
+    }
+}
+```
+
+- `sys::thread(work, data) -> *Thread` — spawns an OS thread running
+  `work(data)`. Wlel has no function pointers: the worker is resolved by
+  name, takes exactly one parameter (the data is type-checked against it)
+  and must return `void`. Every thread gets a fresh root arena of its own
+  and frees it when it exits.
+- `sys::join(t)` — block until the thread finishes; joining releases the
+  handle (join once, like `free`).
+- `sys::mutex_new/lock/unlock/free` — dynamic mutexes; lock/unlock
+  discipline is yours, `mutex_free` destroys and frees.
+- `sys::chan_new[T]()` — an unbounded FIFO of any one type (int, string,
+  pointers, structs). `sys::chan_send(ch, v) -> bool` never blocks (false
+  once the channel is closed); `sys::chan_recv(ch, &out) -> bool` blocks
+  until a value arrives, and returns false when the channel is closed and
+  drained (`*out` untouched — the same bool + out-param idiom as
+  `sys::read_file`); `sys::chan_close(ch)`, `sys::chan_free(ch)` finish the
+  lifecycle. `sys::sleep_ms(ms)` parks the current thread.
+- A failed `assert`/`panic` inside a spawned thread aborts the process with
+  its `file:line` (it never jumps into a foreign test stack).
+
+The full demo — a worker pool computing a mutex-guarded total over a job
+channel — is `examples/concurrency.wl` (`wlel run examples/concurrency.wl`).
 
 ## Testing
 
@@ -428,7 +617,18 @@ version = "0.1.0"
 
 [deps]
 pointlib = { path = "../pointlib" }
-json     = { git = "https://github.com/user/wlel-json" }
+json     = { git = "https://github.com/user/wlel-json", version = "1.2" }
+```
+
+`wlel add` edits the manifest for you — resolve first, write second, so a
+broken dependency never leaves a half-edited manifest behind:
+
+```bash
+$ wlel add github:user/wlel-json@1.2          # shorthand → https://github.com/...
+$ wlel add json https://example.com/repo.git  # explicit name, full URL
+$ wlel add pointlib --path ../pointlib        # path dependency
+added 'json' (git = "https://github.com/user/wlel-json") (satisfies 1.2 via tag v1.2.3)
+next: wlel run
 ```
 
 Dependency functions, structs and tests merge into your program (like file
@@ -437,6 +637,18 @@ dependencies sharing a name from different sources are rejected. Git
 revisions are pinned in `wlel.lock` after the first build — commit it, and
 every later build checks out exactly that revision, even on machines that
 have never seen the repo. Delete the lock to move to the remote's HEAD.
+
+Git dependencies can pin a **version requirement** (`version = "1.2"`):
+caret semantics like Cargo's `^` — `1.2` matches `>=1.2.0 <2.0.0`, `0.2.3`
+matches `>=0.2.3 <0.3.0`. There is no central server: **git tags are the
+registry** (`v1.2.3` and `1.2.3` both count). Resolution picks the highest
+tag satisfying the requirement and then verifies the tag's own `wlel.toml`
+declares a compatible version — tag and manifest must tell the same story.
+`wlel.lock` records the requirement together with the revision
+(`name = "1.2@<sha>"`), so builds stay reproducible and raising the
+requirement re-resolves automatically. Everything prefers the local clone:
+once locked, later builds never touch the network, and even re-resolution
+falls back to already-fetched tags when the remote is unreachable.
 
 ## Formatting
 
@@ -479,6 +691,96 @@ ok: main.wl type-checks
 - **Unreachable statement** — code after `return`/`break`/`continue` in the same block.
 - **Opt-out** — prefix a name with `_` (`_x`, `_i`, `_cb`) to mark intentional
   non-use.
+
+## Language server
+
+`wlel lsp` speaks LSP 3.17 over stdio — hand-rolled, zero dependencies like
+the rest of the toolchain. It runs the real pipeline (parse with error
+recovery, import merge, `use std` splice, type checker) on every edit, so
+what the editor shows is what the compiler sees:
+
+- **Diagnostics** — syntax errors (all of them, one compile), the first type
+  error, and warnings (unused var/param/import, unreachable code), each with
+  the exact range.
+- **Hover** — variable/field types, function and method signatures, struct
+  and enum shapes, variant payloads, pattern-binding types.
+- **Go-to-definition** — locals (with shadowing), functions, methods
+  (`v.push()` lands on the `impl` block), structs, enums, variants, struct
+  fields, and `use "file.wl"` imports (opens the file). Generic calls and
+  desugared method calls resolve back to their template declarations.
+- **Completion** — locals in scope, top-level symbols, spliced std symbols
+  (`vec_new`, `push`, `Ok`, ...), keywords and primitive types.
+
+### Editor setup
+
+**Neovim** (built-in LSP client, `init.lua`):
+
+```lua
+vim.api.nvim_create_autocmd('filetype', {
+  pattern = 'wlel',
+  callback = function()
+    vim.lsp.start({
+      name = 'wlel',
+      cmd = { 'wlel', 'lsp' },
+      root_dir = vim.fs.root(0, { 'wlel.toml' }),
+    })
+  end,
+})
+```
+
+**VS Code** — point a generic LSP client at `wlel lsp` (e.g. via the
+"any-lsp" style extensions), or launch it manually:
+
+```bash
+wlel lsp   # speaks on stdin/stdout; diagnostics on open/change
+```
+
+Notes:
+- The stdlib is embedded in the compiler, so std symbols resolve even
+  without a `std` source file on disk; go-to-definition on a std symbol
+  reports a `wlel-std:` URI (the source is not a file you can open).
+- Unsaved buffers analyze fine, but `use "file.wl"` imports need the
+  document saved next to its imports.
+
+## Documentation
+
+`wlel doc` generates markdown from `///` doc comments — one page per module
+(source file) plus an `index.md`. A doc comment attaches to the declaration
+directly below it (a blank line in between still attaches); an unattached
+block at the top of the file becomes the module description. Plain `//`
+comments are never docs:
+
+```wl
+/// A point in the plane.
+struct Pt {
+    x: float,
+    y: float,
+}
+
+/// Distance from the origin.
+fn len(p: Pt) -> float {
+    return sqrt(p.x * p.x + p.y * p.y);
+}
+```
+
+```bash
+$ wlel doc                    # project mode: every .wl + the stdlib page
+doc: docs/std.md
+doc: docs/geom.md
+doc: docs/index.md
+$ wlel doc src/geom.wl        # single file (adds std.md when it `use std`)
+$ wlel doc --std              # just the stdlib reference
+$ wlel doc -o site            # write somewhere other than docs/
+```
+
+Each page reprints the full API from the parse tree (structs and enums as
+definition blocks, functions as signatures, `impl` methods grouped under
+their type) with the doc text below each item — a file that fails to parse
+is never documented. The stdlib page (`std.md`) is generated from the
+embedded library itself, plus a hand-maintained table for the compiler
+builtins that have no Wlel source (`std::print*`, `std::math::*`,
+`sys::thread`, ...). The output is plain markdown — GitHub Pages, mkdocs or
+any viewer renders it as-is.
 
 ## Safe-debug vs release
 
@@ -534,6 +836,43 @@ passes LeakSanitizer at exit thanks to the root arena):
 wlel build app.wl -o app -sanitize && ./app
 ```
 
+## QBE backend (experimental)
+
+`wlel build --backend qbe` skips C entirely for your program: the compiler
+emits [QBE IL](https://c9x.me/compile/) directly, `qbe` lowers it to assembly,
+and `cc` only assembles and links. Requires `qbe` in `PATH` (`apt install qbe`).
+
+This is an *experiment* (roadmap Fase 3), deliberately scoped to the
+arena-free core of the language:
+
+- **Supported:** all integer widths + wrap semantics, `f32`/`f64`, bools,
+  pointers, stack arrays with indexing and decay, strings (literals, `==`,
+  indexing), `if`/`while`/`for`/`break`/`continue`, functions, monomorphized
+  generics, `extern fn` (`-l`/`-L` pass through), `wlel_print_*`,
+  `sys::argc/arg/exit/mono_ms/unix_ms`, `wlel_sizeof`.
+- **Refused with `file:line:col`:** `use std` and file imports, structs,
+  enums, `impl` methods, `defer`, `arena{}`, `new()`, `test` blocks, `match`,
+  for-in — anything needing the C runtime. Use the C backend there.
+- `--emit-c` emits the IL (`.ssa`) instead.
+
+Measured on one machine (Debian, gcc 12, qbe 1.2), honest both ways:
+
+| | C backend | QBE backend |
+|---|---|---|
+| cold build, 2000-function / 30k-line file | 5883 ms | **78 ms** (75x) |
+| runtime, loop-heavy straight-line program | 0.57 ms | 0.58 ms (parity) |
+| runtime, `fib(35)` (gcc rewrites recursion into loops) | 12 ms | 36 ms (~3x) |
+| binary size (fib) | 16.3 KB | 16.8 KB |
+
+Outputs are byte-identical with the C backend across the parity test corpus.
+
+**Decision recorded in the roadmap:** the C backend stays the default. QBE is
+worth keeping as an opt-in fast-iteration path — its whole-pipeline build
+speedup is real and the code it emits for straight-line programs is already at
+parity — but it does not replace gcc-class optimization for
+transform-heavy code, and the language is moving faster than a second
+production backend could track. Revisit when the language is closer to 1.0.
+
 ## Toolchain notes
 
 - Generated C is meant to be read: `wlel build --emit-c` writes the C99 source
@@ -549,8 +888,8 @@ wlel build app.wl -o app -sanitize && ./app
 Ordered by impact-per-effort. The next milestones:
 
 1. **Stdlib & tooling** — generics via monomorphization, `Vec[T]`/`HashMap[K,V]`, string library, file I/O, `wlel fmt`, CI, FFI.
-2. **Expressiveness** — tagged enums + exhaustive `match`, `Result[T,E]`, method sugar, LSP, concurrency.
-3. **1.0** — three flagship apps (HTTP server, JSON parser, a small game), fuzz soak, full docs, cross-compile recipes.
+2. **Expressiveness** — tagged enums + exhaustive `match`, `Result[T,E]`, method sugar, concurrency, LSP, `wlel doc`.
+3. **1.0** — package registry, a QBE backend experiment, three flagship apps (HTTP server, JSON parser, a small game), fuzz soak, full docs, cross-compile recipes.
 
 Deliberately **not** on the roadmap: borrow checker, macros, GC, OOP class
 hierarchies, exceptions. Simplicity is a feature, not a phase.

@@ -30,7 +30,10 @@
 //! so their functions/structs/tests flow through the normal pipeline and
 //! only what the program actually uses is emitted. Nested dependencies are
 //! resolved recursively; two deps sharing a name with different sources are
-//! rejected.
+//! rejected. Git dependencies may pin a caret version requirement
+//! (`version = "1.2"`) — resolved against the remote's git tags and verified
+//! against the dependency's own manifest (see [`crate::registry`]); the
+//! requirement and resolved revision are both recorded in `wlel.lock`.
 
 use crate::ast::{Program, UseDecl};
 use crate::lexer::Lexer;
@@ -61,6 +64,9 @@ pub enum DepSource {
 pub struct DepSpec {
     pub name: String,
     pub source: DepSource,
+    /// caret version requirement for git deps (`version = "1.2"` in the
+    /// manifest); tags satisfying it are resolved by [`fetch_git_dep`]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,13 +145,15 @@ pub fn parse_manifest(src: &str) -> Result<Manifest, String> {
                 let pairs = parse_inline_table(val, line_no)?;
                 let mut path: Option<String> = None;
                 let mut git: Option<String> = None;
+                let mut version: Option<String> = None;
                 for (k, v) in pairs {
                     match k.as_str() {
                         "path" => path = Some(v),
                         "git" => git = Some(v),
+                        "version" => version = Some(v),
                         _ => {
                             return Err(format!(
-                                "line {line_no}: unknown key '{k}' in dependency '{key}' (expected 'path' or 'git')"
+                                "line {line_no}: unknown key '{k}' in dependency '{key}' (expected 'path', 'git' or 'version')"
                             ))
                         }
                     }
@@ -164,7 +172,19 @@ pub fn parse_manifest(src: &str) -> Result<Manifest, String> {
                         ))
                     }
                 };
-                deps.push(DepSpec { name: key.to_string(), source });
+                if matches!(source, DepSource::Path(_)) && version.is_some() {
+                    return Err(format!(
+                        "line {line_no}: dependency '{key}' is a path dependency — 'version' applies to git dependencies only"
+                    ));
+                }
+                if let Some(r) = &version {
+                    if let Err(e) = crate::registry::Req::parse(r) {
+                        return Err(format!(
+                            "line {line_no}: dependency '{key}': invalid version requirement '{r}': {e}"
+                        ));
+                    }
+                }
+                deps.push(DepSpec { name: key.to_string(), source, version });
             }
             _ => {
                 return Err(format!(
@@ -290,7 +310,7 @@ fn split_top(s: &str, sep: char) -> Vec<String> {
 }
 
 /// dependency names become directory names under `.wlel/deps` — no traversal
-fn valid_dep_name(n: &str) -> bool {
+pub fn valid_dep_name(n: &str) -> bool {
     !n.is_empty()
         && n != "."
         && n != ".."
@@ -312,6 +332,8 @@ pub struct Project {
     /// true when the entry is src/main.wl (run/build need this)
     pub is_bin: bool,
     pub program: Program,
+    /// non-fatal notes from dependency resolution (e.g. offline tag fallback)
+    pub warnings: Vec<String>,
 }
 
 /// walk up from `from` until a `wlel.toml` is found
@@ -354,10 +376,11 @@ pub fn load_project(dir: &Path) -> Result<Project, String> {
     };
 
     let lock = read_lock(dir);
-    let mut resolved: Vec<(String, String)> = Vec::new();
-    let mut program = Program { uses: Vec::new(), structs: Vec::new(), enums: Vec::new(), funcs: Vec::new(), tests: Vec::new() };
+    let mut resolved: Vec<LockEntry> = Vec::new();
+    let mut program = Program { uses: Vec::new(), structs: Vec::new(), enums: Vec::new(), impls: Vec::new(), funcs: Vec::new(), tests: Vec::new() };
     let mut visited = HashSet::new();
     let mut seen: HashMap<String, String> = HashMap::new();
+    let mut warnings = Vec::new();
 
     let root_prog = load_program(&entry, &mut visited)?;
     merge_into(&mut program, root_prog);
@@ -371,19 +394,21 @@ pub fn load_project(dir: &Path) -> Result<Project, String> {
         &mut resolved,
         &mut seen,
         0,
+        &mut warnings,
     )?;
 
     if !resolved.is_empty() {
-        resolved.sort();
+        resolved.sort_by(|a, b| a.name.cmp(&b.name));
         write_lock(dir, &resolved);
     }
-    Ok(Project { dir: dir.to_path_buf(), manifest, entry, is_bin, program })
+    Ok(Project { dir: dir.to_path_buf(), manifest, entry, is_bin, program, warnings })
 }
 
 fn merge_into(program: &mut Program, sub: Program) {
     program.uses.extend(sub.uses);
     program.structs.extend(sub.structs);
     program.enums.extend(sub.enums);
+    program.impls.extend(sub.impls);
     program.funcs.extend(sub.funcs);
     program.tests.extend(sub.tests);
 }
@@ -395,10 +420,11 @@ fn resolve_deps(
     deps: &[DepSpec],
     program: &mut Program,
     visited: &mut HashSet<PathBuf>,
-    lock: &[(String, String)],
-    resolved: &mut Vec<(String, String)>,
+    lock: &[LockEntry],
+    resolved: &mut Vec<LockEntry>,
     seen: &mut HashMap<String, String>,
     depth: u32,
+    warnings: &mut Vec<String>,
 ) -> Result<(), String> {
     if depth > MAX_DEP_DEPTH {
         return Err("dependency nesting too deep (dependency cycle?)".into());
@@ -417,13 +443,14 @@ fn resolve_deps(
                 d
             }
             DepSource::Git(url) => {
-                let locked = lock
-                    .iter()
-                    .find(|(n, _)| n == &dep.name)
-                    .map(|(_, c)| c.as_str());
-                let d = workspace.join(DEPS_DIR).join(&dep.name);
-                let commit = fetch_git_dep(url, &d, locked)?;
-                resolved.push((dep.name.clone(), commit));
+                let locked = lock.iter().find(|e| e.name == dep.name);
+                let d = git_dep_cache_dir(workspace, &dep.name);
+                let gr = fetch_git_dep(url, &d, dep.version.as_deref(), locked, warnings)?;
+                resolved.push(LockEntry {
+                    name: dep.name.clone(),
+                    req: gr.req,
+                    rev: gr.rev,
+                });
                 d
             }
         };
@@ -471,7 +498,7 @@ fn resolve_deps(
         // nested dependencies first (their definitions must exist before the
         // parent's are merged — order does not matter to the checker, but a
         // failing nested manifest should be reported before anything else)
-        resolve_deps(workspace, &dep_root, &mf.deps, program, visited, lock, resolved, seen, depth + 1)?;
+        resolve_deps(workspace, &dep_root, &mf.deps, program, visited, lock, resolved, seen, depth + 1, warnings)?;
         let sub = load_program(&lib, visited)?;
         merge_into(program, sub);
     }
@@ -495,6 +522,7 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
             uses: Vec::new(),
             structs: Vec::new(),
             enums: Vec::new(),
+            impls: Vec::new(),
             funcs: Vec::new(),
             tests: Vec::new(),
         });
@@ -527,6 +555,9 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
     for e in program.enums.iter_mut() {
         e.file = file_str.clone();
     }
+    for i in program.impls.iter_mut() {
+        i.file = file_str.clone();
+    }
     for t in program.tests.iter_mut() {
         t.file = file_str.clone();
     }
@@ -541,6 +572,7 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
     let mut propagated_std_uses: Vec<UseDecl> = Vec::new();
     let mut structs = Vec::new();
     let mut enums = Vec::new();
+    let mut impls = Vec::new();
     let mut funcs = Vec::new();
     let mut tests = Vec::new();
     for u in &program.uses {
@@ -559,6 +591,7 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
         }
         structs.extend(sub.structs);
         enums.extend(sub.enums);
+        impls.extend(sub.impls);
         funcs.extend(sub.funcs);
         tests.extend(sub.tests);
     }
@@ -568,10 +601,12 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
     program.uses.extend(propagated_std_uses);
     structs.append(&mut program.structs);
     enums.append(&mut program.enums);
+    impls.append(&mut program.impls);
     funcs.append(&mut program.funcs);
     tests.append(&mut program.tests);
     program.structs = structs;
     program.enums = enums;
+    program.impls = impls;
     program.funcs = funcs;
     program.tests = tests;
     Ok(program)
@@ -581,8 +616,19 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
 // lockfile (wlel.lock)
 // ---------------------------------------------------------------------------
 
-/// `name = "revision"` lines; comments and blanks ignored
-pub fn read_lock(dir: &Path) -> Vec<(String, String)> {
+/// one resolved git dependency: the pinned revision plus the version
+/// requirement that produced it (`wlel.lock` records `"req@rev"`, or plain
+/// `"rev"` for requirement-less deps — the pre-registry format)
+#[derive(Debug, Clone)]
+pub struct LockEntry {
+    pub name: String,
+    pub req: Option<String>,
+    pub rev: String,
+}
+
+/// `name = "revision"` (or `name = "req@revision"`) lines; comments and
+/// blanks ignored
+pub fn read_lock(dir: &Path) -> Vec<LockEntry> {
     let mut out = Vec::new();
     let Ok(src) = fs::read_to_string(dir.join(LOCK_FILE)) else {
         return out;
@@ -595,19 +641,30 @@ pub fn read_lock(dir: &Path) -> Vec<(String, String)> {
         if let Some((k, v)) = l.split_once('=') {
             let k = k.trim();
             let v = v.trim().trim_matches('"');
-            if !k.is_empty() && !v.is_empty() {
-                out.push((k.to_string(), v.to_string()));
+            if k.is_empty() || v.is_empty() {
+                continue;
             }
+            let (req, rev) = match v.split_once('@') {
+                Some((r, rev)) if !r.is_empty() && !rev.is_empty() => {
+                    (Some(r.to_string()), rev.to_string())
+                }
+                _ => (None, v.to_string()),
+            };
+            out.push(LockEntry { name: k.to_string(), req, rev });
         }
     }
     out
 }
 
-pub fn write_lock(dir: &Path, entries: &[(String, String)]) {
+pub fn write_lock(dir: &Path, entries: &[LockEntry]) {
     let mut body =
         String::from("# wlel.lock - resolved git dependency revisions (managed by wlel; commit this file)\n");
-    for (k, v) in entries {
-        body.push_str(&format!("{k} = \"{v}\"\n"));
+    for e in entries {
+        let val = match &e.req {
+            Some(r) => format!("{r}@{}", e.rev),
+            None => e.rev.clone(),
+        };
+        body.push_str(&format!("{} = \"{val}\"\n", e.name));
     }
     let _ = fs::write(dir.join(LOCK_FILE), body);
 }
@@ -638,36 +695,130 @@ fn git_head(dir: &Path) -> Result<String, String> {
     )
 }
 
-/// clone `url` into `dir` (or reuse/repair an existing clone) and return the
-/// resolved HEAD revision. A pinned `locked` revision is checked out when the
-/// clone's HEAD does not match it — that is what makes builds reproducible.
-fn fetch_git_dep(url: &str, dir: &Path, locked: Option<&str>) -> Result<String, String> {
-    let checkout_locked = |dir: &Path, lc: &str| -> Result<(), String> {
-        run_git(
-            {
-                let mut c = Command::new("git");
-                c.arg("-C").arg(dir).arg("fetch").arg("--all");
-                c
-            },
-            "fetch",
-        )?;
-        run_git(
-            {
-                let mut c = Command::new("git");
-                c.arg("-C").arg(dir).arg("checkout").arg("--detach").arg(lc);
-                c
-            },
-            &format!("checkout {lc}"),
-        )?;
-        Ok(())
-    };
-    if dir.join(".git").exists() {
-        if let Some(lc) = locked {
-            if git_head(dir)? != lc {
-                checkout_locked(dir, lc)?;
+/// the dependency cache clone for `name` under the root project
+pub fn git_dep_cache_dir(root: &Path, name: &str) -> PathBuf {
+    root.join(DEPS_DIR).join(name)
+}
+
+/// the version the dependency declares in its own `wlel.toml` (at whatever
+/// revision is currently checked out)
+fn dep_manifest_version(dir: &Path) -> Result<crate::registry::Version, String> {
+    let p = dir.join(MANIFEST_FILE);
+    let src =
+        fs::read_to_string(&p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
+    let mf = parse_manifest(&src).map_err(|e| format!("{}: {e}", p.display()))?;
+    crate::registry::Version::parse(&mf.version)
+        .map_err(|e| format!("{}: {e}", p.display()))
+}
+
+/// best git tag satisfying `req`, highest version wins (`v`-prefixed and
+/// bare tags both count); the error lists what the repo actually has
+fn best_tag(dir: &Path, req: &crate::registry::Req) -> Result<(String, crate::registry::Version), String> {
+    let out = run_git(
+        {
+            let mut c = Command::new("git");
+            c.arg("-C").arg(dir).arg("tag").arg("-l");
+            c
+        },
+        "tag -l",
+    )?;
+    let mut best: Option<(String, crate::registry::Version)> = None;
+    let mut all: Vec<&str> = Vec::new();
+    for t in out.lines() {
+        let t = t.trim();
+        if t.is_empty() {
+            continue;
+        }
+        all.push(t);
+        if let Ok(v) = crate::registry::Version::parse(t) {
+            if req.matches(&v) && best.as_ref().is_none_or(|(_, bv)| v > *bv) {
+                best = Some((t.to_string(), v));
             }
         }
-    } else {
+    }
+    best.ok_or_else(|| {
+        format!(
+            "no git tag satisfies requirement '{req}' (tags found: {})",
+            if all.is_empty() { "none".to_string() } else { all.join(", ") }
+        )
+    })
+}
+
+/// best-effort tag refresh: fails softly (recorded as a warning) so a warm
+/// clone keeps working offline
+fn refresh_tags(url: &str, dir: &Path, warnings: &mut Vec<String>) {
+    let r = run_git(
+        {
+            let mut c = Command::new("git");
+            c.arg("-C").arg(dir).arg("fetch").arg("--all");
+            c
+        },
+        "fetch",
+    );
+    if let Err(e) = r {
+        warnings.push(format!(
+            "git fetch for '{url}' failed (offline?); resolving from the already-fetched tags ({e})"
+        ));
+    }
+}
+
+pub struct GitResolve {
+    pub rev: String,
+    /// tag name when the revision came from a version requirement
+    pub tag: Option<String>,
+    /// the requirement the lock file should record (None = pin HEAD)
+    pub req: Option<String>,
+}
+
+/// clone `url` into `dir` (or reuse/repair an existing clone) and return the
+/// resolved revision.
+///
+/// With a version requirement the revision is the highest tag satisfying it
+/// (caret semantics), verified against the dependency's own `wlel.toml` —
+/// the tag and the declared version must agree. Without one the clone's
+/// HEAD is pinned, exactly like the pre-registry behavior.
+///
+/// A matching `locked` entry short-circuits: the pinned revision is checked
+/// out locally (no network) and only re-resolved when its version no longer
+/// satisfies the requirement or the recorded requirement drifted — that is
+/// what makes builds reproducible and offline-friendly.
+pub fn fetch_git_dep(
+    url: &str,
+    dir: &Path,
+    req: Option<&str>,
+    locked: Option<&LockEntry>,
+    warnings: &mut Vec<String>,
+) -> Result<GitResolve, String> {
+    let checkout = |dir: &Path, rev: &str| -> Result<(), String> {
+        run_git(
+            {
+                let mut c = Command::new("git");
+                c.arg("-C").arg(dir).arg("checkout").arg("--detach").arg(rev);
+                c
+            },
+            &format!("checkout {rev}"),
+        )
+        .map(|_| ())
+    };
+    let mut have_clone = dir.join(".git").exists();
+    if have_clone {
+        // a clone from a different URL must not satisfy this dep (the name
+        // was re-pointed, or an earlier `wlel add` cached another remote) —
+        // wipe and re-clone
+        let origin = run_git(
+            {
+                let mut c = Command::new("git");
+                c.arg("-C").arg(dir).arg("remote").arg("get-url").arg("origin");
+                c
+            },
+            "remote get-url origin",
+        );
+        if matches!(origin, Ok(o) if o != url) {
+            let _ = fs::remove_dir_all(dir);
+            have_clone = false;
+        }
+    }
+    if !have_clone {
         if let Some(parent) = dir.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
@@ -680,13 +831,63 @@ fn fetch_git_dep(url: &str, dir: &Path, locked: Option<&str>) -> Result<String, 
             },
             &format!("clone {url}"),
         )?;
-        if let Some(lc) = locked {
-            if git_head(dir)? != lc {
-                checkout_locked(dir, lc)?;
+    }
+
+    // 1) reuse the pin when the requirement did not drift and the pinned
+    //    revision still satisfies it
+    if let Some(l) = locked {
+        let pin_matches = match (req, &l.req) {
+            (None, _) => true,
+            (Some(r), Some(lr)) => lr == r,
+            (Some(_), None) => false,
+        };
+        if pin_matches {
+            if git_head(dir)? != l.rev {
+                refresh_tags(url, dir, warnings);
+                checkout(dir, &l.rev)?;
             }
+            let ok = match req {
+                None => true,
+                Some(r) => match crate::registry::Req::parse(r) {
+                    Ok(rq) => match dep_manifest_version(dir) {
+                        Ok(v) => rq.matches(&v),
+                        Err(_) => false,
+                    },
+                    Err(_) => false,
+                },
+            };
+            if ok {
+                return Ok(GitResolve { rev: l.rev.clone(), tag: None, req: l.req.clone() });
+            }
+            // otherwise: fall through and re-resolve
         }
     }
-    git_head(dir)
+
+    // 2) fresh resolution
+    let mut tag = None;
+    if let Some(r) = req {
+        let rq = crate::registry::Req::parse(r)
+            .map_err(|e| format!("invalid version requirement '{r}': {e}"))?;
+        if have_clone {
+            refresh_tags(url, dir, warnings);
+        }
+        let (t, _) = best_tag(dir, &rq)?;
+        checkout(dir, &t)?;
+        tag = Some(t);
+    }
+    let rev = git_head(dir)?;
+    if let Some(r) = req {
+        let rq = crate::registry::Req::parse(r)
+            .map_err(|e| format!("invalid version requirement '{r}': {e}"))?;
+        let v = dep_manifest_version(dir)?;
+        if !rq.matches(&v) {
+            return Err(format!(
+                "dependency declares version {} which does not satisfy requirement '{r}'",
+                v
+            ));
+        }
+    }
+    Ok(GitResolve { rev, tag, req: req.map(|s| s.to_string()) })
 }
 
 // ---------------------------------------------------------------------------
@@ -721,7 +922,7 @@ pub fn scaffold(dir: &Path) -> Result<PathBuf, String> {
          # Dependencies:\n\
          # [deps]\n\
          # mylib  = {{ path = \"../mylib\" }}\n\
-         # json   = {{ git = \"https://github.com/user/wlel-json\" }}\n"
+         # json   = {{ git = \"https://github.com/user/wlel-json\", version = \"1.0\" }}\n"
     );
     let main_wl = "use std;\n\
                    \n\

@@ -261,6 +261,7 @@ impl Lexer {
                     Ok(Token::Amp)
                 }
             }
+            b'?' => Ok(Token::Question),
             other => self.err(format!("unexpected character '{}'", other as char)),
         }
     }
@@ -433,6 +434,7 @@ impl Lexer {
             "extern" => Token::Extern,
             "struct" => Token::Struct,
             "enum" => Token::Enum,
+            "impl" => Token::Impl,
             "match" => Token::Match,
             "use" => Token::Use,
             "test" => Token::Test,

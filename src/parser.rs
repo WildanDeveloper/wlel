@@ -98,6 +98,7 @@ impl<'a> Parser<'a> {
     pub fn program(mut self) -> (Program, Vec<ParseError>) {
         let mut structs = Vec::new();
         let mut enums = Vec::new();
+        let mut impls = Vec::new();
         let mut funcs = Vec::new();
         let mut uses = Vec::new();
         let mut tests = Vec::new();
@@ -109,6 +110,9 @@ impl<'a> Parser<'a> {
                 }),
                 Token::Enum => self.enum_def().map(|e| {
                     enums.push(e);
+                }),
+                Token::Impl => self.impl_def().map(|i| {
+                    impls.push(i);
                 }),
                 Token::Use => self.use_decl().map(|u| {
                     uses.push(u);
@@ -137,6 +141,7 @@ impl<'a> Parser<'a> {
                 uses,
                 structs,
                 enums,
+                impls,
                 funcs,
                 tests,
             },
@@ -148,7 +153,7 @@ impl<'a> Parser<'a> {
     fn sync_top(&mut self) {
         while !matches!(
             self.peek(),
-            Token::Eof | Token::Fn | Token::Extern | Token::Struct | Token::Enum | Token::Use | Token::Test
+            Token::Eof | Token::Fn | Token::Extern | Token::Struct | Token::Enum | Token::Impl | Token::Use | Token::Test
         ) {
             self.advance();
         }
@@ -262,6 +267,40 @@ impl<'a> Parser<'a> {
             name,
             variants,
             type_params,
+            span: self.span_from(start),
+            file: String::new(),
+        })
+    }
+
+    /// impl Name { fn method(self, ...) ... }   |   impl Vec[T] { ... }
+    fn impl_def(&mut self) -> PResult<ImplDef> {
+        let start = self.peek_span();
+        self.expect(&Token::Impl)?;
+        let type_name = self.ident()?;
+        let type_params = self.type_params()?;
+        self.expect(&Token::LBrace)?;
+        let mut methods = Vec::new();
+        while *self.peek() != Token::RBrace && *self.peek() != Token::Eof {
+            let before = self.pos;
+            match self.func_def() {
+                Ok(m) => methods.push(m),
+                Err(e) => {
+                    self.errors.push(e);
+                    // skip to the next method, the closing brace or EOF
+                    while !matches!(self.peek(), Token::Fn | Token::RBrace | Token::Eof) {
+                        self.advance();
+                    }
+                    if self.pos == before && *self.peek() != Token::Fn {
+                        self.advance();
+                    }
+                }
+            }
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(ImplDef {
+            type_name,
+            type_params,
+            methods,
             span: self.span_from(start),
             file: String::new(),
         })
@@ -879,7 +918,8 @@ impl<'a> Parser<'a> {
         self.postfix(p)
     }
 
-    /// postfix: field access chains (a.b.c) after calls/literals
+    /// postfix: field access chains (a.b.c), method calls (a.b(x)),
+    /// indexing (a[i]) and the try operator (expr?) after calls/literals
     fn postfix(&mut self, e: Expr) -> PResult<Expr> {
         let mut cur = e;
         loop {
@@ -889,6 +929,22 @@ impl<'a> Parser<'a> {
                     Err(_) => break,
                 };
                 let start = cur.span;
+                // `recv.name(` is a method call; anything else is a field
+                // access (the checker resolves the receiver's type)
+                if self.eat(&Token::LParen) {
+                    let mut args = Vec::new();
+                    if *self.peek() != Token::RParen {
+                        loop {
+                            args.push(self.expr(0)?);
+                            if !self.eat(&Token::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(&Token::RParen)?;
+                    cur = self.node(start, ExprKind::MethodCall(Box::new(cur), f, args));
+                    continue;
+                }
                 cur = self.node(start, ExprKind::Field(Box::new(cur), f));
                 continue;
             }
@@ -897,6 +953,22 @@ impl<'a> Parser<'a> {
                 self.expect(&Token::RBracket)?;
                 let start = cur.span;
                 cur = self.node(start, ExprKind::Index(Box::new(cur), Box::new(idx)));
+                continue;
+            }
+            if self.eat(&Token::Question) {
+                let start = cur.span;
+                cur = self.node(
+                    start,
+                    ExprKind::Try(TryExpr {
+                        inner: Box::new(cur),
+                        // checker-filled from the two enum instances involved
+                        ret_name: String::new(),
+                        err_tag: 0,
+                        err_variant: String::new(),
+                        err_arity: 0,
+                        ok_variant: String::new(),
+                    }),
+                );
                 continue;
             }
             break;
