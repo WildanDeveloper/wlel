@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790018765887,
+  "lastUpdate": 1790078412192,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -155,6 +155,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 62,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "1f6a56420f65358544a645ec72cf87f4d997ea66",
+          "message": "result/option try operator, impl methods, concurrency v1, lsp v1, wlel doc, package registry, qbe backend, spec v1: postfix expr? in statement positions (let/assign/return/exprstmt) with defer-aware error propagation and checker-enforced std Result/Option + exact error variant, builtin panic(msg) terminating, result_*/option_* combinators, fs::open/read_all/write_all/read/write full Result with strerror payloads; impl blocks desugar to plain functions Name__method resolved via the method table, adaptive receivers (auto-borrow lvalue / auto-deref), generic impls monomorphize per receiver, method layer over std Vec/HashMap/Result/Option dogfooded in examples; sys::thread/join/mutex_*/chan_* with worker-by-name + boxed args, TLS per-thread root arenas, unbounded FIFO channels (send false after close, recv blocking with false = closed+drained), pthread/Win32 runtime spliced only when touched; wlel lsp — LSP 3.17 over stdio hand-rolled zero-dep: diagnostics, hover, go-to-def, completion, UTF-16 positions; wlel doc — markdown per module from /// comments, index.md + std.md rendered from the embedded std; wlel add — git-tag registry with caret semver, resolve-then-edit with rollback, lock req@rev, offline re-resolve fallback, cache origin verification; wlel build --backend qbe — direct QBE IL emission (2k-fn cold build 78ms vs 5.9s C = 75x, fib(35) 3x slower — gcc rewrites recursion; C stays primary, non-subset refused with file:line); docs/spec.md — normative language spec v1 draft for public review (evaluation order, overflow, aliasing, arena lifetime, grammar, open questions) (473 tests green)",
+          "timestamp": "2026-09-22T18:59:23+07:00",
+          "tree_id": "b851d2f452df61ec777a559a89ea6b7de11179ce",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/1f6a56420f65358544a645ec72cf87f4d997ea66"
+        },
+        "date": 1790078411700,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.9,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 80,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 72.9,
             "unit": "ms"
           }
         ]
