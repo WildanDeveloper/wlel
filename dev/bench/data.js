@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790079467752,
+  "lastUpdate": 1790133001428,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -233,6 +233,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 52.5,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "fd93cbdd08540a6385b2db13b7e1cbd90ed37f43",
+          "message": "README: project logo — assets/logo.jpg rendered centered above the title; the repo landing page now shows the arena-first identity",
+          "timestamp": "2026-09-23T10:09:17+07:00",
+          "tree_id": "cde737f8a2c14584906c9d9d73fa319405745f38",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/fd93cbdd08540a6385b2db13b7e1cbd90ed37f43"
+        },
+        "date": 1790132999921,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 18.3,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 95,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 66.2,
             "unit": "ms"
           }
         ]
