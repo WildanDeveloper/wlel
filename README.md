@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/logo.jpg" alt="Wlel — The Arena-First Systems Programming Language" width="200">
+</div>
+
 # Wlel
 
 [![CI](https://github.com/WildanDeveloper/wlel/actions/workflows/ci.yml/badge.svg)](https://github.com/WildanDeveloper/wlel/actions/workflows/ci.yml)
