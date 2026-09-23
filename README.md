@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.jpg" alt="Wlel — The Arena-First Systems Programming Language" width="200">
+  <img src="assets/logo.png" alt="Wlel — The Arena-First Systems Programming Language" width="200">
 </div>
 
 # Wlel
