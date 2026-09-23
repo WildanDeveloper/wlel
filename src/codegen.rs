@@ -351,12 +351,18 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
     // arbitrary length would otherwise leave struct buffers misaligned
     cg.out.push_str("    a->used = (a->used + 7ULL) & ~7ULL;\n");
     cg.out.push_str("    if (a->used + n <= a->cap) { void* p = a->buf + a->used; a->used += n; a->total += n; if (a->total > a->peak) a->peak = a->total; return p; }\n");
-    cg.out.push_str("    WArena* chunk = (WArena*)malloc(sizeof(WArena));\n");
-    cg.out.push_str("    unsigned long long cap = n > a->cap ? n : a->cap;\n");
-    cg.out.push_str("    chunk->buf = (unsigned char*)malloc(cap); chunk->cap = cap; chunk->used = n; chunk->total = n; chunk->peak = n; chunk->next = a->next;\n");
+    // overflow: retire the full head buffer into the chain and keep bumping
+    // in a fresh one sized max(n, cap). Retiring (instead of minting a new
+    // retired chunk per allocation) is what keeps long-running arenas sane:
+    // the old code left the head full forever, so EVERY post-full allocation
+    // minted its own max(n, cap) chunk — a 30k-record parse minted 300k+
+    // mmap'd cap-sized buffers and died on page-table memory alone.
+    cg.out.push_str("    WArena* retired = (WArena*)malloc(sizeof(WArena));\n");
+    cg.out.push_str("    retired->buf = a->buf; retired->cap = a->cap; retired->used = a->used; retired->total = a->total; retired->peak = a->peak; retired->next = a->next;\n");
+    cg.out.push_str("    unsigned long long ncap = n > a->cap ? n : a->cap;\n");
+    cg.out.push_str("    a->buf = (unsigned char*)malloc(ncap); a->cap = ncap; a->used = n; a->next = retired;\n");
     cg.out.push_str("    a->total += n; if (a->total > a->peak) a->peak = a->total;\n");
-    cg.out.push_str("    a->next = chunk;\n");
-    cg.out.push_str("    return chunk->buf;\n");
+    cg.out.push_str("    return a->buf;\n");
     cg.out.push_str("}\n");
     cg.out.push_str("static void wlel_arena_free(WArena* a) {\n");
     if cg.safe {
@@ -668,6 +674,13 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
             ));
         }
         cg.out.insert_str(cg.conc_early_at, &early);
+        // the early runtime lands before the fs-helper mark: every later
+        // insert offset captured beyond this point shifts by its length
+        // (a program using threads + std::fs together used to splice the
+        // fs helpers mid-line and fail cc with "invalid initializer")
+        if cg.conc_early_at <= cg.fs_helpers_at {
+            cg.fs_helpers_at += early.len();
+        }
     }
 
     // splice in only the fs Result helpers the generated code calls (each
@@ -1114,7 +1127,9 @@ fn indent(out: &mut String, level: usize) {
 fn emit_struct(cg: &mut Cg, st: &StructDef) {
     cg.out.push_str(&format!("struct {} {{\n", st.name));
     for (fname, fty) in &st.fields {
-        cg.out.push_str(&format!("    {} {};\n", c_type(fty), fname));
+        // c_decl, not c_type: array fields need the `[N]` on the member
+        // name (`uint8_t zero[8];`), which c_type cannot express
+        cg.out.push_str(&format!("    {};\n", c_decl(fty, fname)));
     }
     cg.out.push_str("};\n\n");
 }
@@ -1132,7 +1147,7 @@ fn emit_enum(cg: &mut Cg, e: &EnumDef) {
         for v in &payloadful {
             cg.out.push_str("        struct {\n");
             for (k, pty) in v.payloads.iter().enumerate() {
-                cg.out.push_str(&format!("            {} f{};\n", c_type(pty), k));
+                cg.out.push_str(&format!("            {};\n", c_decl(pty, &format!("f{k}"))));
             }
             cg.out.push_str(&format!("        }} {};\n", v.name));
         }
@@ -1154,56 +1169,69 @@ fn ty_embeds(ty: &str, name: &str) -> bool {
 /// embeds by value. True cycles (a layout that cannot exist in C) fall
 /// back to source order and are reported by cc.
 fn emit_types(cg: &mut Cg, p: &Program) {
-    let mut sdone = vec![false; p.structs.len()];
-    let mut edone = vec![false; p.enums.len()];
-    let s_needs_e = |si: usize, ei: usize| -> bool {
-        let e = &p.enums[ei];
-        p.structs[si]
-            .fields
-            .iter()
-            .any(|(_, t)| ty_embeds(t, &e.name))
-    };
-    let e_needs_s = |ei: usize, si: usize| -> bool {
-        let s = &p.structs[si];
-        p.enums[ei]
-            .variants
-            .iter()
-            .any(|v| v.payloads.iter().any(|t| ty_embeds(t, &s.name)))
-    };
-    let all = |v: &[bool]| v.iter().all(|d| *d);
-    while !all(&sdone) || !all(&edone) {
-        let mut progress = false;
-        for (i, done) in sdone.iter_mut().enumerate() {
-            if *done {
-                continue;
-            }
-            if (0..p.enums.len()).all(|j| edone[j] || !s_needs_e(i, j)) {
-                emit_struct(cg, &p.structs[i]);
-                *done = true;
-                progress = true;
-            }
+    // one dependency graph over structs + enums in source order: X needs Y
+    // when X embeds Y by value (struct field or enum payload), so Y must be
+    // complete at X's point of definition. Pointer members need nothing (the
+    // forward typedefs cover them). True cycles (a layout that cannot exist
+    // in C) fall back to source order and are reported by cc.
+    enum Kind {
+        S(usize),
+        E(usize),
+    }
+    let n = p.structs.len() + p.enums.len();
+    let mut items: Vec<Kind> = Vec::with_capacity(n);
+    for i in 0..p.structs.len() {
+        items.push(Kind::S(i));
+    }
+    for i in 0..p.enums.len() {
+        items.push(Kind::E(i));
+    }
+    let embeds = |ty: &str, name: &str| ty_embeds(ty, name);
+    let needs = |a: &Kind, b: &Kind| -> bool {
+        match (a, b) {
+            (Kind::S(i), Kind::S(j)) => p.structs[*i]
+                .fields
+                .iter()
+                .any(|(_, t)| embeds(t, &p.structs[*j].name)),
+            (Kind::S(i), Kind::E(j)) => p.structs[*i]
+                .fields
+                .iter()
+                .any(|(_, t)| embeds(t, &p.enums[*j].name)),
+            (Kind::E(i), Kind::S(j)) => p.enums[*i]
+                .variants
+                .iter()
+                .any(|v| v.payloads.iter().any(|t| embeds(t, &p.structs[*j].name))),
+            (Kind::E(i), Kind::E(j)) => p.enums[*i]
+                .variants
+                .iter()
+                .any(|v| v.payloads.iter().any(|t| embeds(t, &p.enums[*j].name))),
         }
-        for (i, done) in edone.iter_mut().enumerate() {
-            if *done {
+    };
+    let mut done = vec![false; n];
+    let all = |v: &[bool]| v.iter().all(|d| *d);
+    while !all(&done) {
+        let mut progress = false;
+        for i in 0..n {
+            if done[i] {
                 continue;
             }
-            if (0..p.structs.len()).all(|j| sdone[j] || !e_needs_s(i, j)) {
-                emit_enum(cg, &p.enums[i]);
-                *done = true;
+            if (0..n).all(|j| j == i || done[j] || !needs(&items[i], &items[j])) {
+                match &items[i] {
+                    Kind::S(s) => emit_struct(cg, &p.structs[*s]),
+                    Kind::E(e) => emit_enum(cg, &p.enums[*e]),
+                }
+                done[i] = true;
                 progress = true;
             }
         }
         if !progress {
-            for (i, done) in sdone.iter_mut().enumerate() {
-                if !*done {
-                    emit_struct(cg, &p.structs[i]);
-                    *done = true;
-                }
-            }
-            for (i, done) in edone.iter_mut().enumerate() {
-                if !*done {
-                    emit_enum(cg, &p.enums[i]);
-                    *done = true;
+            for i in 0..n {
+                if !done[i] {
+                    match &items[i] {
+                        Kind::S(s) => emit_struct(cg, &p.structs[*s]),
+                        Kind::E(e) => emit_enum(cg, &p.enums[*e]),
+                    }
+                    done[i] = true;
                 }
             }
         }
@@ -1498,7 +1526,20 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
         StmtKind::ForIn(f) => {
             let elem_wl = f.elem.as_deref().unwrap_or("int");
             let elem_c = c_type(elem_wl);
-            let iter_c = gen_expr(cg, &f.iter);
+            // a brace-initializer literal is only legal C in an initializer
+            // position — hoist `for x in [1, 2, 3]` into a named temp array
+            // first so the loop iterates over a real object
+            let hoisted = match (&f.iter.node, array_ty_info(&f.iter.ty)) {
+                (ExprKind::ArrayLit(_), Some((_, n))) => {
+                    let arr = format!("_wlel_ia{}", cg.tmp_id);
+                    cg.tmp_id += 1;
+                    let lit = gen_expr(cg, &f.iter);
+                    indent(&mut cg.out, level);
+                    cg.out.push_str(&format!("{} {}[{}] = {};\n", elem_c, arr, n, lit));
+                    Some((arr, n.to_string()))
+                }
+                _ => None,
+            };
             let it = format!("_wlel_it{}", cg.tmp_id);
             let iv = format!("{}_i", it);
             cg.tmp_id += 1;
@@ -1507,11 +1548,16 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
             // (static length), Vec headers are copied (snapshot iteration —
             // pushes during the loop do not extend it; the old buffer stays
             // alive in the arena so reads remain valid)
-            let (data_expr, len_expr) = if let Some((_, n)) = array_ty_info(&f.iter.ty) {
+            let (data_expr, len_expr) = if let Some((arr, n)) = &hoisted {
+                cg.out.push_str(&format!("{}* {} = &{}[0];\n", elem_c, it, arr));
+                (it.clone(), n.clone())
+            } else if let Some((_, n)) = array_ty_info(&f.iter.ty) {
+                let iter_c = gen_expr(cg, &f.iter);
                 cg.out.push_str(&format!("{}* {} = {};\n", elem_c, it, iter_c));
                 (it.clone(), n.to_string())
             } else {
                 let vec_ty = f.iter.ty.clone().unwrap_or_else(|| "void".into());
+                let iter_c = gen_expr(cg, &f.iter);
                 cg.out.push_str(&format!("{} {} = {};\n", vec_ty, it, iter_c));
                 (format!("{}.data", it), format!("{}.len", it))
             };
@@ -2060,6 +2106,11 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
                         e.span.start.line
                     );
                 }
+            }
+            // string indexing yields u8 per the spec — plain `char` on the
+            // C side is signed on x86, so bytes >= 0x80 must be masked
+            if b.ty.as_deref() == Some("string") {
+                return format!("((uint8_t){}[{}])", base_c, idx_c);
             }
             format!("{}[{}]", base_c, idx_c)
         }

@@ -181,8 +181,9 @@ fn string_indexing_types_as_u8() {
          }",
     )
     .expect("typecheck");
-    // the checker annotates u8, codegen emits a plain C index
-    assert!(c.contains("uint8_t b = s[1];"), "{c}");
+    // the checker annotates u8, codegen emits a C index masked to u8
+    // (plain `char` is signed on x86 — bytes >= 0x80 must not sign-extend)
+    assert!(c.contains("uint8_t b = ((uint8_t)s[1]);"), "{c}");
 }
 
 #[test]

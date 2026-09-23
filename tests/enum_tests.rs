@@ -586,3 +586,57 @@ fn cli_test_failing_wildcard_assert_reports_file_line() {
     assert_eq!(code, Some(1), "stdout: {out}");
     assert!(out.contains("FAIL: fails in wildcard"), "{out}");
 }
+
+#[test]
+fn cli_run_enum_with_generic_struct_payloads() {
+    // regression e2e: enum payloads of generic struct types (Vec[Jval],
+    // HashMap[string, Jval]) used to reach codegen as raw "Vec[Jval]" and
+    // fail cc; pass 4 canonicalizes payloads and the emitter now orders the
+    // instance definitions ahead of the enum that embeds them by value
+    let t = TempWl::new(
+        "enum_generic_payload",
+        r#"use std;
+           enum Jval {
+               JNum(f64),
+               JStr(string),
+               JArr(Vec[Jval]),
+               JObj(HashMap[string, Jval])
+           }
+           fn count(v: Jval) -> int {
+               return match v {
+                   JNum(_) => 1,
+                   JStr(_) => 1,
+                   JArr(items) => count_arr(items),
+                   JObj(m) => count_obj(m),
+               };
+           }
+           fn count_arr(items: Vec[Jval]) -> int {
+               n := 1;
+               for x in items {
+                   n += count(x);
+               }
+               return n;
+           }
+           fn count_obj(m: HashMap[string, Jval]) -> int {
+               n := 1;
+               for k in m.keys() {
+                   n += count(m.get(k));
+               }
+               return n;
+           }
+           fn main() -> int {
+               v := vec_new[Jval]();
+               v.push(JNum(1.0));
+               v.push(JStr("hi"));
+               root := JArr(v);
+               std::println_int(count(root));
+               m := map_new[string, Jval]();
+               m.set("a", JNum(2.0));
+               std::println_int(count(JObj(m)));
+               return 0;
+           }"#,
+    );
+    let (out, err, code) = t.run("run");
+    assert_eq!(code, Some(0), "stdout: {out}\nstderr: {err}");
+    assert_eq!(out.trim(), "3\n2"); // JArr+2 nodes; JObj+1 node
+}

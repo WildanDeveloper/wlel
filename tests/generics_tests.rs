@@ -309,3 +309,44 @@ fn generic_fns_compose_with_safe_mode_and_arena() {
     assert!(out.contains("satu"), "{out}");
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn struct_embeds_generic_instance_by_value_emits_in_order() {
+    // regression: a struct embedding a generic instance by value used to be
+    // emitted before the instance's definition (pending instances append
+    // after user structs) — cc failed with "field 'v' has incomplete type".
+    // The emitter now topologically orders structs AND enums by by-value
+    // embeds, so reversed source order still emits Inner__int first.
+    let src = "struct Holder { i: Inner[int] }\n\
+               struct Inner[T] { v: T }\n\
+               fn main() -> int {\n\
+                   h := Holder { i: Inner { v: 7 } };\n\
+                   return h.i.v;\n\
+               }";
+    let c = front(src).unwrap();
+    let inner = c.find("struct Inner__int {").expect("instance emitted");
+    let holder = c.find("struct Holder {").expect("holder emitted");
+    assert!(
+        inner < holder,
+        "generic instance must precede the struct embedding it by value\n{c}"
+    );
+}
+
+#[test]
+fn enum_payloads_of_generic_structs_are_canonical() {
+    // regression: plain-enum payload type strings reached codegen raw
+    // ("Vec[Jval]" instead of the mangled "Vec__Jval") — invalid C. Pass 4
+    // now canonicalizes enum payloads like struct fields and fn signatures.
+    let src = "enum Box2 { One(Box[int]), Many(Vec2[Box[int]]) }\n\
+               struct Box[T] { v: T }\n\
+               struct Vec2[T] { d: *T, n: int }\n\
+               fn main() -> int { return 0; }";
+    let c = front(src).unwrap();
+    assert!(!c.contains("Box2 ["), "raw generic syntax leaked: {c}");
+    assert!(c.contains("Box__int f0;"), "mangled payload expected:\n{c}");
+    // emission order: the instances the payloads embed by value come first
+    let vec_pos = c.find("struct Vec2__Box__int {").expect("vec instance");
+    let box_pos = c.find("struct Box__int {").expect("box instance");
+    let enum_pos = c.find("struct Box2 {").expect("enum emitted");
+    assert!(box_pos < enum_pos && vec_pos < enum_pos, "{c}");
+}

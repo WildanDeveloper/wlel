@@ -42,6 +42,22 @@ impl IntW {
         }
     }
 
+    /// width from its canonical name (the `.ty` annotation format)
+    fn from_name(s: &str) -> Option<IntW> {
+        Some(match s {
+            "i8" => IntW::I8,
+            "i16" => IntW::I16,
+            "i32" => IntW::I32,
+            "int" | "i64" => IntW::I64,
+            "u8" | "byte" | "char" => IntW::U8,
+            "u16" => IntW::U16,
+            "u32" => IntW::U32,
+            "u64" => IntW::U64,
+            "usize" => IntW::Usize,
+            _ => return None,
+        })
+    }
+
     fn signed(self) -> bool {
         matches!(self, IntW::I8 | IntW::I16 | IntW::I32 | IntW::I64)
     }
@@ -93,6 +109,15 @@ impl FloatW {
             FloatW::F32 => "f32",
             FloatW::F64 => "float",
         }
+    }
+
+    /// width from its canonical name (the `.ty` annotation format)
+    fn from_name(s: &str) -> Option<FloatW> {
+        Some(match s {
+            "f32" => FloatW::F32,
+            "float" | "f64" => FloatW::F64,
+            _ => return None,
+        })
     }
 }
 
@@ -770,6 +795,13 @@ impl Checker {
         for s in program.structs.iter_mut() {
             for (_, fty) in s.fields.iter_mut() {
                 *fty = cx.canon_type(fty, &empty_map, s.span)?;
+            }
+        }
+        for e in program.enums.iter_mut() {
+            for v in e.variants.iter_mut() {
+                for p in v.payloads.iter_mut() {
+                    *p = cx.canon_type(p, &empty_map, e.span)?;
+                }
             }
         }
         program.structs.append(&mut cx.pending_structs);
@@ -1746,6 +1778,40 @@ impl Checker {
     /// origin type name + concrete type arguments of a (possibly mangled
     /// generic instance) struct/enum type: "Vec__int" -> ("Vec", [int]),
     /// a plain "Pt" -> ("Pt", [])
+    /// rebuild a Type from a canonical type name (the `.ty` annotation
+    /// format): primitives, pointers, arrays, and registered struct/enum
+    /// names. Returns None for anything else — callers fall through.
+    fn type_from_cached(&self, s: &str) -> Option<Type> {
+        let stars = s.chars().take_while(|c| *c == '*').count();
+        let base = &s[stars..];
+        let t = if let Some(rest) = base.strip_prefix('[') {
+            let close = rest.rfind(']')?;
+            let (inner, n) = rest[..close].rsplit_once(';')?;
+            Type::Array(Box::new(self.type_from_cached(inner.trim())?), n.parse().ok()?)
+        } else if base == "string" {
+            Type::Str
+        } else if base == "bool" {
+            Type::Bool
+        } else if base == "void" {
+            Type::Void
+        } else if let Some(w) = IntW::from_name(base) {
+            Type::Int(w)
+        } else if let Some(w) = FloatW::from_name(base) {
+            Type::Float(w)
+        } else if self.enums.contains_key(base) {
+            Type::Enum(base.to_string())
+        } else if self.structs.contains_key(base) {
+            Type::Struct(base.to_string())
+        } else {
+            return None;
+        };
+        let mut out = t;
+        for _ in 0..stars {
+            out = Type::Ptr(Box::new(out));
+        }
+        Some(out)
+    }
+
     fn type_instance(&self, mangled: &str, is_struct: bool) -> (String, Vec<Type>) {
         if is_struct {
             match self.struct_origin.get(mangled) {
@@ -2088,10 +2154,14 @@ impl Checker {
                             let r_span = r.span;
                             let left = std::mem::replace(&mut **l, dummy_expr(l_span));
                             let right = std::mem::replace(&mut **r, dummy_expr(r_span));
-                            *e = Spanned::new(
+                            let mut call = Spanned::new(
                                 ExprKind::Call("_wlel_strcat".into(), vec![], vec![left, right]),
                                 sp,
                             );
+                            // cache the result type: internal helper calls
+                            // are resolved through it when re-walked
+                            call.ty = Some(Type::Str.name());
+                            *e = call;
                             return Ok(Type::Str);
                         }
                         if is_int(&lt) && is_int(&rt) {
@@ -2173,6 +2243,7 @@ impl Checker {
                                     ),
                                     sp,
                                 );
+                                call.ty = Some(Type::Bool.name());
                                 if is_ne {
                                     let inner = call.clone();
                                     call = Spanned::new(
@@ -2384,6 +2455,18 @@ impl Checker {
                 Ok(Type::Array(Box::new(first), elems.len()))
             }
             ExprKind::Call(name, ty_args, args) => {
+                // internal helper calls (the `_wlel_*` rewrites) carry their
+                // result type on the node: when such a node is re-walked —
+                // e.g. as the receiver of a method call, which expr_ty
+                // visits twice — the cached type short-circuits the walk
+                // (re-resolving would fail: the helper is not a function)
+                if name.starts_with("_wlel_") {
+                    if let Some(cached) = &e.ty {
+                        if let Some(t) = self.type_from_cached(cached) {
+                            return Ok(t);
+                        }
+                    }
+                }
                 // sys module: process-level builtins, always available
                 if let Some(rest) = name.strip_prefix("sys::") {
                     match rest {

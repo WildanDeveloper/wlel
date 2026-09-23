@@ -479,10 +479,9 @@ fn emit_binary(
     let cc = find_cc();
     // Wlel documents two's-complement wrap for signed arithmetic; without
     // this flag signed overflow is UB in C and release builds may miscompile
-    // `-lm`: std::math::* wrappers call libm (glibc needs it at link time)
     // `-pthread`: the concurrency runtime (sys::thread/mutex/chan) links
     // against pthreads on POSIX (harmless no-op define on Windows/MinGW)
-    let mut flags = "-fwrapv -lm -pthread".to_string();
+    let mut flags = "-fwrapv -pthread".to_string();
     if sanitize {
         // AddressSanitizer build (`wlel build -sanitize`)
         flags.push_str(" -fsanitize=address -fno-omit-frame-pointer");
@@ -518,10 +517,14 @@ fn emit_binary(
     let status = Command::new(cc)
         .arg(format!("-O{opt}"))
         .args(flags.split_whitespace())
-        .args(link)
         .arg("-o")
         .arg(&cache_bin)
         .arg(&c_path)
+        // libraries AFTER the object: Debian gcc defaults to
+        // -Wl,--as-needed, which discards any -l named before the objects
+        // that reference it (std::math's log10/sqrt went unresolved)
+        .arg("-lm")
+        .args(link)
         .status()
         .expect("spawn cc");
     let _ = fs::remove_file(&c_path);
