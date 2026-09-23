@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790133001428,
+  "lastUpdate": 1790133217289,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -272,6 +272,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 66.2,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "83140acfb92e5f6a01535656edbb55c4f18e5c78",
+          "message": "README: swap logo to assets/logo.png (500x500 RGBA, 63KB — sharper and 2.5x smaller than the jpeg); reference and rendering unchanged",
+          "timestamp": "2026-09-23T10:13:06+07:00",
+          "tree_id": "59bc8eecc16a6477543184f806e82cce65b7009a",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/83140acfb92e5f6a01535656edbb55c4f18e5c78"
+        },
+        "date": 1790133216795,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.7,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 80,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 71.2,
             "unit": "ms"
           }
         ]
