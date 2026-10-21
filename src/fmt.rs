@@ -527,7 +527,7 @@ impl Printer {
             }
             Some(ElseBranch::Block(b)) => {
                 self.out.pop();
-                self.out.push_str(" else {");
+                self.out.push_str(" else {\n");
                 self.block_body(b, end_line);
             }
             None => {}
@@ -716,9 +716,15 @@ fn literal_suffix_form(ty: &str, inner: &Expr) -> Option<String> {
     if !WIDTHS.contains(&ty) && ty != "byte" && ty != "char" {
         return None;
     }
+    let float_suffix = matches!(ty, "f32" | "f64");
     match &inner.node {
+        // a float suffix needs a float-shaped literal: `1f32` would re-parse
+        // as an int cast and format differently on the next run
+        ExprKind::Int(v) if *v >= 0 && float_suffix => Some(format!("{v}.0{ty}")),
         ExprKind::Int(v) if *v >= 0 => Some(format!("{v}{ty}")),
         ExprKind::UInt(v) => Some(format!("{v}{ty}")),
+        // a float-typed suffix needs a float literal on the left, or the
+        // output (`1f32`) re-formats differently on the next run
         ExprKind::Float(v) => Some(format!("{}{ty}", float_lit(*v))),
         _ => None,
     }

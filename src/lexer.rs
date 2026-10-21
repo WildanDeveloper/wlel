@@ -358,6 +358,12 @@ impl Lexer {
                 Ok(v) => v,
                 Err(_) => return self.err(format!("bad float literal '{s}'")),
             };
+            if !v.is_finite() {
+                // `1e999` overflows f64 to infinity; there is no way to
+                // spell a non-finite float literal, and emitting `inf` into
+                // C (or into `wlel fmt` output) produces broken source
+                return self.err(format!("float literal '{s}' out of range"));
+            }
             match suffix {
                 Some(suf) => match suf.as_str() {
                     "f32" | "f64" => Ok(Token::FloatSuf(v, suf)),

@@ -75,10 +75,17 @@ if else while for in break continue true false
 `new`, `wlel_sizeof`, and `wlel_arena` are not keywords but parser-level
 builtin forms (§5.9). Identifiers match `[A-Za-z_][A-Za-z0-9_]*`.
 
-The identifier prefix `_wlel_` is reserved: a user declaration of a variable
-or parameter with this prefix is a compile-time error. Identifiers beginning
-with a single `_` (but not `_wlel_`) are ordinary names that opt out of
-unused warnings (§9.6).
+The identifier prefix `_wlel_` is reserved: a user declaration of a variable,
+parameter or function with this prefix is a compile-time error. Identifiers
+beginning with a single `_` (but not `_wlel_`) are ordinary names that opt
+out of unused warnings (§9.6).
+
+Because Wlel compiles to C, names that are C keywords or built-in type names
+(`int`, `long`, `double`, `char`, `void`, `size_t`, ...) and names defined by
+the generated prelude (`printf`, `malloc`, `strlen`, `wlel_alloc`, `std__*`,
+`sys__*`, ...) are rejected by the checker for locals, parameters, fields,
+functions, struct/enum names and enum variants — they would collide in the
+emitted C.
 
 ### 2.4 Integer literals
 
@@ -369,9 +376,10 @@ the target evaluated once.
 
 The target of `=`/compound assignment MUST be an lvalue: a variable, a
 field, a dereference, or an index of an array/pointer. Array-type targets
-and string-index targets are rejected by the checker; other non-lvalue
-targets are rejected by the C compiler (this delegation is intentional and
-listed for review in §17).
+and string-index targets are rejected by the checker, as is any other
+non-lvalue target (`1 = 2`, `f().x = 1`, `(x + 1) = 2`) — this is a
+compile-time error with a clear message, not a delegation to the C
+compiler.
 
 A plain write (`x = 5;`) does **not** count as a *read* for the
 unused-variable warning (§9.6).
@@ -436,9 +444,10 @@ regardless of the bounds' widths, and is scoped to the body.
 
 `for x in coll { }` accepts:
 
-- an array `[T; N]` — element type `T`;
-- any struct with a field `data: *T` (a "Vec-shaped" struct; `std::Vec[T]`
-  is one) — element type `T`.
+- an array `[T; N]` — element type `T` (element types must not themselves
+  be arrays: the loop variable is a value, and arrays are not first-class);
+- any struct with a field `data: *T` **and** an integer `len` field (a
+  "Vec-shaped" struct; `std::Vec[T]` is one) — element type `T`.
 
 Anything else is a compile-time error. Semantics:
 
@@ -630,7 +639,10 @@ after import merging; there are no module qualifiers except the hardcoded
 
 ### 9.2 Entry point
 
-`fn main()` or `fn main() -> int` is the entry point. Command-line access is
+`fn main()` or `fn main() -> int` is the entry point: `main` takes no
+parameters (the C entry point's `argc`/`argv` are exposed through
+`sys::argc()`/`sys::arg(i)`) and must return an integer type or nothing.
+Command-line access is
 via `sys::argc()` and `sys::arg(i)` (out-of-range → `""`); `sys::exit(code)`
 terminates immediately (and still runs `atexit` cleanup, hence root-arena
 freeing, §10.1).
@@ -942,16 +954,15 @@ are explicitly up for review before 1.0 freeze:
    assignments like `let x: f64 = f32v + f64v`). Current behavior matches
    the shipped compiler; changing it is a one-line checker change plus
    tests.
-3. **Assignment lvalue checking** is partly delegated to the C compiler
-   (§5.7); a fully checker-side lvalue grammar would improve error
-   messages.
+3. **Assignment lvalue checking** is done by the checker (§5.7): a
+   non-lvalue target is rejected with a compile-time message.
 4. **Array decay** happens only at call arguments (§4.1.4); explicit
    `arr as *T` is currently rejected. Either generalizing decay or adding
    the cast is under discussion.
-5. **`std::print_bool`** is listed by `wlel doc` but not implemented — doc
-   and implementation must converge one way or the other.
+5. **`std::print_bool` / `std::println_bool`** are implemented (they print
+   `true`/`false`); the doc table and the checker now agree.
 6. **`std::len`** accepts arrays only (use `.len()` for Vec-shaped
-   structs); the doc table previously claimed both.
+   structs); the doc table now states this explicitly.
 7. **Pointer arithmetic beyond indexing** (`p + 1`) does not exist; FFI
    code uses casts. Whether to add it pre-1.0 is open (default: no).
 8. **Escape analysis** (a static warning when a pointer provably escapes an

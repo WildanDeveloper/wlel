@@ -94,8 +94,8 @@ fn helpers_emitted_and_calls_rewritten() {
     assert!(c.contains("static void _wlel_fs_close(File* f)"), "{c}");
     // the Result helper is spliced in only when called, and returns the
     // checker-registered enum instance by value
-    assert!(c.contains("static Result__pFile__string _wlel_fs_open_r(const char* path, const char* mode)"), "{c}");
-    assert!(c.contains("struct Result__pFile__string {"), "{c}");
+    assert!(c.contains("static Result__$pFile__string _wlel_fs_open_r(const char* path, const char* mode)"), "{c}");
+    assert!(c.contains("struct Result__$pFile__string {"), "{c}");
     assert!(c.contains("_wlel_read_file(\"x.txt\", &content)"), "{c}");
     assert!(c.contains("_wlel_fs_open_r(\"x.txt\", \"rb\")"), "{c}");
     assert!(c.contains("_wlel_fs_read_r(f, buf, 8)"), "{c}");

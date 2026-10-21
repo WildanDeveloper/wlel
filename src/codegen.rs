@@ -15,6 +15,7 @@ pub fn gen_program(p: &Program) -> String {
         safe: false,
         used_arr_at: false,
         used_divz: false,
+        used_nonneg: false,
         used_conc: false,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
@@ -49,6 +50,7 @@ pub fn gen_program_safe(p: &Program) -> String {
         safe: true,
         used_arr_at: false,
         used_divz: false,
+        used_nonneg: false,
         used_conc: false,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
@@ -82,6 +84,7 @@ pub fn gen_program_tests(p: &Program) -> String {
         safe: false,
         used_arr_at: false,
         used_divz: false,
+        used_nonneg: false,
         used_conc: false,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
@@ -113,6 +116,7 @@ pub fn gen_program_tests_safe(p: &Program) -> String {
         safe: true,
         used_arr_at: false,
         used_divz: false,
+        used_nonneg: false,
         used_conc: false,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
@@ -161,6 +165,8 @@ struct Cg {
     /// definitions are spliced into the prelude once, only when used
     used_arr_at: bool,
     used_divz: bool,
+    /// safe-mode arena-capacity guard (negative capacity → huge malloc)
+    used_nonneg: bool,
     /// concurrency layer (threads/mutexes/channels) in use; the whole
     /// runtime is spliced only when the program actually touches it
     used_conc: bool,
@@ -227,6 +233,8 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
     cg.out.push_str("static void std__println_int(long long v) { printf(\"%lld\\n\", v); }\n");
     cg.out.push_str("static void std__println_float(double v) { printf(\"%g\\n\", v); }\n");
     cg.out.push_str("static void std__println_str(const char* s) { printf(\"%s\\n\", s); }\n");
+    cg.out.push_str("static void std__print_bool(_Bool b) { fputs(b ? \"true\" : \"false\", stdout); }\n");
+    cg.out.push_str("static void std__println_bool(_Bool b) { printf(\"%s\\n\", b ? \"true\" : \"false\"); }\n");
     cg.out.push_str("static long long std__strlen(const char* s) { return (long long)strlen(s); }\n");
     cg.out.push_str("static _Bool std__streq(const char* a, const char* b) { return strcmp(a, b) == 0; }\n");
     cg.out.push_str("static _Bool _wlel_streq(const char* a, const char* b) { return strcmp(a, b) == 0; }\n");
@@ -694,7 +702,7 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
     }
 
     // splice in only the safe-mode helpers the generated code actually calls
-    if cg.safe && (cg.used_arr_at || cg.used_divz) {
+    if cg.safe && (cg.used_arr_at || cg.used_divz || cg.used_nonneg) {
         let mut h = String::new();
         if cg.used_arr_at {
             h.push_str("static unsigned char* _wlel_arr_at(void* base, long long n, unsigned long long esz, long long i, const char* f, long long l) {\n");
@@ -712,6 +720,15 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
             h.push_str("        exit(1);\n");
             h.push_str("    }\n");
             h.push_str("    return d;\n");
+            h.push_str("}\n");
+        }
+        if cg.used_nonneg {
+            h.push_str("static long long _wlel_nonneg(long long v, const char* f, long long l) {\n");
+            h.push_str("    if (v < 0) {\n");
+            h.push_str("        fprintf(stderr, \"negative size at %s:%lld\\n\", f, l);\n");
+            h.push_str("        exit(1);\n");
+            h.push_str("    }\n");
+            h.push_str("    return v;\n");
             h.push_str("}\n");
         }
         cg.out.insert_str(safe_helpers_at, &h);
@@ -805,14 +822,14 @@ fn bsearch_helper_c(idx: usize, elem: &str, cmp: &str) -> String {
 fn fs_helper_c(name: &str) -> &'static str {
     match name {
         "_wlel_fs_open_r" => {
-"static Result__pFile__string _wlel_fs_open_r(const char* path, const char* mode) {
+"static Result__$pFile__string _wlel_fs_open_r(const char* path, const char* mode) {
     FILE* h = fopen(path, mode);
     if (!h) {
-        return (Result__pFile__string){ ._tag = 1, .v = { .Err = { strerror(errno) } } };
+        return (Result__$pFile__string){ ._tag = 1, .v = { .Err = { strerror(errno) } } };
     }
     File* f = (File*)(_wlel_cur_arena ? wlel_arena_alloc(_wlel_cur_arena, sizeof(File)) : malloc(sizeof(File)));
     f->h = (void*)h;
-    return (Result__pFile__string){ ._tag = 0, .v = { .Ok = { f } } };
+    return (Result__$pFile__string){ ._tag = 0, .v = { .Ok = { f } } };
 }
 "
         }
@@ -1159,9 +1176,16 @@ fn emit_enum(cg: &mut Cg, e: &EnumDef) {
 /// does the (canonical) type string embed `name` by value? pointers do not
 /// count — the forward typedefs cover them
 fn ty_embeds(ty: &str, name: &str) -> bool {
-    let base = ty.trim_start_matches('*');
-    let base = base.split('[').next().unwrap_or(base).trim();
-    base == name
+    let base = ty.trim_start_matches('*').trim();
+    // arrays embed their ELEMENT type by value: `[Pt; 2]` needs Pt to be
+    // complete, and `[[Pt; 2]; 3]` needs it too
+    if let Some(rest) = base.strip_prefix('[') {
+        let close = rest.rfind(']').unwrap_or(rest.len());
+        let inner = &rest[..close];
+        let elem = inner.rsplit_once(';').map(|(b, _)| b.trim()).unwrap_or(inner);
+        return ty_embeds(elem, name);
+    }
+    base.split('[').next().unwrap_or(base).trim() == name
 }
 
 /// struct + enum definitions in dependency order: an enum must be defined
@@ -1465,25 +1489,45 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
                 Some(t) => c_decl(t, name),
                 None => format!("{} {}", infer_cty(e), name),
             };
-            let init = gen_expr(cg, e);
+            // an array initializer needs the brace form: it is the only
+            // spelling that works for nested arrays (`T m[2][2] = {{...}}`),
+            // and it keeps the emitted C canonical
+            let init = if let (Some(t), ExprKind::ArrayLit(elems)) = (ty_ann.as_deref(), &e.node)
+            {
+                if t.starts_with('[') {
+                    array_lit_braces(cg, elems)
+                } else {
+                    gen_expr(cg, e)
+                }
+            } else {
+                gen_expr(cg, e)
+            };
             cg.out.push_str(&format!("{} = {};\n", decl, init));
         }
         StmtKind::Assign(a) => {
             // try operator on the right-hand side: propagate first, then the
-            // plain assignment of the success payload
-            if a.op == CompoundOp::Set {
-                if let ExprKind::Try(t) = &a.value.node {
-                    let tmp = gen_try_propagate(cg, t, level);
-                    indent(&mut cg.out, level);
-                    let lhs = gen_expr(cg, &a.target);
-                    cg.out.push_str(&format!(
-                        "{} = {}.v.{}.f0;\n",
-                        lhs,
-                        tmp,
-                        t.ok_variant
-                    ));
-                    return;
-                }
+            // plain (or compound) assignment of the success payload. The
+            // target is evaluated exactly once, as §5.6 requires.
+            if let ExprKind::Try(t) = &a.value.node {
+                let tmp = gen_try_propagate(cg, t, level);
+                let op_sym = match a.op {
+                    CompoundOp::Set => "=",
+                    CompoundOp::Add => "+=",
+                    CompoundOp::Sub => "-=",
+                    CompoundOp::Mul => "*=",
+                    CompoundOp::Div => "/=",
+                    CompoundOp::Mod => "%=",
+                };
+                indent(&mut cg.out, level);
+                let lhs = gen_expr(cg, &a.target);
+                cg.out.push_str(&format!(
+                    "{} {} {}.v.{}.f0;\n",
+                    lhs,
+                    op_sym,
+                    tmp,
+                    t.ok_variant
+                ));
+                return;
             }
             indent(&mut cg.out, level);
             let op_sym = match a.op {
@@ -1495,7 +1539,22 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
                 CompoundOp::Mod => "%=",
             };
             let lhs = gen_expr(cg, &a.target);
-            let rhs = gen_expr(cg, &a.value);
+            let mut rhs = gen_expr(cg, &a.value);
+            // safe mode: `/=` and `%=` on integers abort on a zero divisor,
+            // exactly like the binary forms (`x = x / 0` used to die with
+            // SIGFPE/SIGILL and no diagnostic)
+            if cg.safe
+                && matches!(a.op, CompoundOp::Div | CompoundOp::Mod)
+                && is_int_ty(&a.target.ty)
+            {
+                cg.used_divz = true;
+                rhs = format!(
+                    "_wlel_divz({}, {}, {})",
+                    rhs,
+                    c_string_literal(&cg.src_file),
+                    s.span.start.line
+                );
+            }
             cg.out.push_str(&format!("{} {} {};\n", lhs, op_sym, rhs));
         }
         StmtKind::If(i) => gen_if(cg, i, level),
@@ -1530,10 +1589,13 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
             // position — hoist `for x in [1, 2, 3]` into a named temp array
             // first so the loop iterates over a real object
             let hoisted = match (&f.iter.node, array_ty_info(&f.iter.ty)) {
-                (ExprKind::ArrayLit(_), Some((_, n))) => {
+                (ExprKind::ArrayLit(elems), Some((_, n))) => {
                     let arr = format!("_wlel_ia{}", cg.tmp_id);
                     cg.tmp_id += 1;
-                    let lit = gen_expr(cg, &f.iter);
+                    // the brace form: `T a[3] = { ... }` is the only legal
+                    // initializer (the value-position compound literal is
+                    // not an initializer for an array object)
+                    let lit = array_lit_braces(cg, elems);
                     indent(&mut cg.out, level);
                     cg.out.push_str(&format!("{} {}[{}] = {};\n", elem_c, arr, n, lit));
                     Some((arr, n.to_string()))
@@ -1628,11 +1690,19 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
                 Some(expr) => {
                     // try operator: propagate the error variant (defer-aware
                     // inside), then defer-aware return of the success payload
+                    // RE-WRAPPED in the enclosing function's success variant
+                    // (`return f()?` returns `Ok(payload)`, not the payload)
                     if let ExprKind::Try(t) = &expr.node {
                         if cg.defers.is_empty() {
                             let tmp = gen_try_propagate(cg, t, level);
-                            cg.out
-                                .push_str(&format!("return {}.v.{}.f0;\n", tmp, t.ok_variant));
+                            cg.out.push_str(&format!(
+                                "return ({}){{ ._tag = {}, .v = {{ .{} = {{ {}.v.{}.f0 }} }} }};\n",
+                                c_type(&t.ret_name),
+                                t.ret_ok_tag,
+                                t.ret_ok_variant,
+                                tmp,
+                                t.ok_variant
+                            ));
                             return;
                         }
                         let snapshot = cg.defers.clone();
@@ -1640,8 +1710,14 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
                         let tmp = gen_try_propagate(cg, t, level + 1);
                         emit_defer_snapshot(cg, &snapshot, level + 1);
                         indent(&mut cg.out, level + 1);
-                        cg.out
-                            .push_str(&format!("return {}.v.{}.f0;\n", tmp, t.ok_variant));
+                        cg.out.push_str(&format!(
+                            "return ({}){{ ._tag = {}, .v = {{ .{} = {{ {}.v.{}.f0 }} }} }};\n",
+                            c_type(&t.ret_name),
+                            t.ret_ok_tag,
+                            t.ret_ok_variant,
+                            tmp,
+                            t.ok_variant
+                        ));
                         indent(&mut cg.out, level);
                         cg.out.push_str("}\n");
                         return;
@@ -1726,7 +1802,23 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
         StmtKind::Arena(cap, body) => {
             indent(&mut cg.out, level);
             let cap_expr = match cap {
-                Some(c) => gen_expr(cg, c),
+                Some(c) => {
+                    // a negative capacity reaches malloc as a huge size_t;
+                    // safe mode reports it instead of crashing (release
+                    // builds keep the raw expression for zero overhead)
+                    let raw = gen_expr(cg, c);
+                    if cg.safe {
+                        cg.used_nonneg = true;
+                        format!(
+                            "((unsigned long long)_wlel_nonneg({}, {}, {}))",
+                            raw,
+                            c_string_literal(&cg.src_file),
+                            s.span.start.line
+                        )
+                    } else {
+                        raw
+                    }
+                }
                 None => "4096".to_string(),
             };
             cg.out.push_str("{\n");
@@ -1956,8 +2048,14 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
                     ExprKind::Str(s) => s.clone(),
                     _ => String::new(),
                 };
-                let elem = meta(&args[args.len() - 2]);
-                let cmp = meta(args.last().expect("sort metadata"));
+                // trailing metadata: [.., elem, cmp, "__vec__<Type>"?]
+                let vec_ty = match args.last().map(|a| &a.node) {
+                    Some(ExprKind::Str(s)) => s.strip_prefix("__vec__").map(str::to_string),
+                    _ => None,
+                };
+                let meta_len = if vec_ty.is_some() { 3 } else { 2 };
+                let elem = meta(&args[args.len() - meta_len]);
+                let cmp = meta(&args[args.len() - meta_len + 1]);
                 let searching = f == "_wlel_bsearch";
                 let idx = {
                     let reg = if searching {
@@ -1978,8 +2076,24 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
                 } else {
                     format!("_wlel_sort_{idx}")
                 };
+                let real = &args[..args.len() - meta_len];
+                if let Some(coll_ty) = vec_ty {
+                    // bind the collection ONCE, then read .data/.len from the
+                    // temp: `sort(mk(), cmp)` must not call mk() twice
+                    let tmp = format!("_wlel_coll{}", cg.tmp_id);
+                    cg.tmp_id += 1;
+                    let coll = gen_expr(cg, &real[0]);
+                    indent(&mut cg.out, 1);
+                    cg.out
+                        .push_str(&format!("{} {} = {};\n", c_type(&coll_ty), tmp, coll));
+                    if searching {
+                        let key = gen_expr(cg, &real[1]);
+                        return format!("{name}({tmp}.data, {tmp}.len, {key})");
+                    }
+                    return format!("{name}({tmp}.data, 0, {tmp}.len - 1)");
+                }
                 let mut parts: Vec<String> = Vec::new();
-                for a in &args[..args.len() - 2] {
+                for a in real {
                     parts.push(gen_expr(cg, a));
                 }
                 if searching {
@@ -2069,7 +2183,18 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
             let sz = c_sizeof_ty(ty);
             match count {
                 Some(cnt) => {
-                    let c_expr = gen_expr(cg, cnt);
+                    let mut c_expr = gen_expr(cg, cnt);
+                    // a negative count reaches malloc as a huge size_t;
+                    // safe mode reports it instead of segfaulting
+                    if cg.safe {
+                        cg.used_nonneg = true;
+                        c_expr = format!(
+                            "_wlel_nonneg({}, {}, {})",
+                            c_expr,
+                            c_string_literal(&cg.src_file),
+                            e.span.start.line
+                        );
+                    }
                     format!(
                         "({}*)(_wlel_cur_arena ? wlel_arena_alloc(_wlel_cur_arena, sizeof({}) * ({})) : malloc(sizeof({}) * ({})))",
                         elem_ty, sz, c_expr, sz, c_expr
@@ -2115,8 +2240,33 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
             format!("{}[{}]", base_c, idx_c)
         }
         ExprKind::ArrayLit(elems) => {
-            let parts: Vec<String> = elems.iter().map(|x| gen_expr(cg, x)).collect();
-            format!("{{ {} }}", parts.join(", "))
+            // In value position a brace list is not an expression in C:
+            // `[1,2,3][1]`, `f([1,2,3])` and `std::sort([3,1,2], cmp)` all
+            // need an addressable object. A C99 compound literal
+            // `(T[]){ ... }` is an lvalue with block scope, so it works for
+            // indexing, decay to a pointer argument and in-place sorting.
+            // Initializer positions use `array_lit_braces` instead.
+            if let Some(t) = &e.ty {
+                if let Some((elem, _)) = array_ty_info(&Some(t.clone())) {
+                    if !elem.starts_with('[') {
+                        // single-dimension: a flat brace list; the inner
+                        // braces `(T[3]){ {1,2,3} }` would be read as one
+                        // scalar initializer and zero-fill the rest
+                        let parts: Vec<String> = elems.iter().map(|x| gen_expr(cg, x)).collect();
+                        return format!("({}[]){{ {} }}", c_type(&elem), parts.join(", "));
+                    }
+                }
+                if t.starts_with('[') {
+                    // nested: `(long long[2][2]){ {1,2},{3,4} }` — an lvalue
+                    // with the full type, and the nested braces line up
+                    return format!(
+                        "({}){{ {} }}",
+                        c_sizeof_ty(t),
+                        array_lit_braces(cg, elems)
+                    );
+                }
+            }
+            array_lit_braces(cg, elems)
         }
         ExprKind::AddrOf(x) => format!("&{}", gen_expr(cg, x)),
         ExprKind::Deref(x) => format!("(*{})", gen_expr(cg, x)),
@@ -2124,7 +2274,18 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
         ExprKind::StructLit(name, fields) => {
             let parts: Vec<String> = fields
                 .iter()
-                .map(|(n, v)| format!(".{} = {}", n, gen_expr(cg, v)))
+                .map(|(n, v)| {
+                    // array-typed fields need the brace initializer; the
+                    // compound literal that value-position arrays emit is
+                    // not valid as a designated initializer in C99
+                    let init = match (&v.node, &v.ty) {
+                        (ExprKind::ArrayLit(elems), Some(t)) if t.starts_with('[') => {
+                            array_lit_braces(cg, elems)
+                        }
+                        _ => gen_expr(cg, v),
+                    };
+                    format!(".{} = {}", n, init)
+                })
                 .collect();
             format!("({}){{ {} }}", name, parts.join(", "))
         }
@@ -2157,6 +2318,21 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
         // impl's desugared function before codegen sees it
         ExprKind::MethodCall(..) => unreachable!("method call survived type checking"),
     }
+}
+
+/// brace-list form `{ a, b }` — legal only in an initializer position
+/// (`T x[2] = {...}`, `T x = {...}`, `.field = {...}`). An element that is
+/// itself an array literal nests as `{ {1, 2}, {3, 4} }`; the compound
+/// literal used in value position is not a valid array initializer.
+fn array_lit_braces(cg: &mut Cg, elems: &[Expr]) -> String {
+    let parts: Vec<String> = elems
+        .iter()
+        .map(|x| match &x.node {
+            ExprKind::ArrayLit(inner) => array_lit_braces(cg, inner),
+            _ => gen_expr(cg, x),
+        })
+        .collect();
+    format!("{{ {} }}", parts.join(", "))
 }
 
 fn binop_str(op: BinOp) -> &'static str {
@@ -2209,8 +2385,21 @@ fn array_ty_info(ty: &Option<String>) -> Option<(String, usize)> {
 }
 
 /// exact C type for a resolved Wlel type string ("int", "*Pt", "u8", ...)
-fn c_type(t: &str) -> String {    let stars = t.chars().take_while(|c| *c == '*').count();
+fn c_type(t: &str) -> String {
+    let stars = t.chars().take_while(|c| *c == '*').count();
     let base = &t[stars..];
+    // an array type is only valid in a declaration; as a value/pointer
+    // target it decays (`[int; 2]` -> `long long*`), which is what a cast,
+    // parameter or `sizeof` argument needs
+    if base.starts_with('[') {
+        let (elem, dims) = c_array_dims(base);
+        let mut out = elem;
+        for _ in 0..dims.len() {
+            out.push('*');
+        }
+        out.push_str(&"*".repeat(stars));
+        return out;
+    }
     let base_c = match base {
         "int" | "i64" => "long long",
         "i8" => "int8_t",
@@ -2231,28 +2420,48 @@ fn c_type(t: &str) -> String {    let stars = t.chars().take_while(|c| *c == '*'
     format!("{}{}", base_c, "*".repeat(stars))
 }
 
-/// type inside sizeof(): arrays keep their length (`long long[5]`)
-fn c_sizeof_ty(ty: &str) -> String {
-    if let Some(rest) = ty.strip_prefix('[') {
+/// split a canonical array type into its base type and dimensions:
+/// "[int; 3]" -> ("int", ["3"]), "[[int; 2]; 3]" -> ("int", ["3", "2"])
+fn c_array_dims(ty: &str) -> (String, Vec<String>) {
+    let mut dims = Vec::new();
+    let mut t = ty.trim();
+    while let Some(rest) = t.strip_prefix('[') {
         let close = rest.rfind(']').unwrap_or(rest.len());
         let inner = &rest[..close];
-        if let Some((base, n)) = inner.rsplit_once(';') {
-            return format!("{}[{}]", c_type(base.trim()), n.trim());
+        let Some((base, n)) = inner.rsplit_once(';') else {
+            break;
+        };
+        dims.push(n.trim().to_string());
+        t = base.trim();
+    }
+    (c_type(t), dims)
+}
+
+/// type inside sizeof(): arrays keep their length (`long long[5]`,
+/// `long long[2][2]` for nested arrays)
+fn c_sizeof_ty(ty: &str) -> String {
+    if ty.trim_start().starts_with('[') {
+        let (base, dims) = c_array_dims(ty);
+        let mut out = base;
+        for d in dims {
+            out.push_str(&format!("[{}]", d));
         }
+        return out;
     }
     c_type(ty)
 }
 
-/// declaration fragment: arrays need `long long a[4]`, others `long long a`
+/// declaration fragment: arrays need `long long a[4]` (and
+/// `long long m[2][2]` when nested), others `long long a`
 fn c_decl(ty: &str, name: &str) -> String {
-    if let Some(rest) = ty.strip_prefix('[') {
-        let close = rest.rfind(']').unwrap_or(rest.len());
-        let inner = &rest[..close];
-        if let Some((base, n)) = inner.rsplit_once(';') {
-            let bt = c_type(base.trim());
-            let stars = bt.chars().take_while(|c| *c == '*').count();
-            return format!("{}{} {}[{}]", &bt[stars..], "*".repeat(stars), name, n.trim());
+    if ty.trim_start().starts_with('[') {
+        let (base, dims) = c_array_dims(ty);
+        let stars = base.chars().take_while(|c| *c == '*').count();
+        let mut out = format!("{}{} {}", &base[stars..], "*".repeat(stars), name);
+        for d in dims {
+            out.push_str(&format!("[{}]", d));
         }
+        return out;
     }
     format!("{} {}", c_type(ty), name)
 }
@@ -2278,7 +2487,11 @@ fn c_string_literal(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            '\0' => out.push_str("\\0"),
+            // three-digit octal: `\0` followed by a digit (`"a\01"`) would be
+            // read by C as the single octal escape 0x01, silently swallowing
+            // the next character. `\000` is exactly three digits, so a
+            // following digit stays literal.
+            '\0' => out.push_str("\\000"),
             other => out.push(other),
         }
     }

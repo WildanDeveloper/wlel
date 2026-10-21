@@ -321,6 +321,11 @@ pub struct TryExpr {
     pub err_arity: usize,
     /// success variant name of the inner enum ("Ok" / "Some")
     pub ok_variant: String,
+    /// tag of the success variant in the ENCLOSING function's return enum
+    /// (needed by `return expr?`: the payload is re-wrapped as Ok/Some)
+    pub ret_ok_tag: usize,
+    /// success variant name of the return enum ("Ok" / "Some")
+    pub ret_ok_variant: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -417,7 +417,7 @@ so they do not appear in the sections above.
 | `std::print_bool/println_bool(b)` | write a bool |
 | `std::strlen(s) -> int`, `std::streq(a, b) -> bool` | string length / byte equality |
 | `std::abs(x)`, `std::min(a, b)`, `std::max(a, b)` | small numeric helpers |
-| `std::len(coll) -> int` | length of an array or `Vec` |
+| `std::len(arr) -> int` | length of a fixed array (Vec-shaped structs expose `.len`) |
 | `std::checked_add/sub/mul(a, b, &out) -> bool` | overflow-checked arithmetic (`__builtin_*_overflow`) |
 | `std::format(fmt, ...) -> string` | mini-printf: `{}` placeholders accept int/float/bool/string |
 | `std::parse_float(s, &out) -> bool` | strtod semantics; must consume the whole string |

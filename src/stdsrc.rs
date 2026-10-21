@@ -190,6 +190,10 @@ fn vec_new[T]() -> Vec[T] {
 
 /// a new empty Vec with room for `n` elements preallocated
 fn vec_with_cap[T](n: int) -> Vec[T] {
+    // a negative capacity would reach malloc as a huge size_t
+    if n < 0 {
+        panic("vec_with_cap: negative capacity");
+    }
     v := Vec { data: new(T, n), len: 0, cap: n };
     return v;
 }
@@ -362,7 +366,12 @@ fn map_slot_for_insert[K, V](m: *HashMap[K, V], key: K) -> int {
 }
 
 // low-level insert: table must have room (map_set enforces the invariant)
+// The capacity check turns an unallocated table into a clean panic instead
+// of the segfault `mask = -1` would cause (map_insert is public API).
 fn map_insert[K, V](m: *HashMap[K, V], key: K, val: V) {
+    if m.cap == 0 {
+        panic("map_insert: the table is not allocated — call map_set first");
+    }
     s := map_slot_for_insert(m, key);
     if m.state[s] == 1 {
         m.vals[s] = val;
@@ -515,6 +524,13 @@ fn str_find_from(hay: string, needle: string, from: int) -> int {
     if i < 0 {
         i = 0;
     }
+    if i > hl {
+        // beyond the end: the NUL is the only legal position, and no
+        // non-empty needle can start there. Without this clamp
+        // `i + nl` overflows for a huge `from` and the loop reads wildly
+        // out of bounds.
+        return -1;
+    }
     while i + nl <= hl {
         j := 0;
         while j < nl && hay[i + j] == needle[j] {
@@ -544,9 +560,16 @@ fn str_sub(s: string, start: int, n: int) -> string {
     if b > len {
         b = len;
     }
-    e := b + n;
-    if e > len {
+    if n <= 0 {
+        return "";
+    }
+    // clamp before adding: `b + n` overflows for a huge n and the
+    // resulting negative `e` would slip past the length check
+    e := b;
+    if n > len - b {
         e = len;
+    } else {
+        e = b + n;
     }
     if e <= b {
         return "";

@@ -422,7 +422,13 @@ fn emit_binary_qbe(il: &str, out: &Path, link: &[String]) -> PathBuf {
     let out = with_exe(out);
     if cache_bin.exists() {
         if out != cache_bin {
-            let _ = fs::copy(&cache_bin, &out);
+            if let Err(e) = fs::copy(&cache_bin, &out) {
+                eprintln!(
+                    "wlel: cannot write {}: {e} (does its directory exist?)",
+                    out.display()
+                );
+                exit(1);
+            }
         }
         return out;
     }
@@ -461,7 +467,13 @@ fn emit_binary_qbe(il: &str, out: &Path, link: &[String]) -> PathBuf {
         exit(1);
     }
     if out != cache_bin {
-        let _ = fs::copy(&cache_bin, &out);
+        if let Err(e) = fs::copy(&cache_bin, &out) {
+            eprintln!(
+                "wlel: cannot write {}: {e} (does its directory exist?)",
+                out.display()
+            );
+            exit(1);
+        }
     }
     out
 }
@@ -534,7 +546,13 @@ fn emit_binary(
     }
     let _ = fs::create_dir_all(&cache_dir);
     if out != cache_bin {
-        let _ = fs::copy(&cache_bin, &out);
+        if let Err(e) = fs::copy(&cache_bin, &out) {
+            eprintln!(
+                "wlel: cannot write {}: {e} (does its directory exist?)",
+                out.display()
+            );
+            exit(1);
+        }
     }
     out
 }
@@ -748,6 +766,18 @@ fn run_doc(files: &[String], out_dir: Option<String>, std_only: bool) -> ! {
         eprintln!("wlel: cannot create {}", out_root.display());
         exit(1);
     }
+    // module pages are named "<module>.md"; a source file called
+    // `index.wl` would be overwritten by the generated index below, so the
+    // index gets the first free name instead (the page keeps its own name)
+    let index_name = {
+        let mut n = "index".to_string();
+        let mut k = 2usize;
+        while modules.iter().any(|m| m.name == n) {
+            n = format!("index-{k}");
+            k += 1;
+        }
+        n
+    };
     for m in &modules {
         let path = out_root.join(format!("{}.md", m.name));
         if let Err(e) = fs::write(&path, &m.markdown) {
@@ -773,7 +803,7 @@ fn run_doc(files: &[String], out_dir: Option<String>, std_only: bool) -> ! {
         None => "Documentation".into(),
     };
     let index = wlel::doc::index_markdown(&title, &modules);
-    let index_path = out_root.join("index.md");
+    let index_path = out_root.join(format!("{index_name}.md"));
     if let Err(e) = fs::write(&index_path, &index) {
         eprintln!("wlel: cannot write {}: {e}", index_path.display());
         exit(1);
@@ -822,6 +852,21 @@ fn run_add(name: Option<String>, spec: Option<String>, path: Option<String>) -> 
         }
     }
     exit(0);
+}
+
+/// Exit code for a child process. A signal death (SIGSEGV/SIGILL/…) has no
+/// exit code; map it to 128+signal like a shell does and say so, instead of
+/// silently reporting a plain 1.
+fn exit_code_of(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            eprintln!("wlel: process terminated by signal {sig}");
+            return 128 + sig;
+        }
+    }
+    status.code().unwrap_or(1)
 }
 
 fn main() {
@@ -988,7 +1033,7 @@ fn main() {
                     link,
                 );
                 let status = Command::new(bin).args(run_args).status().expect("run binary");
-                exit(status.code().unwrap_or(1));
+                exit(exit_code_of(status));
             }
             None => {
                 let p = find_project();
@@ -1018,7 +1063,7 @@ fn main() {
                 );
                 let status =
                     Command::new(bin).args(run_args).status().expect("run binary");
-                exit(status.code().unwrap_or(1));
+                exit(exit_code_of(status));
             }
         },
         Mode::Test { file, link } => match file {
@@ -1040,7 +1085,7 @@ fn main() {
                     link,
                 );
                 let status = Command::new(bin).status().expect("run tests");
-                exit(status.code().unwrap_or(1));
+                exit(exit_code_of(status));
             }
             None => {
                 let p = find_project();
@@ -1062,7 +1107,7 @@ fn main() {
                     link,
                 );
                 let status = Command::new(bin).status().expect("run tests");
-                exit(status.code().unwrap_or(1));
+                exit(exit_code_of(status));
             }
         },
     }

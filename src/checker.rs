@@ -281,10 +281,16 @@ pub struct Checker {
     std_called: bool,
     /// function names referenced by calls (for unused-import detection)
     called_funcs: HashSet<String>,
+    /// callee -> files that called it. A call made from inside the callee's
+    /// own file does not prove an `use "file.wl"` import was needed.
+    called_from: HashMap<String, HashSet<String>>,
     /// struct names referenced anywhere (types, literals, casts)
     used_structs: HashSet<String>,
     /// enum names referenced anywhere (types, constructors, match)
     used_enums: HashSet<String>,
+    /// type name -> files that referenced it (same rule as called_from:
+    /// a reference inside the defining file does not use the import)
+    used_type_from: HashMap<String, HashSet<String>>,
     /// variant name -> owning enum's source name ("Circle" -> "Shape";
     /// for generics the TEMPLATE name: "Ok" -> "Result")
     variant_owner: HashMap<String, String>,
@@ -350,8 +356,10 @@ impl Checker {
             use_std,
             std_called: false,
             called_funcs: HashSet::new(),
+            called_from: HashMap::new(),
             used_structs: HashSet::new(),
             used_enums: HashSet::new(),
+            used_type_from: HashMap::new(),
             variant_owner: HashMap::new(),
             methods: HashMap::new(),
             defer_depth: 0,
@@ -560,6 +568,15 @@ impl Checker {
         cx.structs.insert("Thread".into(), Vec::new());
         cx.structs.insert("Mutex".into(), Vec::new());
         for st in &program.structs {
+            if c_reserved(&st.name) {
+                return err_at(
+                    st.span,
+                    format!(
+                        "struct name '{}' collides with a C keyword or type name",
+                        st.name
+                    ),
+                );
+            }
             if cx.structs.insert(st.name.clone(), Vec::new()).is_some() {
                 if st.name == "ArenaStats" {
                     return err_at(
@@ -599,11 +616,44 @@ impl Checker {
                     format!("duplicate type '{}': already declared as an enum", st.name),
                 );
             }
+            if cx.generic_enums.contains_key(&st.name) {
+                return err_at(
+                    st.span,
+                    format!("duplicate type '{}': already declared as a generic enum", st.name),
+                );
+            }
+            if cx.generic_structs.contains_key(&st.name) {
+                return err_at(
+                    st.span,
+                    format!("duplicate type '{}': already declared as a generic struct", st.name),
+                );
+            }
         }
         // enum names are part of the type namespace: register them before
         // any field/payload resolution so structs and enums can reference
         // each other's names freely
         for e in &program.enums {
+            if c_reserved(&e.name) {
+                return err_at(
+                    e.span,
+                    format!(
+                        "enum name '{}' collides with a C keyword or type name",
+                        e.name
+                    ),
+                );
+            }
+            for v in &e.variants {
+                // variant names become union member names in the emitted C
+                if c_reserved(&v.name) {
+                    return err_at(
+                        e.span,
+                        format!(
+                            "enum '{}': variant '{}' collides with a C keyword or type name",
+                            e.name, v.name
+                        ),
+                    );
+                }
+            }
             if cx.enums.insert(e.name.clone(), Vec::new()).is_some() {
                 return err_at(e.span, format!("duplicate enum '{}'", e.name));
             }
@@ -613,10 +663,38 @@ impl Checker {
                     format!("duplicate type '{}': already declared as a struct", e.name),
                 );
             }
+            if cx.generic_structs.contains_key(&e.name) {
+                return err_at(
+                    e.span,
+                    format!("duplicate type '{}': already declared as a generic struct", e.name),
+                );
+            }
+            if cx.generic_enums.contains_key(&e.name) {
+                return err_at(
+                    e.span,
+                    format!("duplicate type '{}': already declared as a generic enum", e.name),
+                );
+            }
         }
         for st in &program.structs {
             let mut fields = Vec::with_capacity(st.fields.len());
+            let mut seen_fields: HashSet<&str> = HashSet::new();
             for (fname, fty) in &st.fields {
+                if !seen_fields.insert(fname.as_str()) {
+                    return err_at(
+                        st.span,
+                        format!("struct '{}': duplicate field '{}'", st.name, fname),
+                    );
+                }
+                if c_reserved(fname) {
+                    return err_at(
+                        st.span,
+                        format!(
+                            "struct '{}': field '{}' collides with a C keyword or type name",
+                            st.name, fname
+                        ),
+                    );
+                }
                 let t = cx.resolve_type_str(fty, st.span)?;
                 if t == Type::Void {
                     return err_at(
@@ -705,7 +783,40 @@ impl Checker {
                     format!("duplicate function '{}': a generic with this name exists", f.name),
                 );
             }
+            // `main` is the C entry point: the codegen always emits
+            // `int main(int argc, char** argv)`, so a different signature
+            // silently loses parameters or emits C that cannot compile
+            if f.name == "main" {
+                if !f.params.is_empty() {
+                    return err_at(
+                        f.span,
+                        "main takes no parameters — read the command line with sys::argc()/sys::arg(i)",
+                    );
+                }
+            }
+            // user functions land verbatim in the emitted C: a name that the
+            // prelude already defines (`printf`, `wlel_alloc`, `std__*`)
+            // produces a conflicting declaration, never a link error
+            if !f.is_extern {
+                cx.check_reserved_decl_name(&f.name, f.span)?;
+            }
             let ret = cx.resolve_type_str(f.ret_type.as_deref().unwrap_or("void"), f.span)?;
+            if f.name == "main" {
+                // the emitted C entry point returns int: a string/pointer/
+                // aggregate return type cannot be compiled at all
+                if matches!(
+                    ret,
+                    Type::Str | Type::Ptr(_) | Type::Struct(_) | Type::Enum(_) | Type::Array(..)
+                ) {
+                    return err_at(
+                        f.span,
+                        format!(
+                            "main must return int (or nothing), not '{}' — the process exit code is an integer",
+                            ret.name()
+                        ),
+                    );
+                }
+            }
             if matches!(ret, Type::Array(..)) {
                 return err_at(
                     f.span,
@@ -812,8 +923,10 @@ impl Checker {
         let used_files: HashSet<String> = called_files(
             program,
             &cx.called_funcs,
+            &cx.called_from,
             &cx.used_structs,
             &cx.used_enums,
+            &cx.used_type_from,
             &cx.generic_funcs,
             &cx.generic_structs,
             &cx.generic_enums,
@@ -831,19 +944,32 @@ impl Checker {
         // bare calls into the embedded library (vec_new, str_find, ...)
         // mark `use std` as used too: the spliced functions carry the
         // <std> file tag, so a referenced one proves the import is live
+        // a call only proves `use std` when it comes from OUTSIDE the std
+        // library: std's own functions call each other constantly, which
+        // used to suppress the warning for every program
         let std_touched = cx.std_called
-            || program
-                .funcs
-                .iter()
-                .any(|f| f.file == STD_FILE && cx.called_funcs.contains(&f.name))
-            || program
-                .structs
-                .iter()
-                .any(|s| s.file == STD_FILE && cx.used_structs.contains(&s.name))
-            || program
-                .enums
-                .iter()
-                .any(|e| e.file == STD_FILE && cx.used_enums.contains(&e.name));
+            || program.funcs.iter().any(|f| {
+                f.file == STD_FILE
+                    && cx.called_from.get(&f.name).is_some_and(|callers| {
+                        callers.iter().any(|c| c != STD_FILE)
+                    })
+            })
+            || program.structs.iter().any(|s| {
+                s.file == STD_FILE
+                    && cx.used_structs.contains(&s.name)
+                    && cx
+                        .used_type_from
+                        .get(&s.name)
+                        .is_some_and(|by| by.iter().any(|f| f != STD_FILE))
+            })
+            || program.enums.iter().any(|e| {
+                e.file == STD_FILE
+                    && cx.used_enums.contains(&e.name)
+                    && cx
+                        .used_type_from
+                        .get(&e.name)
+                        .is_some_and(|by| by.iter().any(|f| f != STD_FILE))
+            });
         if use_std && !std_touched {
             if let Some(u) = program.uses.iter().find(|u| u.path.is_none()) {
                 cx.warnings.push(CheckWarning {
@@ -891,6 +1017,7 @@ impl Checker {
     /// register a `fn name[T, ...]` template: type params must be fresh
     /// names and every parameter annotated, or inference would be impossible
     fn register_generic_fn(&mut self, f: FuncDef) -> CResult<()> {
+        self.check_reserved_decl_name(&f.name, f.span)?;
         for tp in &f.type_params {
             if Type::from_builtin(tp).is_some() || tp == "ArenaStats" || tp == "File" {
                 return err_at(
@@ -923,8 +1050,31 @@ impl Checker {
         Ok(())
     }
 
+    /// reject user declarations that would collide with the runtime/std
+    /// prelude in the emitted C: `wlel_alloc`, `std__*`, `sys__*`, `printf`
+    fn check_reserved_decl_name(&self, name: &str, span: Span) -> CResult<()> {
+        if c_reserved(name) {
+            return err_at(
+                span,
+                format!(
+                    "function name '{name}' collides with a C/runtime symbol — pick another name"
+                ),
+            );
+        }
+        Ok(())
+    }
+
     /// register a `struct Name[T, ...]` template
     fn register_generic_struct(&mut self, s: StructDef) -> CResult<()> {
+        if c_reserved(&s.name) {
+            return err_at(
+                s.span,
+                format!(
+                    "struct name '{}' collides with a C keyword or type name",
+                    s.name
+                ),
+            );
+        }
         for tp in &s.type_params {
             if Type::from_builtin(tp).is_some() || tp == "ArenaStats" || tp == "File" {
                 return err_at(s.span, format!("type parameter '{tp}' shadows a built-in type"));
@@ -946,6 +1096,18 @@ impl Checker {
             }
             return err_at(span, format!("duplicate struct '{}'", s.name));
         }
+        // structs and enums share the C struct namespace; a generic of one
+        // kind must not reuse the other kind's name (their instantiations
+        // mangle identically and cc sees two definitions of one struct)
+        if self.generic_enums.contains_key(&s.name) || self.enums.contains_key(&s.name) {
+            return err_at(
+                span,
+                format!(
+                    "duplicate type '{}': already declared as an enum",
+                    s.name
+                ),
+            );
+        }
         self.generic_structs.insert(s.name.clone(), s);
         Ok(())
     }
@@ -953,6 +1115,15 @@ impl Checker {
     /// register an `enum Name[T, ...]` template; its variant names enter the
     /// global variant namespace immediately (construction resolves by name)
     fn register_generic_enum(&mut self, e: EnumDef) -> CResult<()> {
+        if c_reserved(&e.name) {
+            return err_at(
+                e.span,
+                format!(
+                    "enum name '{}' collides with a C keyword or type name",
+                    e.name
+                ),
+            );
+        }
         for tp in &e.type_params {
             if Type::from_builtin(tp).is_some() || tp == "ArenaStats" || tp == "File" {
                 return err_at(e.span, format!("type parameter '{tp}' shadows a built-in type"));
@@ -965,6 +1136,15 @@ impl Checker {
             }
         }
         for v in &e.variants {
+            if c_reserved(&v.name) {
+                return err_at(
+                    e.span,
+                    format!(
+                        "enum '{}': variant '{}' collides with a C keyword or type name",
+                        e.name, v.name
+                    ),
+                );
+            }
             if self.generic_funcs.contains_key(&v.name) {
                 return err_at(
                     e.span,
@@ -979,9 +1159,19 @@ impl Checker {
             }
         }
         let span = e.span;
-        if self.generic_enums.insert(e.name.clone(), e).is_some() {
-            return err_at(span, "duplicate enum");
+        if self.generic_enums.contains_key(&e.name) {
+            return err_at(span, format!("duplicate enum '{}'", e.name));
         }
+        if self.generic_structs.contains_key(&e.name) || self.structs.contains_key(&e.name) {
+            return err_at(
+                span,
+                format!(
+                    "duplicate type '{}': already declared as a struct",
+                    e.name
+                ),
+            );
+        }
+        self.generic_enums.insert(e.name.clone(), e);
         Ok(())
     }
 
@@ -1071,7 +1261,7 @@ impl Checker {
             span: gen.span,
             file: gen.file.clone(),
         });
-        self.used_enums.insert(name.to_string());
+        self.note_type_use(name, true);
         Ok(mangled)
     }
 
@@ -1144,7 +1334,7 @@ impl Checker {
             span: gen.span,
             file: gen.file.clone(),
         });
-        self.used_structs.insert(name.to_string());
+        self.note_type_use(name, false);
         Ok(mangled)
     }
 
@@ -1396,6 +1586,12 @@ impl Checker {
             }
             ExprKind::AddrOf(x) | ExprKind::Deref(x) => self.canon_expr(x, map, sp)?,
             ExprKind::Field(obj, _) => self.canon_expr(obj, map, sp)?,
+            ExprKind::MethodCall(recv, _, args) => {
+                self.canon_expr(recv, map, sp)?;
+                for a in args.iter_mut() {
+                    self.canon_expr(a, map, sp)?;
+                }
+            }
             ExprKind::StructLit(_, fields) => {
                 for (_, v) in fields.iter_mut() {
                     self.canon_expr(v, map, sp)?;
@@ -1413,6 +1609,19 @@ impl Checker {
             ExprKind::EnumLit(_, _, _, payloads) => {
                 for p in payloads.iter_mut() {
                     self.canon_expr(p, map, sp)?;
+                }
+            }
+            // `expr?` and a value-form `match` can appear inside a generic
+            // body (let/return/assignment positions); their nested
+            // annotations and type arguments need substitution too
+            ExprKind::Try(t) => self.canon_expr(&mut t.inner, map, sp)?,
+            ExprKind::Match(m) => {
+                self.canon_expr(&mut m.scrutinee, map, sp)?;
+                for arm in m.arms.iter_mut() {
+                    match &mut arm.body {
+                        MatchBody::Expr(x) => self.canon_expr(x, map, sp)?,
+                        MatchBody::Block(b) => self.canon_block(b, map, sp)?,
+                    }
                 }
             }
             _ => {}
@@ -1567,7 +1776,10 @@ impl Checker {
             // concrete pattern: types must match exactly, stars included
             // (an untyped literal adaptation is re-checked later by the
             // normal call path)
-            if resolve_concrete(pattern) != *arg {
+            let concrete = self
+                .type_from_cached(pattern)
+                .unwrap_or_else(|| resolve_concrete(pattern));
+            if concrete != *arg {
                 return err_at(
                     sp,
                     format!("generic argument: expected '{pattern}', got '{}'", arg.name()),
@@ -1682,10 +1894,10 @@ impl Checker {
             Some(t) => t,
             None => {
                 if self.structs.contains_key(base) {
-                    self.used_structs.insert(base.to_string());
+                    self.note_type_use(base, false);
                     Type::Struct(base.to_string())
                 } else if self.enums.contains_key(base) {
-                    self.used_enums.insert(base.to_string());
+                    self.note_type_use(base, true);
                     Type::Enum(base.to_string())
                 } else {
                     return err_at(span, format!("unknown type '{}'", base));
@@ -1708,6 +1920,15 @@ impl Checker {
                 ),
             );
         }
+        // a local named like a C type (`int`, `long`, `double`) or like a
+        // runtime symbol (`printf`, `malloc`) produces invalid C: the
+        // generated declaration collides with the type/keyword/function
+        if c_reserved(name) {
+            return err_at(
+                span,
+                format!("{ctx}: identifier '{name}' collides with a C keyword or type name"),
+            );
+        }
         let scope = self.scopes.last_mut().unwrap();
         if scope
             .insert(name.to_string(), VarInfo { ty, read: false, span })
@@ -1719,6 +1940,30 @@ impl Checker {
             );
         }
         Ok(())
+    }
+
+    /// record a call from the function currently being checked, so the
+    /// unused-import pass can tell a call from the importer apart from the
+    /// imported file calling its own helpers
+    fn note_call(&mut self, callee: &str) {
+        self.called_funcs.insert(callee.to_string());
+        self.called_from
+            .entry(callee.to_string())
+            .or_default()
+            .insert(self.current_file.clone());
+    }
+
+    /// record a reference to a struct/enum from the file being checked
+    fn note_type_use(&mut self, name: &str, is_enum: bool) {
+        if is_enum {
+            self.used_enums.insert(name.to_string());
+        } else {
+            self.used_structs.insert(name.to_string());
+        }
+        self.used_type_from
+            .entry(name.to_string())
+            .or_default()
+            .insert(self.current_file.clone());
     }
 
     fn lookup(&mut self, name: &str) -> Option<Type> {
@@ -1922,6 +2167,15 @@ impl Checker {
                 if !is_lvalue(x) {
                     return err_at(sp, " '&' needs a variable, field or dereference");
                 }
+                // a pointer to an array has no C spelling in the emitted
+                // types (`*[T; N]` would decay wrongly); arrays are not
+                // first-class, so reject the address form explicitly
+                if matches!(t, Type::Array(..)) {
+                    return err_at(
+                        sp,
+                        "cannot take the address of an array — index it or wrap the array in a struct",
+                    );
+                }
                 Ok(Type::Ptr(Box::new(t)))
             }
             ExprKind::Deref(x) => {
@@ -2038,7 +2292,7 @@ impl Checker {
                     }
                     self.instantiate_fn(&tmpl.name, &binds, sp)?
                 };
-                self.called_funcs.insert(tmpl.name.clone());
+                self.note_call(&tmpl.name.clone());
                 let mut all_args = Vec::with_capacity(args.len() + 1);
                 all_args.push(std::mem::replace(&mut **recv, dummy_expr(sp)));
                 all_args.extend(std::mem::take(args));
@@ -2101,7 +2355,7 @@ impl Checker {
                     Some(f) => f.clone(),
                     None => return err_at(sp, format!("unknown struct '{name}'")),
                 };
-                self.used_structs.insert(name.clone());
+                self.note_type_use(name, false);
                 if fields.len() != declared.len() {
                     return err_at(
                         sp,
@@ -2128,6 +2382,20 @@ impl Checker {
                     }
                     let want = declared[i].1.clone();
                     let got = self.expr_ty(fexpr)?;
+                    // arrays are not first-class: an array-typed field can
+                    // only be initialized by a literal, never by another
+                    // array value (C has no array assignment)
+                    if matches!(want, Type::Array(..))
+                        && !matches!(&fexpr.node, ExprKind::ArrayLit(_))
+                    {
+                        return err_at(
+                            sp,
+                            format!(
+                                "struct '{}': field '{}' is an array — initialize it with an array literal (arrays are not first-class)",
+                                name, fname
+                            ),
+                        );
+                    }
                     if !assignable_checked(&want, fexpr, &got, sp)? {
                         return err_at(
                             sp,
@@ -2415,7 +2683,7 @@ impl Checker {
                         );
                     }
                 }
-                self.used_enums.insert(ename.clone());
+                self.note_type_use(ename, true);
                 Ok(Type::Enum(ename.clone()))
             }
             ExprKind::Match(_) => err_at(
@@ -2655,7 +2923,7 @@ impl Checker {
                                     ),
                                 );
                             }
-                            self.called_funcs.insert(work_name.clone());
+                            self.note_call(&work_name.clone());
                             let param_ty = sig.params[0].name();
                             let data = std::mem::replace(&mut args[1], dummy_expr(sp));
                             *e = Spanned::new(
@@ -3415,11 +3683,15 @@ impl Checker {
                                 ),
                             );
                         }
-                        self.called_funcs.insert(cmp_name.clone());
+                        self.note_call(&cmp_name.clone());
                         // resolve the collection into (base, len, elem);
                         // every form validates its own argument count
                         let base: Expr;
                         let len: Expr;
+                        // set for the Vec-like form: codegen must bind the
+                        // collection to a temp before reading data/len
+                        let mut vec_like = false;
+                        let mut vec_coll: Option<Expr> = None;
                         let mut needle: Option<Expr> = None;
                         let mut needle_ty = Type::Void;
                         let elem: Type;
@@ -3479,6 +3751,10 @@ impl Checker {
                                     (Some(el), true) => {
                                         let coll =
                                             std::mem::replace(&mut args[0], dummy_expr(sp));
+                                        // keep the ORIGINAL collection
+                                        // expression: codegen binds it to a
+                                        // temp and reads data/len from that
+                                        let coll_orig = coll.clone();
                                         base = Spanned::new(
                                             ExprKind::Field(
                                                 Box::new(coll.clone()),
@@ -3491,6 +3767,11 @@ impl Checker {
                                             sp,
                                         );
                                         elem = el;
+                                        // a call as the collection
+                                        // (`sort(mk(), cmp)`) would evaluate
+                                        // twice, once per field
+                                        vec_like = true;
+                                        vec_coll = Some(coll_orig);
                                     }
                                     _ => {
                                         return err_at(
@@ -3590,12 +3871,36 @@ impl Checker {
                             }
                         }
                         let helper = if searching { "_wlel_bsearch" } else { "_wlel_sort" };
-                        let mut new_args = vec![base, len];
-                        if let Some(nd) = needle {
-                            new_args.push(nd);
-                        }
+                        let mut new_args = if vec_like {
+                            // codegen needs the collection value itself, not
+                            // the already-projected .data/.len fields
+                            let coll = match vec_coll.take() {
+                                Some(c) => c,
+                                None => base.clone(),
+                            };
+                            let mut v = vec![coll];
+                            if searching {
+                                v.push(std::mem::replace(&mut needle, None).unwrap_or_else(|| dummy_expr(sp)));
+                            }
+                            v
+                        } else {
+                            let mut v = vec![base, len];
+                            if let Some(nd) = needle.take() {
+                                v.push(nd);
+                            }
+                            v
+                        };
                         new_args.push(Spanned::new(ExprKind::Str(elem.name()), sp));
                         new_args.push(Spanned::new(ExprKind::Str(cmp_name), sp));
+                        if vec_like {
+                            // trailing metadata tells codegen to bind the
+                            // collection to a temp before reading data/len,
+                            // so the expression is evaluated exactly once
+                            new_args.push(Spanned::new(
+                                ExprKind::Str(format!("__vec__{}", val_tys[0].name())),
+                                sp,
+                            ));
+                        }
                         *e = Spanned::new(
                             ExprKind::Call(helper.into(), vec![], new_args),
                             sp,
@@ -3610,6 +3915,7 @@ impl Checker {
                         "print_int" | "println_int" => &[Type::Int(IntW::I64)],
                         "print_float" | "println_float" => &[Type::Float(FloatW::F64)],
                         "print_str" | "println_str" => &[Type::Str],
+                        "print_bool" | "println_bool" => &[Type::Bool],
                         "strlen" => &[Type::Str],
                         "streq" => &[Type::Str, Type::Str],
                         "float_to_str" => &[Type::Float(FloatW::F64)],
@@ -3794,7 +4100,7 @@ impl Checker {
                     for (tp, ta) in gen.type_params.iter().zip(ty_args.iter()) {
                         binds.insert(tp.clone(), self.resolve_type_str(ta, sp)?);
                     }
-                    self.called_funcs.insert(name.clone());
+                    self.note_call(&name.clone());
                     let mangled = self.instantiate_fn(name.as_str(), &binds, sp)?;
                     let taken = std::mem::take(args);
                     *e = Spanned::new(ExprKind::Call(mangled, vec![], taken), sp);
@@ -3835,7 +4141,7 @@ impl Checker {
                             );
                         }
                     }
-                    self.called_funcs.insert(name.clone());
+                    self.note_call(&name.clone());
                     let mangled = self.instantiate_fn(name.as_str(), &binds, sp)?;
                     let taken = std::mem::take(args);
                     *e = Spanned::new(ExprKind::Call(mangled, vec![], taken), sp);
@@ -3850,7 +4156,7 @@ impl Checker {
                 let cached: Option<FuncSig> = self.sigs.get(name).cloned();
                 let sig = match cached {
                     Some(s) => {
-                        self.called_funcs.insert(name.clone());
+                        self.note_call(&name.clone());
                         s
                     }
                     None => {
@@ -3940,8 +4246,34 @@ impl Checker {
                     );
                 }
                 for (i, a) in args.iter_mut().enumerate() {
-                    let at = self.expr_ty(a)?;
                     let want = &sig.params[i];
+                    // seed the expected-type hint when the argument is a
+                    // direct generic enum constructor: `take(Ok(5))` needs
+                    // the parameter type to fill Result's E
+                    if let Type::Enum(m) = want {
+                        if let Some(origin) = self.enum_origin.get(m).cloned() {
+                            if let Some(args) = self.enum_args.get(m).cloned() {
+                                // only a DIRECT variant constructor takes
+                                // the hint; a nested call (`take(wrap(Ok(5)))`)
+                                // must not leak it into the inner arguments
+                                let direct = match &a.node {
+                                    ExprKind::Call(n, ta, _) => {
+                                        ta.is_empty() && self.variant_owner.contains_key(n)
+                                    }
+                                    ExprKind::Ident(n) => {
+                                        self.variant_owner.contains_key(n)
+                                            && self.lookup(n).is_none()
+                                    }
+                                    _ => false,
+                                };
+                                if direct {
+                                    self.expected = Some((origin, args));
+                                }
+                            }
+                        }
+                    }
+                    let at = self.expr_ty(a)?;
+                    self.expected = None;
                     // C-style array decay: [T; N] argument to *T parameter
                     let ok = match (want, &at) {
                         (Type::Ptr(w), Type::Array(el, _)) => **w == **el,
@@ -4060,6 +4392,19 @@ impl Checker {
                             ),
                         );
                     }
+                    // arrays are not first-class: `let b: [int; 3] = a;`
+                    // would emit a C array copy, which does not exist
+                    if matches!(d, Type::Array(..))
+                        && !matches!(&init.node, ExprKind::ArrayLit(_))
+                    {
+                        return err_at(
+                            sp,
+                            format!(
+                                "cannot copy array value into '{}' — arrays are not first-class; index the elements or wrap the array in a struct",
+                                name
+                            ),
+                        );
+                    }
                     self.declare("let", name, d, sp)?;
                 } else {
                     if init_ty == Type::Void {
@@ -4068,12 +4413,41 @@ impl Checker {
                             format!("cannot infer type of '{name}' from void expression"),
                         );
                     }
+                    // arrays are not first-class (§3.2): `b := a` would emit
+                    // a C array copy, which does not exist
+                    if matches!(init_ty, Type::Array(..))
+                        && !matches!(&init.node, ExprKind::ArrayLit(_))
+                    {
+                        return err_at(
+                            sp,
+                            format!(
+                                "cannot copy array value into '{name}' — arrays are not first-class; index the elements or wrap the array in a struct"
+                            ),
+                        );
+                    }
                     *ty_ann = Some(init_ty.name());
                     self.declare("let", name, init_ty, sp)?;
                 }
                 Ok(())
             }
             StmtKind::Assign(a) => {
+                // the target must be an lvalue: a variable, field,
+                // dereference or index — anything else (`1 = 2`, `f().x = 1`,
+                // `(x + 1) = 2`) is a compile-time error, not a C error
+                if !is_lvalue(&a.target) {
+                    return err_at(
+                        a.target.span,
+                        "assignment target must be a variable, field, dereference or index",
+                    );
+                }
+                if let ExprKind::Field(obj, _) = &a.target.node {
+                    if !is_lvalue(obj) {
+                        return err_at(
+                            a.target.span,
+                            "assignment target must be a variable, field, dereference or index",
+                        );
+                    }
+                }
                 // a plain `x = v` writes x; it does not read it, so the read
                 // flag the target check sets is restored afterwards
                 let plain_write =
@@ -4187,18 +4561,26 @@ impl Checker {
                 let elem: Type = match &it_ty {
                     Type::Array(el, _) => (**el).clone(),
                     Type::Struct(sname) => {
-                        let data_ty = self
-                            .structs
-                            .get(sname)
-                            .and_then(|fs| fs.iter().find(|(n, _)| n == "data"))
+                        // a Vec-shaped struct needs BOTH `data: *T` and an
+                        // integer `len`: the codegen reads `.data` and `.len`
+                        // (a struct with only `data` used to reach cc)
+                        let fields = self.structs.get(sname).cloned().unwrap_or_default();
+                        let data_ty = fields
+                            .iter()
+                            .find(|(n, _)| n == "data")
                             .map(|(_, t)| t.clone());
-                        match data_ty {
-                            Some(Type::Ptr(el)) => *el,
+                        let has_len = fields
+                            .iter()
+                            .find(|(n, _)| n == "len")
+                            .map(|(_, t)| is_int(t))
+                            .unwrap_or(false);
+                        match (data_ty, has_len) {
+                            (Some(Type::Ptr(el)), true) => *el,
                             _ => {
                                 return err_at(
                                     sp,
                                     format!(
-                                        "cannot iterate over {} — for-in supports arrays and Vec[T]",
+                                        "cannot iterate over {} — for-in needs an array or a struct with `data: *T` and an int `len`",
                                         it_ty.name()
                                     ),
                                 )
@@ -4217,6 +4599,18 @@ impl Checker {
                 };
                 if elem == Type::Void {
                     return err_at(sp, "cannot iterate over void elements");
+                }
+                // an array element is not first-class: the loop variable
+                // would need a C array assignment (`long long x[2] = ...`),
+                // which does not exist
+                if matches!(elem, Type::Array(..)) {
+                    return err_at(
+                        sp,
+                        format!(
+                            "cannot iterate over arrays of arrays — the loop variable would be a {} value; index it or wrap it in a struct",
+                            elem.name()
+                        ),
+                    );
                 }
                 f.elem = Some(elem.name());
                 self.loop_depth += 1;
@@ -4292,7 +4686,19 @@ impl Checker {
                                 msg: format!("enum '{ret_inst}' has no success variant"),
                                 span: tsp,
                             })?;
-                        let r_ok_ty = rvariants[r_ok_i].1[0].clone();
+                        let r_ok_ty = match rvariants[r_ok_i].1.as_slice() {
+                            [t] => t.clone(),
+                            _ => {
+                                return err_at(
+                                    tsp,
+                                    format!(
+                                        "'?' needs '{}::Ok' to carry exactly one payload, found {}",
+                                        ret_inst,
+                                        rvariants[r_ok_i].1.len()
+                                    ),
+                                )
+                            }
+                        };
                         if !assignable_checked(&r_ok_ty, e, &unwrapped, tsp)? {
                             return err_at(
                                 tsp,
@@ -4434,6 +4840,7 @@ impl Checker {
         }
     }
 
+
     /// Build an enum value from a call to a variant name. Concrete enums
     /// construct directly; generic enums infer type arguments from the
     /// payload expressions (like generic struct literals), falling back to
@@ -4511,7 +4918,7 @@ impl Checker {
             let arg_strs: Vec<String> =
                 gen.type_params.iter().map(|tp| binds[tp].name()).collect();
             let mangled = self.instantiate_enum(&owner, arg_strs, sp)?;
-            self.used_enums.insert(mangled.clone());
+            self.note_type_use(&mangled.clone(), true);
             // re-check the payloads against the concrete payload types
             let variants = self.enums.get(&mangled).cloned().ok_or_else(|| CheckError {
                 msg: format!("unknown enum '{mangled}'"),
@@ -4583,7 +4990,7 @@ impl Checker {
                 );
             }
         }
-        self.used_enums.insert(owner.clone());
+        self.note_type_use(&owner.clone(), true);
         *e = Spanned::new(
             ExprKind::EnumLit(owner.clone(), vi, variant, args),
             sp,
@@ -4606,7 +5013,7 @@ impl Checker {
                 )
             }
         };
-        self.used_enums.insert(enum_name.clone());
+        self.note_type_use(&enum_name.clone(), true);
         let variants = self.enums.get(&enum_name).cloned().ok_or_else(|| CheckError {
             msg: format!("unknown enum '{enum_name}'"),
             span: sp,
@@ -4890,7 +5297,7 @@ impl Checker {
             );
             self.enum_args.insert(name.clone(), vec![ok, err]);
             self.enum_origin.insert(name.clone(), "Result".to_string());
-            self.used_enums.insert(name.clone());
+            self.note_type_use(&name.clone(), true);
         }
         name
     }
@@ -4935,8 +5342,32 @@ impl Checker {
                         msg: format!("enum '{inst}' has no variant 'Err'"),
                         span: sp,
                     })?;
-                let ok_ty = variants[ok_i].1[0].clone();
-                let err_ty = variants[err_i].1[0].clone();
+                let ok_ty = match variants[ok_i].1.as_slice() {
+                    [t] => t.clone(),
+                    _ => {
+                        return err_at(
+                            sp,
+                            format!(
+                                "'?' needs '{}::Ok' to carry exactly one payload, found {}",
+                                inst,
+                                variants[ok_i].1.len()
+                            ),
+                        )
+                    }
+                };
+                let err_ty = match variants[err_i].1.as_slice() {
+                    [t] => t.clone(),
+                    _ => {
+                        return err_at(
+                            sp,
+                            format!(
+                                "'?' needs '{}::Err' to carry exactly one payload, found {}",
+                                inst,
+                                variants[err_i].1.len()
+                            ),
+                        )
+                    }
+                };
                 // the enclosing function must return Result[.., err_ty]
                 let Type::Enum(ret_inst) = self.current_ret.clone() else {
                     return err_at(
@@ -4971,7 +5402,38 @@ impl Checker {
                         msg: format!("enum '{ret_inst}' has no variant 'Err'"),
                         span: sp,
                     })?;
-                let r_err_ty = rvariants[r_err_i].1[0].clone();
+                let r_err_ty = match rvariants[r_err_i].1.as_slice() {
+                    [t] => t.clone(),
+                    _ => {
+                        return err_at(
+                            sp,
+                            format!(
+                                "'?' needs '{}::Err' to carry exactly one payload, found {}",
+                                ret_inst,
+                                rvariants[r_err_i].1.len()
+                            ),
+                        )
+                    }
+                };
+                // the payload is re-wrapped as the return enum's Ok, which
+                // must therefore exist and carry exactly one value
+                let r_ok_i = rvariants
+                    .iter()
+                    .position(|(n, _)| n == "Ok")
+                    .ok_or_else(|| CheckError {
+                        msg: format!("enum '{ret_inst}' has no variant 'Ok'"),
+                        span: sp,
+                    })?;
+                if rvariants[r_ok_i].1.len() != 1 {
+                    return err_at(
+                        sp,
+                        format!(
+                            "'?' needs '{}::Ok' to carry exactly one payload, found {}",
+                            ret_inst,
+                            rvariants[r_ok_i].1.len()
+                        ),
+                    );
+                }
                 if r_err_ty != err_ty {
                     return err_at(
                         sp,
@@ -4987,6 +5449,8 @@ impl Checker {
                 t.err_variant = "Err".to_string();
                 t.err_arity = 1;
                 t.ok_variant = "Ok".to_string();
+                t.ret_ok_tag = r_ok_i;
+                t.ret_ok_variant = "Ok".to_string();
                 Ok(ok_ty)
             }
             Some("Option") => {
@@ -5008,7 +5472,19 @@ impl Checker {
                         msg: format!("enum '{inst}' has no variant 'None'"),
                         span: sp,
                     })?;
-                let some_ty = variants[some_i].1[0].clone();
+                let some_ty = match variants[some_i].1.as_slice() {
+                    [t] => t.clone(),
+                    _ => {
+                        return err_at(
+                            sp,
+                            format!(
+                                "'?' needs '{}::Some' to carry exactly one payload, found {}",
+                                inst,
+                                variants[some_i].1.len()
+                            ),
+                        )
+                    }
+                };
                 // the enclosing function must return an Option (any payload)
                 let Type::Enum(ret_inst) = self.current_ret.clone() else {
                     return err_at(
@@ -5029,11 +5505,35 @@ impl Checker {
                         ),
                     );
                 }
+                let rvariants =
+                    self.enums.get(&ret_inst).cloned().ok_or_else(|| CheckError {
+                        msg: format!("unknown enum '{ret_inst}'"),
+                        span: sp,
+                    })?;
+                let r_some_i = rvariants
+                    .iter()
+                    .position(|(n, _)| n == "Some")
+                    .ok_or_else(|| CheckError {
+                        msg: format!("enum '{ret_inst}' has no variant 'Some'"),
+                        span: sp,
+                    })?;
+                if rvariants[r_some_i].1.len() != 1 {
+                    return err_at(
+                        sp,
+                        format!(
+                            "'?' needs '{}::Some' to carry exactly one payload, found {}",
+                            ret_inst,
+                            rvariants[r_some_i].1.len()
+                        ),
+                    );
+                }
                 t.ret_name = ret_inst;
                 t.err_tag = none_i;
                 t.err_variant = "None".to_string();
                 t.err_arity = 0;
                 t.ok_variant = "Some".to_string();
+                t.ret_ok_tag = r_some_i;
+                t.ret_ok_variant = "Some".to_string();
                 Ok(some_ty)
             }
             _ => err_at(
@@ -5167,6 +5667,34 @@ impl Checker {
     }
 }
 
+/// Names that cannot appear as C identifiers in generated code: C keywords
+/// and built-in type names (a local `int := 5` emits `long long int = 5;`),
+/// plus the runtime/std symbol prefixes the prelude defines.
+fn c_reserved(name: &str) -> bool {
+    matches!(
+        name,
+        "auto" | "break" | "case" | "char" | "const" | "continue" | "default" | "do"
+            | "double" | "else" | "enum" | "extern" | "float" | "for" | "goto" | "if"
+            | "inline" | "int" | "long" | "register" | "restrict" | "return" | "short"
+            | "signed" | "sizeof" | "static" | "struct" | "switch" | "typedef" | "union"
+            | "unsigned" | "void" | "volatile" | "while" | "_Bool" | "_Complex"
+            | "_Imaginary" | "bool" | "true" | "false"
+            | "int8_t" | "int16_t" | "int32_t" | "int64_t"
+            | "uint8_t" | "uint16_t" | "uint32_t" | "uint64_t" | "size_t"
+            | "printf" | "fprintf" | "sprintf" | "snprintf" | "fputs" | "fopen" | "fclose"
+            | "fread" | "fwrite" | "fseek" | "ftell" | "ferror" | "malloc" | "free"
+            | "calloc" | "realloc" | "memcpy" | "memset" | "strlen" | "strcmp" | "strcpy"
+            | "strerror" | "strtod" | "exit" | "atexit" | "setjmp" | "longjmp"
+            | "clock_gettime" | "nanosleep" | "pthread_create" | "pthread_join"
+            | "pthread_mutex_lock" | "pthread_mutex_unlock" | "pthread_mutex_init"
+            | "pthread_mutex_destroy" | "pthread_cond_wait" | "pthread_cond_signal"
+            | "pthread_cond_broadcast" | "pthread_cond_init" | "pthread_cond_destroy"
+    ) || name.starts_with("wlel_")
+        || name.starts_with("_wlel_")
+        || name.starts_with("std__")
+        || name.starts_with("sys__")
+}
+
 fn assignable(target: &Type, value: &Type) -> bool {
     target == value
         || (matches!(target, Type::Float(_)) && matches!(value, Type::Int(_)))
@@ -5210,30 +5738,49 @@ fn assignable_checked(target: &Type, value: &Expr, value_ty: &Type, span: Span) 
 fn called_files(
     program: &Program,
     called_funcs: &HashSet<String>,
+    called_from: &HashMap<String, HashSet<String>>,
     used_structs: &HashSet<String>,
     used_enums: &HashSet<String>,
+    used_type_from: &HashMap<String, HashSet<String>>,
     generic_funcs: &HashMap<String, FuncDef>,
     generic_structs: &HashMap<String, StructDef>,
     generic_enums: &HashMap<String, EnumDef>,
 ) -> HashSet<String> {
+    // a symbol is used when SOMEONE ELSE calls it: a call inside the same
+    // file (imported helper calling its own helper) proves nothing about
+    // whether the importer needs the import
+    let externally_called = |name: &str, file: &str| -> bool {
+        called_funcs.contains(name)
+            && called_from
+                .get(name)
+                .is_some_and(|callers| callers.iter().any(|c| c != file))
+    };
     let mut files: HashSet<String> = HashSet::new();
     for f in &program.funcs {
-        if called_funcs.contains(&f.name) {
+        if externally_called(&f.name, &f.file) {
             files.insert(f.file.clone());
         }
     }
     for s in &program.structs {
-        if used_structs.contains(&s.name) {
+        if used_structs.contains(&s.name)
+            && used_type_from
+                .get(&s.name)
+                .is_some_and(|by| by.iter().any(|f| *f != s.file))
+        {
             files.insert(s.file.clone());
         }
     }
     for e in &program.enums {
-        if used_enums.contains(&e.name) {
+        if used_enums.contains(&e.name)
+            && used_type_from
+                .get(&e.name)
+                .is_some_and(|by| by.iter().any(|f| *f != e.file))
+        {
             files.insert(e.file.clone());
         }
     }
     for (name, f) in generic_funcs {
-        if called_funcs.contains(name) {
+        if externally_called(name, &f.file) {
             files.insert(f.file.clone());
         }
     }
@@ -5256,7 +5803,10 @@ pub(crate) fn mangle_ty(t: &str) -> String {
     let mut out = String::new();
     for c in t.chars() {
         match c {
-            '*' => out.push('p'),
+            // `p` alone would make `*int` and a user struct named `pint`
+            // collide (Box[*int] == Box[pint]); the star gets a marker that
+            // cannot start an identifier
+            '*' => out.push_str("$p"),
             '[' => out.push('$'),
             ']' | ';' | ',' | ' ' => {}
             other => out.push(other),

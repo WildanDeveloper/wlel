@@ -198,15 +198,42 @@ impl<'a> JsonParser<'a> {
                 Some(b'\\') => {
                     self.i += 1;
                     match self.peek() {
-                        Some(b'"') => out.push('"'),
-                        Some(b'\\') => out.push('\\'),
-                        Some(b'/') => out.push('/'),
-                        Some(b'b') => out.push('\u{8}'),
-                        Some(b'f') => out.push('\u{c}'),
-                        Some(b'n') => out.push('\n'),
-                        Some(b'r') => out.push('\r'),
-                        Some(b't') => out.push('\t'),
+                        Some(b'"') => {
+                            out.push('"');
+                            self.i += 1;
+                        }
+                        Some(b'\\') => {
+                            out.push('\\');
+                            self.i += 1;
+                        }
+                        Some(b'/') => {
+                            out.push('/');
+                            self.i += 1;
+                        }
+                        Some(b'b') => {
+                            out.push('\u{8}');
+                            self.i += 1;
+                        }
+                        Some(b'f') => {
+                            out.push('\u{c}');
+                            self.i += 1;
+                        }
+                        Some(b'n') => {
+                            out.push('\n');
+                            self.i += 1;
+                        }
+                        Some(b'r') => {
+                            out.push('\r');
+                            self.i += 1;
+                        }
+                        Some(b't') => {
+                            out.push('\t');
+                            self.i += 1;
+                        }
                         Some(b'u') => {
+                            // `hex4` consumes the four digits itself; adding
+                            // another `self.i += 1` here swallowed the
+                            // character that followed the escape
                             self.i += 1;
                             let cp = self.hex4()?;
                             if (0xD800..0xDC00).contains(&cp) {
@@ -233,7 +260,6 @@ impl<'a> JsonParser<'a> {
                         }
                         _ => return Err(format!("bad escape at byte {}", self.i)),
                     }
-                    self.i += 1;
                 }
                 Some(_) => {
                     // copy one UTF-8 scalar as-is
@@ -1748,7 +1774,9 @@ impl Server {
         let doc = self.docs.get_mut(&uri)?;
         doc.text = new_text;
         doc.version = version;
-        doc.analysis = None;
+        // analyze eagerly: publishDiagnostics runs right after the change and
+        // must report the NEW text's diagnostics, not an empty stale set
+        doc.analysis = Some(analyze(&doc.text, doc.path.as_deref()));
         Some(uri)
     }
 

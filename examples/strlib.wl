@@ -25,7 +25,8 @@ fn main() -> int {
     n := 0;
     if str_parse_int("  -42", &n) {
         std::println_str("parsed");
-    } else {        std::println_str("strict: whitespace rejected");
+    } else {
+        std::println_str("strict: whitespace rejected");
     }
     if str_parse_int(str_trim("  -42 "), &n) {
         std::println_str(std::format("parsed {}", n * 2));

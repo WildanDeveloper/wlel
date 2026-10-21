@@ -15,7 +15,8 @@ fn main() -> int {
         if first == "greet" {
             if argc > 2 {
                 std::println_str("hello, " + sys::arg(2) + "!");
-            } else {                std::println_str("hello, world!");
+            } else {
+                std::println_str("hello, world!");
             }
         }
     }

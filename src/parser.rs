@@ -778,6 +778,16 @@ impl<'a> Parser<'a> {
     }
 
     fn if_stmt(&mut self) -> PResult<IfStmt> {
+        // `else if` chains recurse through here: count them against the same
+        // nesting budget as expressions, or a hostile 20k-arm chain overflows
+        // the stack before any diagnostic can be printed
+        self.enter("if")?;
+        let r = self.if_stmt_inner();
+        self.leave();
+        r
+    }
+
+    fn if_stmt_inner(&mut self) -> PResult<IfStmt> {
         self.expect(&Token::If)?;
         let cond = self.expr(0)?;
         let then_body = self.block()?;
@@ -979,9 +989,18 @@ impl<'a> Parser<'a> {
         let mut cur = e;
         loop {
             if self.eat(&Token::Dot) {
-                let f = match self.ident() {
-                    Ok(f) => f,
-                    Err(_) => break,
+                // `recv.field` / `recv.method(...)`: a dot without a
+                // following identifier is a syntax error — silently dropping
+                // it would turn `x.` into `x` and `x. = 5` into a plain write
+                let f = match self.peek().clone() {
+                    Token::Ident(f) => {
+                        self.advance();
+                        f
+                    }
+                    t => {
+                        let sp = self.peek_span();
+                        return err_at(sp, format!("expected a field or method name after '.', found {t:?}"));
+                    }
                 };
                 let start = cur.span;
                 // `recv.name(` is a method call; anything else is a field
@@ -1022,6 +1041,8 @@ impl<'a> Parser<'a> {
                         err_variant: String::new(),
                         err_arity: 0,
                         ok_variant: String::new(),
+                        ret_ok_tag: 0,
+                        ret_ok_variant: String::new(),
                     }),
                 );
                 continue;

@@ -112,12 +112,14 @@ fn main() -> int {
     std::println_int(m.get_or("z", 0)); // 0
     if m.has("b") {
         std::println_str("has b");
-    } else {        std::println_str("no b");
+    } else {
+        std::println_str("no b");
     }
     m.del("b");
     if m.has("b") {
         std::println_str("has b");
-    } else {        std::println_str("no b");
+    } else {
+        std::println_str("no b");
     }
     let okv: Result[int, string] = Ok(10);
     if okv.is_ok() {
