@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792612352767,
+  "lastUpdate": 1792618039050,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -350,6 +350,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 77,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "528c7a5291bcf047f0924d3f7ad527d4558a7eef",
+          "message": "CI lint fix: clippy -D warnings — collapse the nested main-parameter check into one condition, use Option::take for the binary_search needle (mem_replace_option_with_none), and bundle the eight unused-import bookkeeping maps into a Usage<'_> struct so called_files stays under the 7-argument lint limit; behavior unchanged, cargo clippy --all-targets -- -D warnings clean",
+          "timestamp": "2026-10-22T04:26:36+07:00",
+          "tree_id": "84ca00571035ad43e7d6abc1df32976319f94b20",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/528c7a5291bcf047f0924d3f7ad527d4558a7eef"
+        },
+        "date": 1792618038453,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 11.2,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 71,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 53.3,
             "unit": "ms"
           }
         ]
