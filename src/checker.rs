@@ -786,13 +786,11 @@ impl Checker {
             // `main` is the C entry point: the codegen always emits
             // `int main(int argc, char** argv)`, so a different signature
             // silently loses parameters or emits C that cannot compile
-            if f.name == "main" {
-                if !f.params.is_empty() {
-                    return err_at(
-                        f.span,
-                        "main takes no parameters — read the command line with sys::argc()/sys::arg(i)",
-                    );
-                }
+            if f.name == "main" && !f.params.is_empty() {
+                return err_at(
+                    f.span,
+                    "main takes no parameters — read the command line with sys::argc()/sys::arg(i)",
+                );
             }
             // user functions land verbatim in the emitted C: a name that the
             // prelude already defines (`printf`, `wlel_alloc`, `std__*`)
@@ -922,14 +920,16 @@ impl Checker {
         // defined in it is referenced; `use std` when any std:: call exists
         let used_files: HashSet<String> = called_files(
             program,
-            &cx.called_funcs,
-            &cx.called_from,
-            &cx.used_structs,
-            &cx.used_enums,
-            &cx.used_type_from,
-            &cx.generic_funcs,
-            &cx.generic_structs,
-            &cx.generic_enums,
+            &Usage {
+                called_funcs: &cx.called_funcs,
+                called_from: &cx.called_from,
+                used_structs: &cx.used_structs,
+                used_enums: &cx.used_enums,
+                used_type_from: &cx.used_type_from,
+                generic_funcs: &cx.generic_funcs,
+                generic_structs: &cx.generic_structs,
+                generic_enums: &cx.generic_enums,
+            },
         );
         for u in &program.uses {
             if let (Some(orig), Some(resolved)) = (&u.path, &u.resolved) {
@@ -3880,7 +3880,7 @@ impl Checker {
                             };
                             let mut v = vec![coll];
                             if searching {
-                                v.push(std::mem::replace(&mut needle, None).unwrap_or_else(|| dummy_expr(sp)));
+                                v.push(needle.take().unwrap_or_else(|| dummy_expr(sp)));
                             }
                             v
                         } else {
@@ -5731,21 +5731,33 @@ fn assignable_checked(target: &Type, value: &Expr, value_ty: &Type, span: Span) 
     Ok(false)
 }
 
+/// Everything the unused-import pass needs to know about symbol usage:
+/// which functions were called and from where, which structs/enums were
+/// referenced and from where, and the generic templates (whose *template*
+/// name is what a reference records).
+struct Usage<'a> {
+    called_funcs: &'a HashSet<String>,
+    called_from: &'a HashMap<String, HashSet<String>>,
+    used_structs: &'a HashSet<String>,
+    used_enums: &'a HashSet<String>,
+    used_type_from: &'a HashMap<String, HashSet<String>>,
+    generic_funcs: &'a HashMap<String, FuncDef>,
+    generic_structs: &'a HashMap<String, StructDef>,
+    generic_enums: &'a HashMap<String, EnumDef>,
+}
+
 /// Files whose symbols are actually referenced: the file of every called
 /// function plus the file of every used struct or enum. Import paths are
-/// resolved to canonical paths, so matching is exact. Generic templates
-/// attribute their file when the *template name* is referenced.
-fn called_files(
-    program: &Program,
-    called_funcs: &HashSet<String>,
-    called_from: &HashMap<String, HashSet<String>>,
-    used_structs: &HashSet<String>,
-    used_enums: &HashSet<String>,
-    used_type_from: &HashMap<String, HashSet<String>>,
-    generic_funcs: &HashMap<String, FuncDef>,
-    generic_structs: &HashMap<String, StructDef>,
-    generic_enums: &HashMap<String, EnumDef>,
-) -> HashSet<String> {
+/// resolved to canonical paths, so matching is exact.
+fn called_files(program: &Program, usage: &Usage<'_>) -> HashSet<String> {
+    let called_funcs = usage.called_funcs;
+    let called_from = usage.called_from;
+    let used_structs = usage.used_structs;
+    let used_enums = usage.used_enums;
+    let used_type_from = usage.used_type_from;
+    let generic_funcs = usage.generic_funcs;
+    let generic_structs = usage.generic_structs;
+    let generic_enums = usage.generic_enums;
     // a symbol is used when SOMEONE ELSE calls it: a call inside the same
     // file (imported helper calling its own helper) proves nothing about
     // whether the importer needs the import
