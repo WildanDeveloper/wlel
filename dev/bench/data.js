@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790133217289,
+  "lastUpdate": 1792612352767,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -311,6 +311,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 71.2,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "18ee2924f675d9fbff57755fd359d545f924f702",
+          "message": "bugfix sweep: full-source audit — 34 findings fixed across parser/checker/codegen/stdlib/tooling: return-expr? re-wrapped as Ok/Some (was a raw payload → invalid C), payload-less Result/Option no longer panics the checker (clean \"exactly one payload\" error), 12k else-if chains rejected instead of stack-overflowing, trailing dot is a syntax error (was silently dropped), nested arrays + array literals in value position + struct-ordering with array fields now build, C-keyword/_wlel_/printf/malloc names rejected at check time, duplicate fields and struct↔enum name collisions rejected, main signature validated, non-lvalue assignment targets rejected by the checker, sort/binary_search bind the collection once (was double-eval), safe mode reports negative new()/arena sizes and compound /=,%= by zero, LSP \\uXXXX no longer eats the next char and didChange publishes fresh diagnostics, wlel doc no longer overwrites an index.wl page, build -o to a missing dir fails loudly, signal deaths map to 128+sig, std str_find_from/str_sub/map_insert/vec_with_cap hardened, std::print_bool implemented, unused-import/std warnings attributed correctly, generic canon covers Try/Match/MethodCall, Ok()/Some() infer from the callee parameter, enum/struct generic unification fixed, fmt else-block + float-suffix idempotency fixed; 507 cargo tests green (26 new regression tests), wlel fmt canonical, flagships + all examples type-check",
+          "timestamp": "2026-10-22T02:51:43+07:00",
+          "tree_id": "a28c4d75e9c749ab7723806bbbc5c73444799162",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/18ee2924f675d9fbff57755fd359d545f924f702"
+        },
+        "date": 1792612352382,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 20,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 82,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 77,
             "unit": "ms"
           }
         ]
