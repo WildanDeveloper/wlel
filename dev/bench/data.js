@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792705663456,
+  "lastUpdate": 1792706299047,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -423,6 +423,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "sort 1M ints",
             "value": 67,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 3,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "f8969c2969190bd5af5f3be944d0ebb9ddfa64bf",
+          "message": "tuning: front-end 10-20x (stdlib parsed once per process and cloned, `wlel check` no longer generates discarded C, lexer borrows the source and stops allocating a String per comment, identifiers/numbers scanned as slices, parser advance() stops cloning every token, codegen pre-reserves and emits #line without per-line format!, checker maps use an FxHash hasher, find_cc resolves on PATH instead of spawning `cc --version`, `wlel build` joins the content-addressed binary cache) and three real bugs found while profiling — std::sort was O(n^2) on already-sorted input (the Dijkstra 3-way partition rotated the median-of-3 sample; 1M pre-sorted ints 4.6 s -> 25 ms with a Hoare crossing partition + insertion-sort cutoff 24, fuzz-verified over 20k shapes against libc qsort), `wlel build --emit-c -o out.c` wrote the C then overwrote it with the linked ELF (a .c target now stops at the source, which is also why the \"front-end without cc\" benchmark had been timing cc: kitchen 320 -> 15 ms), and flagship/json.wl had been failing to type-check at HEAD because a nested call in a variant payload erased the expected-type hint from the return type (`Err(g(\"x\"))` now infers the Ok slot; the flagship's 10 test blocks pass again); CI now covers the flagships — a new `flagship` job type-checks, test-runs and builds them plus a JSON throughput smoke test, and `fmt -check` includes flagship/ (game.wl and json.wl were not canonical); the JSON bench floor drops from the reference machine's 100 MB/s to a portable 20 MB/s with the reference number documented, and bench.sh now reports the fastest of 7 samples instead of a median of 5 (a shared runner's interference only adds time; the median swung fib(35) 11 -> 20 ms on byte-identical generated C and tripped the 150% trend alert); also fixed the new sorted-input test's result parser, which used index arithmetic that silently dropped a digit locally and panicked on a single-digit value in CI; measured: check kitchen 23 -> 8 ms, check 28k-line file 193 -> 123 ms, build --emit-c 320 -> 15 ms, repeat build 200 -> 8 ms, sort 1M random 200 -> 135 ms, pre-sorted 4652 -> 27 ms, reversed 3246 -> 25 ms, fib(35) still at C parity; 511 cargo tests green (4 new regression tests: partition shape, sorted/reversed input, nested Result hint, --emit-c -o x.c), clippy -D warnings clean, wlel fmt canonical, ASan/LSan clean",
+          "timestamp": "2026-10-23T04:57:29+07:00",
+          "tree_id": "44e97b71cc0ad43b5589ac861b7eb0e4c10b2833",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/f8969c2969190bd5af5f3be944d0ebb9ddfa64bf"
+        },
+        "date": 1792706298716,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.8,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 66,
             "unit": "ms"
           },
           {
