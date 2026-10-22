@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792618039050,
+  "lastUpdate": 1792705663456,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -389,6 +389,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 53.3,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "29e07ef7ff569bdcb48ae10608710f1bd44d85f1",
+          "message": "tuning: front-end 10-20x (stdlib di-parse sekali + di-clone, wlel check tanpa codegen, lexer/parser/codegen bebas alokasi per token/baris, FxHash checker, find_cc tanpa spawn, build content-cache) + 3 bug nyata yang ketemu sambil profiling — std::sort O(n^2) di input terurut (partisi Dijkstra 3-way merotasi sampel median-of-3; 1M int terurut 4.6 s -> 25 ms dengan partisi silang Hoare + insertion cutoff 24, fuzz 20k kasus vs libc qsort), --emit-c -o out.c menulis C lalu menimpanya dengan ELF (target .c sekarang berhenti di source; itu juga sebabnya bench \"front-end tanpa cc\" dulu mengukur cc: kitchen 320 -> 15 ms), dan flagship/json.wl gagal type-check di HEAD karena hint expected dari return type dihapus call bersarang di payload Err(g(\"x\")) (check_variant_construct menyimpan/mengembalikan hint; flagship 10 test blok hijau lagi) — plus CI akhirnya menyentuh flagship: job `flagship` (check + test ketiga app, build json/httpd, smoke throughput JSON dengan floor rendah) dan `fmt -check` kini mencakup flagship/ juga (game.wl + json.wl ternyata belum kanonik, sudah diformat), floor 100 MB/s di json.wl dikoreksi jadi 20 MB/s dengan komentar jujur bahwa itu angka wall-clock (build HEAD di host ini ~26 MB/s), .gitignore mencakup wlel_json_test.tmp, README roadmap dipisah shipped vs next (namespace modul sebagai blocker self-hosting), bench.sh menambah metrik sort input terurut; angka: check kitchen 23 -> 8 ms, check 28k baris 193 -> 123 ms, build ulang 200 -> 8 ms, sort 1M acak 200 -> 135 ms, terurut 4652 -> 27 ms, terbalik 3246 -> 25 ms, fib(35) tetap paritas C; 511 cargo tests green (4 regresi baru: skema partisi, input terurut/terbalik, hint Result bersarang, --emit-c -o x.c), clippy -D warnings clean, wlel fmt kanonik, ASan/LSan clean",
+          "timestamp": "2026-10-23T04:46:52+07:00",
+          "tree_id": "6ce7371cf717c55bd85045c9ffa851ec805fb766",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/29e07ef7ff569bdcb48ae10608710f1bd44d85f1"
+        },
+        "date": 1792705663079,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.9,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 67,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 3,
             "unit": "ms"
           }
         ]
