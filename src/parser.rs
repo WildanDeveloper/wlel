@@ -80,13 +80,15 @@ impl<'a> Parser<'a> {
         &self.toks[(self.pos + off).min(self.toks.len() - 1)].token
     }
 
-    fn advance(&mut self) -> Token {
-        let t = self.toks[self.pos].token.clone();
+    /// consume the current token. The token itself is *not* returned: no
+    /// call site wants it, and cloning it copied an identifier/string
+    /// payload (one heap allocation) on every single token of the file.
+    /// Callers that need the payload clone it explicitly from `peek()`.
+    fn advance(&mut self) {
         self.last_end = self.toks[self.pos].span.end;
         if self.pos + 1 < self.toks.len() {
             self.pos += 1;
         }
-        t
     }
 
     fn eat(&mut self, t: &Token) -> bool {

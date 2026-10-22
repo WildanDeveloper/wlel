@@ -483,6 +483,52 @@ fn main() -> int {
 }
 
 // ---------------------------------------------------------------------------
+// enum construction: a nested call in a payload must not erase the
+// expected-type hint from the annotated let / return type
+
+#[test]
+fn variant_payload_nested_call_keeps_expected_type() {
+    // `Err(g("x"))` has no payload type that mentions T, so the Ok slot can
+    // only come from the function's declared return type. Checking the
+    // nested call used to clear that hint (flagship/json.wl regressed on it).
+    let c = Case::new(
+        "variant_nested_hint",
+        r#"use std;
+fn shout(s: string) -> string { return s + "!"; }
+fn fail(msg: string) -> Result[int, string] {
+    return Err(shout(msg));
+}
+fn main() -> int {
+    match fail("boom") {
+        Ok(v) => { std::println_int(v); }
+        Err(e) => { std::println_str(e); }
+    }
+    return 0;
+}"#,
+    );
+    let (out, code) = c.build_and_run("variant_nested_hint");
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out.trim(), "boom!", "{out}");
+}
+
+#[test]
+fn let_annotation_hint_survives_nested_variant_payload() {
+    let src = r#"use std;
+fn ident(s: string) -> string { return s; }
+fn main() -> int {
+    let r: Result[int, string] = Err(ident("bad"));
+    match r {
+        Ok(v) => { return v; }
+        Err(e) => { std::println_str(e); }
+    }
+    return 0;
+}"#;
+    let mut p = parse(src);
+    wlel::stdsrc::splice_std(&mut p);
+    Checker::check(&mut p).expect("the let annotation must seed the Ok slot");
+}
+
+// ---------------------------------------------------------------------------
 // LSP: JSON escapes and didChange diagnostics
 
 #[test]

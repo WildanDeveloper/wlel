@@ -133,10 +133,17 @@ fn helpers_emitted_and_specialized_per_pair() {
         "{c}"
     );
     // comparators are called directly (inlinable), not through void* qsort
-    assert!(c.contains("asc(a[i], pivot)"), "{c}");
+    assert!(c.contains("asc(a[++i], pivot)"), "{c}");
+    assert!(c.contains("asc(a[--j], pivot)"), "{c}");
     assert!(c.contains("asc(a[mid], key)"), "{c}");
-    assert!(c.contains("str_cmp(a[i], pivot)"), "{c}");
+    assert!(c.contains("str_cmp(a[++i], pivot)"), "{c}");
     assert!(!c.contains("qsort("), "no C qsort dependency: {c}");
+    // the partition is Hoare's crossing scan + an insertion-sort cutoff:
+    // the old Dijkstra 3-way scheme degraded to O(n^2) on already-sorted
+    // input (1M pre-sorted ints: 2.1 s versus ~15 ms here)
+    assert!(c.contains("while (hi - lo > 24)"), "insertion cutoff: {c}");
+    assert!(c.contains("while (asc(a[++i], pivot) < 0) {}"), "{c}");
+    assert!(c.contains("while (asc(a[--j], pivot) > 0) {}"), "{c}");
     // call sites carry the collection shape
     assert!(c.contains("_wlel_sort_0(a, 0, (5) - 1);"), "{c}");
     assert!(c.contains("_wlel_sort_1(f, 0, (2) - 1);"), "{c}");
@@ -351,6 +358,49 @@ fn one_million_ints_sort_under_100ms_release() {
     }
     let (ms, line) = best.expect("at least one run");
     assert!(ms < 2000, "1M int sort took {} ms: {line}", ms);
+}
+
+/// Already-sorted and reverse-sorted input must not degrade: the previous
+/// partition scheme split off one element per level for these shapes and took
+/// 1.5-2.1 s for 1M ints (vs ~15 ms now). The ceiling is generous because the
+/// number is wall-clock on a shared machine, but an O(n^2) regression is
+/// orders of magnitude past it.
+///
+/// The result line is parsed by splitting on whitespace and stripping the
+/// `key=` prefix. Do not "optimise" that into index arithmetic: an earlier
+/// version sliced `find(k) + k.len() + 1`, which silently dropped the first
+/// digit locally and panicked on a single-digit value in CI.
+#[test]
+fn sorted_and_reversed_input_stay_fast() {
+    let src = r#"use std;
+        fn asc(a: int, b: int) -> int { if a < b { return -1; } if a > b { return 1; } return 0; }
+        fn main() -> int {
+            n := 1_000_000;
+            data := new(int, n);
+            for i in 0..n { data[i] = i; }
+            t0 := sys::mono_ms();
+            std::sort(data, n, asc);
+            asc_ms := sys::mono_ms() - t0;
+            for i in 0..n { data[i] = n - i; }
+            t0 = sys::mono_ms();
+            std::sort(data, n, asc);
+            desc_ms := sys::mono_ms() - t0;
+            std::println_str(std::format("asc={} desc={}", asc_ms, desc_ms));
+            return 0;
+        }"#;
+    let (ok, out, err) = build_and_run("sortshapes", src, &["-O2"]);
+    assert!(ok, "{err}");
+    let line = out.lines().last().expect("result line");
+    let get = |k: &str| -> i64 {
+        line.split_whitespace()
+            .find_map(|part| part.strip_prefix(k))
+            .unwrap_or_else(|| panic!("{k:?} missing from {line:?}"))
+            .parse()
+            .unwrap_or_else(|e| panic!("{k:?} is not a number in {line:?}: {e}"))
+    };
+    let (asc_ms, desc_ms) = (get("asc="), get("desc="));
+    assert!(asc_ms < 2000, "sorted-input sort took {asc_ms} ms: {line}");
+    assert!(desc_ms < 2000, "reversed-input sort took {desc_ms} ms: {line}");
 }
 
 // ---------------------------------------------------------------------------

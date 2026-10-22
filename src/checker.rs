@@ -1,7 +1,62 @@
 use crate::ast::*;
 use crate::span::{Span, Spanned};
 use crate::stdsrc::STD_FILE;
-use std::collections::{HashMap, HashSet};
+
+/// Minimal FxHash-style hasher for the checker's internal maps. The
+/// compiler is single-threaded and these keys are never attacker-controlled
+/// in a way that matters (a compile is already O(source size)); SipHash's
+/// DoS resistance costs measurable time on the millions of short
+/// identifier lookups a large file makes. Not used for anything persisted
+/// or exposed across a trust boundary.
+#[derive(Default)]
+struct FxHasher {
+    hash: u64,
+}
+
+impl FxHasher {
+    #[inline]
+    fn add(&mut self, word: u64) {
+        self.hash = (self.hash.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl std::hash::Hasher for FxHasher {
+    #[inline]
+    fn write(&mut self, mut bytes: &[u8]) {
+        while bytes.len() >= 8 {
+            let mut w = [0u8; 8];
+            w.copy_from_slice(&bytes[..8]);
+            self.add(u64::from_ne_bytes(w));
+            bytes = &bytes[8..];
+        }
+        if !bytes.is_empty() {
+            let mut w = [0u8; 8];
+            w[..bytes.len()].copy_from_slice(bytes);
+            self.add(u64::from_ne_bytes(w));
+        }
+    }
+    #[inline]
+    fn write_u8(&mut self, i: u8) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn write_u32(&mut self, i: u32) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+}
+
+type Build = std::hash::BuildHasherDefault<FxHasher>;
+/// fast internal map/set aliases (see [`FxHasher`])
+type FMap<K, V> = std::collections::HashMap<K, V, Build>;
+type FSet<T> = std::collections::HashSet<T, Build>;
 
 /// Integer width. `int` in source is an alias for `I64`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,35 +323,35 @@ fn err_at<T>(span: Span, msg: impl Into<String>) -> CResult<T> {
 }
 
 pub struct Checker {
-    sigs: HashMap<String, FuncSig>,
-    structs: HashMap<String, Vec<(String, Type)>>,
+    sigs: FMap<String, FuncSig>,
+    structs: FMap<String, Vec<(String, Type)>>,
     /// concrete enums (plain and instantiated generics): name -> variants,
     /// each variant as (name, payload types)
-    enums: HashMap<String, Vec<(String, Vec<Type>)>>,
-    scopes: Vec<HashMap<String, VarInfo>>,
+    enums: FMap<String, Vec<(String, Vec<Type>)>>,
+    scopes: Vec<FMap<String, VarInfo>>,
     current_ret: Type,
     loop_depth: usize,
     arena_depth: usize,
     use_std: bool,
     std_called: bool,
     /// function names referenced by calls (for unused-import detection)
-    called_funcs: HashSet<String>,
+    called_funcs: FSet<String>,
     /// callee -> files that called it. A call made from inside the callee's
     /// own file does not prove an `use "file.wl"` import was needed.
-    called_from: HashMap<String, HashSet<String>>,
+    called_from: FMap<String, FSet<String>>,
     /// struct names referenced anywhere (types, literals, casts)
-    used_structs: HashSet<String>,
+    used_structs: FSet<String>,
     /// enum names referenced anywhere (types, constructors, match)
-    used_enums: HashSet<String>,
+    used_enums: FSet<String>,
     /// type name -> files that referenced it (same rule as called_from:
     /// a reference inside the defining file does not use the import)
-    used_type_from: HashMap<String, HashSet<String>>,
+    used_type_from: FMap<String, FSet<String>>,
     /// variant name -> owning enum's source name ("Circle" -> "Shape";
     /// for generics the TEMPLATE name: "Ok" -> "Result")
-    variant_owner: HashMap<String, String>,
+    variant_owner: FMap<String, String>,
     /// method table: (impl type name, method name) -> the desugared
     /// template function ("Vec", "push") -> `fn Vec__push[T](self: *Vec[T], x: T)`
-    methods: HashMap<(String, String), FuncDef>,
+    methods: FMap<(String, String), FuncDef>,
     /// positive while checking a `defer { ... }` block: control flow out of
     /// it is forbidden, because the block runs during scope unwinding
     defer_depth: usize,
@@ -308,23 +363,23 @@ pub struct Checker {
     warnings: Vec<CheckWarning>,
     /// generic function templates, keyed by source name; monomorphized
     /// into concrete functions at each call site
-    generic_funcs: HashMap<String, FuncDef>,
+    generic_funcs: FMap<String, FuncDef>,
     /// generic struct templates, keyed by source name
-    generic_structs: HashMap<String, StructDef>,
+    generic_structs: FMap<String, StructDef>,
     /// generic enum templates, keyed by source name
-    generic_enums: HashMap<String, EnumDef>,
+    generic_enums: FMap<String, EnumDef>,
     /// builtin channel instances: mangled struct name -> element type
     /// ("Chan__int" -> int), filled by sys::chan_new[T] so chan_send/recv
     /// can validate the value/out types against the channel's element
-    chan_elems: HashMap<String, Type>,
+    chan_elems: FMap<String, Type>,
     /// mangled struct name -> concrete type arguments (for inference)
-    struct_args: HashMap<String, Vec<Type>>,
+    struct_args: FMap<String, Vec<Type>>,
     /// mangled struct name -> the generic struct it was instantiated from
-    struct_origin: HashMap<String, String>,
+    struct_origin: FMap<String, String>,
     /// mangled enum name -> concrete type arguments (expected-type hints)
-    enum_args: HashMap<String, Vec<Type>>,
+    enum_args: FMap<String, Vec<Type>>,
     /// mangled enum name -> the generic enum it was instantiated from
-    enum_origin: HashMap<String, String>,
+    enum_origin: FMap<String, String>,
     /// monomorphized function bodies awaiting their type check
     pending_funcs: Vec<FuncDef>,
     /// monomorphized struct definitions to append to the program
@@ -346,34 +401,34 @@ impl Checker {
     pub fn check(program: &mut Program) -> CResult<Vec<CheckWarning>> {
         let use_std = program.uses.iter().any(|u| u.path.is_none());
         let mut cx = Checker {
-            sigs: HashMap::new(),
-            structs: HashMap::new(),
-            enums: HashMap::new(),
-            scopes: vec![HashMap::new()],
+            sigs: FMap::default(),
+            structs: FMap::default(),
+            enums: FMap::default(),
+            scopes: vec![FMap::default()],
             current_ret: Type::Void,
             loop_depth: 0,
             arena_depth: 0,
             use_std,
             std_called: false,
-            called_funcs: HashSet::new(),
-            called_from: HashMap::new(),
-            used_structs: HashSet::new(),
-            used_enums: HashSet::new(),
-            used_type_from: HashMap::new(),
-            variant_owner: HashMap::new(),
-            methods: HashMap::new(),
+            called_funcs: FSet::default(),
+            called_from: FMap::default(),
+            used_structs: FSet::default(),
+            used_enums: FSet::default(),
+            used_type_from: FMap::default(),
+            variant_owner: FMap::default(),
+            methods: FMap::default(),
             defer_depth: 0,
             block_terminated: false,
             current_file: String::new(),
             warnings: Vec::new(),
-            generic_funcs: HashMap::new(),
-            generic_structs: HashMap::new(),
-            generic_enums: HashMap::new(),
-            chan_elems: HashMap::new(),
-            struct_args: HashMap::new(),
-            struct_origin: HashMap::new(),
-            enum_args: HashMap::new(),
-            enum_origin: HashMap::new(),
+            generic_funcs: FMap::default(),
+            generic_structs: FMap::default(),
+            generic_enums: FMap::default(),
+            chan_elems: FMap::default(),
+            struct_args: FMap::default(),
+            struct_origin: FMap::default(),
+            enum_args: FMap::default(),
+            enum_origin: FMap::default(),
             pending_funcs: Vec::new(),
             pending_structs: Vec::new(),
             pending_enums: Vec::new(),
@@ -401,8 +456,8 @@ impl Checker {
         // generic impl carry the impl's type parameters and monomorphize
         // per receiver like any generic function.
         let empty_params: Vec<String> = Vec::new();
-        let mut generic_ty_params: HashMap<&str, &Vec<String>> = HashMap::new();
-        let mut concrete_tys: HashSet<&str> = HashSet::new();
+        let mut generic_ty_params: FMap<&str, &Vec<String>> = FMap::default();
+        let mut concrete_tys: FSet<&str> = FSet::default();
         for s in &program.structs {
             if s.type_params.is_empty() {
                 concrete_tys.insert(s.name.as_str());
@@ -678,7 +733,7 @@ impl Checker {
         }
         for st in &program.structs {
             let mut fields = Vec::with_capacity(st.fields.len());
-            let mut seen_fields: HashSet<&str> = HashSet::new();
+            let mut seen_fields: FSet<&str> = FSet::default();
             for (fname, fty) in &st.fields {
                 if !seen_fields.insert(fname.as_str()) {
                     return err_at(
@@ -864,7 +919,7 @@ impl Checker {
         // pass 2b: test bodies — void functions with no params
         for t in program.tests.iter_mut() {
             cx.current_ret = Type::Void;
-            cx.scopes = vec![HashMap::new()];
+            cx.scopes = vec![FMap::default()];
             cx.block_terminated = false;
             cx.current_file = t.file.clone();
             cx.check_block_mut(&mut t.body)?;
@@ -886,7 +941,7 @@ impl Checker {
         // C types ("Box[int]" -> "Box__int"); signatures included, since a
         // concrete function may return/take a generic struct (std's
         // `fn str_split(...) -> Vec[string]`); may instantiate more structs
-        let empty_map = HashMap::new();
+        let empty_map = FMap::default();
         for f in program.funcs.iter_mut() {
             if let Some(rt) = f.ret_type.as_mut() {
                 *rt = cx.canon_type(rt, &empty_map, f.span)?;
@@ -918,7 +973,7 @@ impl Checker {
 
         // unused imports: a file import is used when any function or struct
         // defined in it is referenced; `use std` when any std:: call exists
-        let used_files: HashSet<String> = called_files(
+        let used_files: FSet<String> = called_files(
             program,
             &Usage {
                 called_funcs: &cx.called_funcs,
@@ -991,7 +1046,7 @@ impl Checker {
         let sig_params = sig.params.clone();
         let sig_ret = sig.ret.clone();
         self.current_ret = sig_ret.clone();
-        self.scopes = vec![HashMap::new()];
+        self.scopes = vec![FMap::default()];
         self.block_terminated = false;
         self.current_file = f.file.clone();
         for (p, t) in f.params.iter().zip(sig_params.iter()) {
@@ -1026,7 +1081,7 @@ impl Checker {
                 );
             }
         }
-        let mut seen = HashSet::new();
+        let mut seen = FSet::default();
         for tp in &f.type_params {
             if !seen.insert(tp.clone()) {
                 return err_at(f.span, format!("duplicate type parameter '{tp}'"));
@@ -1080,7 +1135,7 @@ impl Checker {
                 return err_at(s.span, format!("type parameter '{tp}' shadows a built-in type"));
             }
         }
-        let mut seen = HashSet::new();
+        let mut seen = FSet::default();
         for tp in &s.type_params {
             if !seen.insert(tp.clone()) {
                 return err_at(s.span, format!("duplicate type parameter '{tp}'"));
@@ -1129,7 +1184,7 @@ impl Checker {
                 return err_at(e.span, format!("type parameter '{tp}' shadows a built-in type"));
             }
         }
-        let mut seen = HashSet::new();
+        let mut seen = FSet::default();
         for tp in &e.type_params {
             if !seen.insert(tp.clone()) {
                 return err_at(e.span, format!("duplicate type parameter '{tp}'"));
@@ -1197,12 +1252,12 @@ impl Checker {
                 ),
             );
         }
-        let empty_map = HashMap::new();
+        let empty_map = FMap::default();
         let mut args = Vec::with_capacity(raw_args.len());
         for a in &raw_args {
             args.push(self.canon_type(a, &empty_map, sp)?);
         }
-        let mut map = HashMap::new();
+        let mut map = FMap::default();
         for (tp, a) in gen.type_params.iter().zip(args.iter()) {
             map.insert(tp.clone(), a.clone());
         }
@@ -1288,12 +1343,12 @@ impl Checker {
         }
         // canonicalize arguments first ("Vec[int]" -> "Vec__int") so the
         // mangled name is stable no matter which syntax reached us
-        let empty_map = HashMap::new();
+        let empty_map = FMap::default();
         let mut args = Vec::with_capacity(raw_args.len());
         for a in &raw_args {
             args.push(self.canon_type(a, &empty_map, sp)?);
         }
-        let mut map = HashMap::new();
+        let mut map = FMap::default();
         for (tp, a) in gen.type_params.iter().zip(args.iter()) {
             map.insert(tp.clone(), a.clone());
         }
@@ -1345,7 +1400,7 @@ impl Checker {
     fn canon_type(
         &mut self,
         ty: &str,
-        map: &HashMap<String, String>,
+        map: &FMap<String, String>,
         sp: Span,
     ) -> CResult<String> {
         let chars: Vec<char> = ty.chars().collect();
@@ -1479,14 +1534,14 @@ impl Checker {
     }
 
     /// canon_type across a whole monomorphized body (annotations only)
-    fn canon_block(&mut self, b: &mut Block, map: &HashMap<String, String>, sp: Span) -> CResult<()> {
+    fn canon_block(&mut self, b: &mut Block, map: &FMap<String, String>, sp: Span) -> CResult<()> {
         for s in b.0.iter_mut() {
             self.canon_stmt(s, map, sp)?;
         }
         Ok(())
     }
 
-    fn canon_stmt(&mut self, s: &mut Stmt, map: &HashMap<String, String>, sp: Span) -> CResult<()> {
+    fn canon_stmt(&mut self, s: &mut Stmt, map: &FMap<String, String>, sp: Span) -> CResult<()> {
         match &mut s.node {
             StmtKind::Let(_, ty_ann, e) => {
                 if let Some(t) = ty_ann {
@@ -1545,7 +1600,7 @@ impl Checker {
         Ok(())
     }
 
-    fn canon_if(&mut self, i: &mut IfStmt, map: &HashMap<String, String>, sp: Span) -> CResult<()> {
+    fn canon_if(&mut self, i: &mut IfStmt, map: &FMap<String, String>, sp: Span) -> CResult<()> {
         self.canon_expr(&mut i.cond, map, sp)?;
         self.canon_block(&mut i.then_body, map, sp)?;
         match &mut i.else_branch {
@@ -1556,7 +1611,7 @@ impl Checker {
         Ok(())
     }
 
-    fn canon_expr(&mut self, e: &mut Expr, map: &HashMap<String, String>, sp: Span) -> CResult<()> {
+    fn canon_expr(&mut self, e: &mut Expr, map: &FMap<String, String>, sp: Span) -> CResult<()> {
         match &mut e.node {
             ExprKind::Cast(ty, x) => {
                 *ty = self.canon_type(ty, map, sp)?;
@@ -1634,7 +1689,7 @@ impl Checker {
     fn instantiate_fn(
         &mut self,
         name: &str,
-        binds: &HashMap<String, Type>,
+        binds: &FMap<String, Type>,
         sp: Span,
     ) -> CResult<String> {
         let gen = self
@@ -1645,7 +1700,7 @@ impl Checker {
                 span: sp,
             })?
             .clone();
-        let mut map = HashMap::new();
+        let mut map = FMap::default();
         for tp in &gen.type_params {
             let t = binds.get(tp).ok_or_else(|| CheckError {
                 msg: format!("cannot infer type parameter '{tp}' of '{name}'"),
@@ -1704,7 +1759,7 @@ impl Checker {
         pattern: &str,
         arg: &Type,
         params: &[String],
-        binds: &mut HashMap<String, Type>,
+        binds: &mut FMap<String, Type>,
         sp: Span,
     ) -> CResult<()> {
         let stars = pattern.chars().take_while(|c| *c == '*').count();
@@ -1947,10 +2002,11 @@ impl Checker {
     /// imported file calling its own helpers
     fn note_call(&mut self, callee: &str) {
         self.called_funcs.insert(callee.to_string());
-        self.called_from
-            .entry(callee.to_string())
-            .or_default()
-            .insert(self.current_file.clone());
+        // the inner set is keyed by file and stays tiny (one entry per
+        // calling file), so cloning the name here is the only allocation
+        // this hot path needs
+        let file = self.current_file.clone();
+        self.called_from.entry(callee.to_string()).or_default().insert(file);
     }
 
     /// record a reference to a struct/enum from the file being checked
@@ -1960,10 +2016,8 @@ impl Checker {
         } else {
             self.used_structs.insert(name.to_string());
         }
-        self.used_type_from
-            .entry(name.to_string())
-            .or_default()
-            .insert(self.current_file.clone());
+        let file = self.current_file.clone();
+        self.used_type_from.entry(name.to_string()).or_default().insert(file);
     }
 
     fn lookup(&mut self, name: &str) -> Option<Type> {
@@ -2286,7 +2340,7 @@ impl Checker {
                 let fname = if tmpl.type_params.is_empty() {
                     tmpl.name.clone()
                 } else {
-                    let mut binds = HashMap::new();
+                    let mut binds = FMap::default();
                     for (tp, ta) in tmpl.type_params.iter().zip(targs.iter()) {
                         binds.insert(tp.clone(), ta.clone());
                     }
@@ -2321,7 +2375,7 @@ impl Checker {
                             ),
                         );
                     }
-                    let mut binds = HashMap::new();
+                    let mut binds = FMap::default();
                     for (i, (fname, _)) in fields.iter().enumerate() {
                         let pat = gen
                             .fields
@@ -4096,7 +4150,7 @@ impl Checker {
                             ),
                         );
                     }
-                    let mut binds = HashMap::new();
+                    let mut binds = FMap::default();
                     for (tp, ta) in gen.type_params.iter().zip(ty_args.iter()) {
                         binds.insert(tp.clone(), self.resolve_type_str(ta, sp)?);
                     }
@@ -4126,7 +4180,7 @@ impl Checker {
                     for a in args.iter_mut() {
                         arg_types.push(self.expr_ty(a)?);
                     }
-                    let mut binds = HashMap::new();
+                    let mut binds = FMap::default();
                     for (p, at) in gen.params.iter().zip(arg_types.iter()) {
                         let pat = p.ty.as_deref().unwrap_or("int");
                         self.unify_pattern(pat, at, &gen.type_params, &mut binds, sp)?;
@@ -4300,7 +4354,7 @@ impl Checker {
     fn check_block_mut(&mut self, b: &mut Block) -> CResult<()> {
         // a terminator inside this block does not terminate the enclosing one
         let outer_terminated = std::mem::replace(&mut self.block_terminated, false);
-        self.scopes.push(HashMap::new());
+        self.scopes.push(FMap::default());
         for s in b.0.iter_mut() {
             if self.block_terminated {
                 self.warnings.push(CheckWarning {
@@ -4535,7 +4589,7 @@ impl Checker {
                     );
                 }
                 self.loop_depth += 1;
-                self.scopes.push(HashMap::new());
+                self.scopes.push(FMap::default());
                 let outer_terminated =
                     std::mem::replace(&mut self.block_terminated, false);
                 self.declare("for", var, Type::Int(IntW::I64), sp)?;
@@ -4614,7 +4668,7 @@ impl Checker {
                 }
                 f.elem = Some(elem.name());
                 self.loop_depth += 1;
-                self.scopes.push(HashMap::new());
+                self.scopes.push(FMap::default());
                 let outer_terminated =
                     std::mem::replace(&mut self.block_terminated, false);
                 self.declare("for", &f.var, elem, sp)?;
@@ -4885,11 +4939,18 @@ impl Checker {
                     ),
                 );
             }
+            // checking a payload argument can itself be a call, whose
+            // argument loop clears `expected` when it finishes; save the
+            // hint seeded for THIS constructor and restore it afterwards
+            // (a nested call must not erase it: `Err(g("x"))` needs the
+            // return type's `Result[..., E]` to fill the Ok slot)
+            let saved_expected = self.expected.take();
             let mut arg_types = Vec::with_capacity(args.len());
             for a in args.iter_mut() {
                 arg_types.push(self.expr_ty(a)?);
             }
-            let mut binds: HashMap<String, Type> = HashMap::new();
+            self.expected = saved_expected;
+            let mut binds: FMap<String, Type> = FMap::default();
             for (pat, at) in vdef.payloads.iter().zip(arg_types.iter()) {
                 self.unify_pattern(pat, at, &gen.type_params, &mut binds, sp)?;
             }
@@ -5061,7 +5122,7 @@ impl Checker {
                         );
                     }
                     // bindings live only inside this arm; `_` is a discard
-                    self.scopes.push(HashMap::new());
+                    self.scopes.push(FMap::default());
                     bound = true;
                     for (b, pt) in binds.iter_mut().zip(payload.iter()) {
                         b.ty = Some(pt.name());
@@ -5736,20 +5797,20 @@ fn assignable_checked(target: &Type, value: &Expr, value_ty: &Type, span: Span) 
 /// referenced and from where, and the generic templates (whose *template*
 /// name is what a reference records).
 struct Usage<'a> {
-    called_funcs: &'a HashSet<String>,
-    called_from: &'a HashMap<String, HashSet<String>>,
-    used_structs: &'a HashSet<String>,
-    used_enums: &'a HashSet<String>,
-    used_type_from: &'a HashMap<String, HashSet<String>>,
-    generic_funcs: &'a HashMap<String, FuncDef>,
-    generic_structs: &'a HashMap<String, StructDef>,
-    generic_enums: &'a HashMap<String, EnumDef>,
+    called_funcs: &'a FSet<String>,
+    called_from: &'a FMap<String, FSet<String>>,
+    used_structs: &'a FSet<String>,
+    used_enums: &'a FSet<String>,
+    used_type_from: &'a FMap<String, FSet<String>>,
+    generic_funcs: &'a FMap<String, FuncDef>,
+    generic_structs: &'a FMap<String, StructDef>,
+    generic_enums: &'a FMap<String, EnumDef>,
 }
 
 /// Files whose symbols are actually referenced: the file of every called
 /// function plus the file of every used struct or enum. Import paths are
 /// resolved to canonical paths, so matching is exact.
-fn called_files(program: &Program, usage: &Usage<'_>) -> HashSet<String> {
+fn called_files(program: &Program, usage: &Usage<'_>) -> FSet<String> {
     let called_funcs = usage.called_funcs;
     let called_from = usage.called_from;
     let used_structs = usage.used_structs;
@@ -5767,7 +5828,7 @@ fn called_files(program: &Program, usage: &Usage<'_>) -> HashSet<String> {
                 .get(name)
                 .is_some_and(|callers| callers.iter().any(|c| c != file))
     };
-    let mut files: HashSet<String> = HashSet::new();
+    let mut files: FSet<String> = FSet::default();
     for f in &program.funcs {
         if externally_called(&f.name, &f.file) {
             files.insert(f.file.clone());

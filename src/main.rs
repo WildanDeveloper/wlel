@@ -318,6 +318,23 @@ fn front(file: &str, test_mode: bool, safe: bool) -> Result<(String, Vec<CheckWa
     front_prog(program, file, test_mode, safe)
 }
 
+/// `wlel check`: load + splice + type-check, no code generation. Emitting C
+/// just to throw it away was a third of a large file's check time.
+fn check_front(file: &str) -> Result<Vec<CheckWarning>, String> {
+    let program = project::load_program(Path::new(file), &mut HashSet::new())?;
+    check_prog(program, file)
+}
+
+fn check_prog(
+    mut program: Program,
+    label: &str,
+) -> Result<Vec<CheckWarning>, String> {
+    if program.uses.iter().any(|u| u.path.is_none()) {
+        wlel::stdsrc::splice_std(&mut program);
+    }
+    Checker::check(&mut program).map_err(|e| format!("{}:{}: {}", label, e.span, e.msg))
+}
+
 /// type-check + transpile an already-loaded program. `use std` splices the
 /// embedded library in ahead of user code; it then flows through the same
 /// check/monomorphization pipeline, so only the Vec/HashMap instantiations a
@@ -348,14 +365,50 @@ fn print_warnings(file: &str, warnings: &[CheckWarning]) {
     }
 }
 
-fn find_cc() -> &'static str {
-    for cc in ["cc", "gcc", "clang"] {
-        if Command::new(cc).arg("--version").output().is_ok() {
+fn find_cc() -> String {
+    // $CC wins (build systems set it), then the usual names. Looking them
+    // up on PATH costs a few stat() calls; spawning `cc --version` for the
+    // probe cost ~5 ms on every single build.
+    if let Some(cc) = env::var_os("CC") {
+        let cc = cc.to_string_lossy().trim().to_string();
+        if !cc.is_empty() {
             return cc;
+        }
+    }
+    let names = ["cc", "gcc", "clang"];
+    let path = env::var_os("PATH").unwrap_or_default();
+    let dirs: Vec<PathBuf> = env::split_paths(&path).collect();
+    for name in names {
+        for dir in &dirs {
+            let candidate = dir.join(name);
+            if is_executable(&candidate) {
+                return name.to_string();
+            }
+        }
+    }
+    // nothing on PATH: probe anyway so the diagnosis names the real problem
+    for cc in names {
+        if Command::new(cc).arg("--version").output().is_ok() {
+            return cc.to_string();
         }
     }
     eprintln!("wlel: no C compiler found (need cc, gcc or clang)");
     exit(1);
+}
+
+fn is_executable(p: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        p.metadata()
+            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows resolves `cc`/`gcc` to .exe/.bat through PATH itself
+        p.is_file() || p.with_extension("exe").is_file()
+    }
 }
 
 /// FNV-1a 64-bit — dependency-free content hash for the run cache
@@ -519,7 +572,13 @@ fn emit_binary(
     let cache_bin = with_exe(&cache_bin);
     if allow_cache && cache_bin.exists() {
         if out != cache_bin {
-            let _ = fs::copy(&cache_bin, &out);
+            if let Err(e) = fs::copy(&cache_bin, &out) {
+                eprintln!(
+                    "wlel: cannot write {}: {e} (does its directory exist?)",
+                    out.display()
+                );
+                exit(1);
+            }
         }
         return out;
     }
@@ -890,8 +949,8 @@ fn main() {
             exit(0);
         }
         Mode::Check { file } => match file {
-            Some(f) => match front(f, false, false) {
-                Ok((_, warnings)) => {
+            Some(f) => match check_front(f) {
+                Ok(warnings) => {
                     print_warnings(f, &warnings);
                     println!("ok: {f} type-checks");
                 }
@@ -903,8 +962,8 @@ fn main() {
             None => {
                 let p = find_project();
                 let label = p.entry.display().to_string();
-                match front_prog(p.program, &label, false, false) {
-                    Ok((_, warnings)) => {
+                match check_prog(p.program, &label) {
+                    Ok(warnings) => {
                         print_warnings(&label, &warnings);
                         println!("ok: project '{}' type-checks", p.manifest.name);
                     }
@@ -957,10 +1016,24 @@ fn main() {
                 let out_path = PathBuf::from(out_s);
                 if *emit_c {
                     let c_path = out_path.with_extension("c");
-                    fs::write(&c_path, &c_src).expect("write emitted c");
+                    if let Err(e) = fs::write(&c_path, &c_src) {
+                        eprintln!(
+                            "wlel: cannot write {}: {e} (does its directory exist?)",
+                            c_path.display()
+                        );
+                        exit(1);
+                    }
                     println!("c -> {}", c_path.display());
+                    // `-o out.c` names the C source itself: writing the
+                    // binary to the same path would clobber the file we just
+                    // emitted (the old behaviour silently replaced the C
+                    // with an ELF). A `.c` target means "stop at the source".
+                    if c_path == out_path {
+                        println!("ok");
+                        return;
+                    }
                 }
-                emit_binary(&c_src, &out_path, *opt, false, *sanitize, link);
+                emit_binary(&c_src, &out_path, *opt, true, *sanitize, link);
                 println!("ok");
             }
             None => {
@@ -1005,10 +1078,22 @@ fn main() {
                 print_warnings(&label, &warnings);
                 if *emit_c {
                     let c_path = out_path.with_extension("c");
-                    fs::write(&c_path, &c_src).expect("write emitted c");
+                    if let Err(e) = fs::write(&c_path, &c_src) {
+                        eprintln!(
+                            "wlel: cannot write {}: {e} (does its directory exist?)",
+                            c_path.display()
+                        );
+                        exit(1);
+                    }
                     println!("c -> {}", c_path.display());
+                    // `-o out.c` names the C source itself (see the file
+                    // build path above): stop at the source, no link step
+                    if c_path == out_path {
+                        println!("ok");
+                        return;
+                    }
                 }
-                emit_binary(&c_src, &out_path, *opt, false, *sanitize, link);
+                emit_binary(&c_src, &out_path, *opt, true, *sanitize, link);
                 println!("ok");
             }
         },

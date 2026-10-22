@@ -31,6 +31,42 @@ jobs:
       - name: Test suite
         run: cargo test --release --locked
 
+  # the three flagship apps are the end-to-end proof that the language
+  # carries real programs. They were previously not exercised by CI at all,
+  # which let flagship/json.wl stop type-checking while every job stayed
+  # green. `game.wl` only needs raylib to *build* — its tests run windowless,
+  # so check/test need no graphics library.
+  flagship:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build compiler
+        run: cargo build --release --locked
+      - name: Type-check every flagship
+        run: |
+          for f in flagship/*.wl; do
+            ./target/release/wlel check "$f"
+          done
+      - name: Run every flagship's test blocks
+        run: |
+          for f in flagship/*.wl; do
+            ./target/release/wlel test "$f"
+          done
+      - name: Build the dependency-free flagships
+        run: |
+          ./target/release/wlel build flagship/json.wl -O2 -o "$RUNNER_TEMP/json"
+          ./target/release/wlel build flagship/httpd.wl -O2 -o "$RUNNER_TEMP/httpd"
+      # an explicit, deliberately low floor: shared CI runners are slower and
+      # noisier than the reference machine, so this only catches the class of
+      # regression that matters (the old O(n^2) parse ran at ~1.3 MB/s). Run
+      # locally with `wlel run flagship/json.wl -- bench` for the headline
+      # number (the app's own default floor is 20 MB/s).
+      - name: JSON parser throughput smoke
+        run: |
+          "$RUNNER_TEMP/json" bench 8 10
+
   # keep the quality bar the repo already claims: clippy -D warnings and
   # canonical .wl formatting (wlel fmt -check, the fmt∘fmt == fmt guarantee)
   lint:
@@ -43,7 +79,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
-      - name: wlel fmt -check (all examples)
+      - name: wlel fmt -check (examples + flagships)
         run: |
           cargo build --release --locked
-          find examples -name '*.wl' -print0 | xargs -0 ./target/release/wlel fmt -check
+          find examples flagship -name '*.wl' -print0 | xargs -0 ./target/release/wlel fmt -check

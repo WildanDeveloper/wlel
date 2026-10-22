@@ -424,8 +424,11 @@ while true {
 comparator — `cmp(a, b) -> int`, negative / zero / positive like `strcmp`.
 No function pointers, no `qsort` `void*`: the compiler emits a specialized
 C sort per (element, comparator) pair, so the comparator call inlines at
-`-O2` (1M random ints sort in ~77 ms — faster than C `qsort` at ~111 ms on
-the same machine, which pays for indirect calls):
+`-O2` (1M random ints sort in ~110 ms — about 1.8x faster than C `qsort` at
+~200 ms on the same machine, which pays for an indirect call per comparison).
+The partition is median-of-three + Hoare crossing with an insertion-sort
+cutoff below 24 elements, so already-sorted, reverse-sorted and all-equal
+inputs finish in ~15-30 ms instead of degrading quadratically:
 
 ```wl
 use std;
@@ -531,6 +534,15 @@ pass: string
 - `wlel test file.wl` also runs tests from **imported files** (`use "lib/x.wl"`),
   so libraries ship their own tests. `wlel run`/`wlel build` ignore test blocks
   entirely — zero overhead in the shipped binary.
+
+CI runs the full suite on Linux, macOS and Windows (the generated code is
+exercised under ASan/UBSan on Linux/macOS), then in a separate job
+type-checks, test-runs and builds the three flagship apps, smoke-tests the
+JSON parser's throughput, and enforces `wlel fmt -check` over both
+`examples/` and `flagship/` — the flagships are end-to-end programs, so a
+front-end regression that only breaks them (like the `Result` inference
+regression that had `flagship/json.wl` failing to type-check) can no longer
+pass CI behind a green test suite.
 
 ## FFI
 
@@ -881,7 +893,11 @@ production backend could track. Revisit when the language is closer to 1.0.
 
 - Generated C is meant to be read: `wlel build --emit-c` writes the C99 source
   next to your binary, with `#line` directives so compiler diagnostics point
-  back into your `.wl` files.
+  back into your `.wl` files. Naming the target `-o out.c` writes the source
+  *at that path* and stops before linking, so `wlel build app.wl -O2 --emit-c
+  -o app.c` is the way to read the C and the way to time the front end alone.
+- `wlel build` is content-cached: an unchanged rebuild reuses the object cc
+  already produced instead of re-running it.
 - `wlel run` caches compiled binaries by content hash — rebuilds only happen
   when the source actually changes.
 - The compiler never rejects a program on warnings, and one syntax error never
@@ -889,11 +905,26 @@ production backend could track. Revisit when the language is closer to 1.0.
 
 ## Roadmap
 
-Ordered by impact-per-effort. The next milestones:
+Shipped:
 
-1. **Stdlib & tooling** — generics via monomorphization, `Vec[T]`/`HashMap[K,V]`, string library, file I/O, `wlel fmt`, CI, FFI.
+1. **Stdlib & tooling** — generics via monomorphization, `Vec[T]`/`HashMap[K,V]`, string library, file I/O, `wlel fmt`, FFI.
 2. **Expressiveness** — tagged enums + exhaustive `match`, `Result[T,E]`, method sugar, concurrency, LSP, `wlel doc`.
-3. **1.0** — package registry, a QBE backend experiment, three flagship apps (HTTP server, JSON parser, a small game), fuzz soak, full docs, cross-compile recipes.
+3. **1.0 scope** — git-tag package registry, QBE backend, three flagship apps, fuzz soak, spec v1 draft.
+
+Next, ordered by impact-per-effort:
+
+4. **CI integrity** — flagship check/test/build/bench jobs and `fmt -check`
+   over `flagship/` (the apps used to be outside CI entirely, so
+   `flagship/json.wl` could stop type-checking while every job stayed green).
+5. **1.0 freeze** — resolve the [open questions](docs/spec.md#17-open-questions-for-review)
+   in the spec, `wlel --version`, release binaries and cross-compile recipes.
+6. **Module namespaces** — imports currently merge into one flat global
+   scope (two files defining `helper` is a duplicate-symbol error); this is
+   also the main blocker for self-hosting.
+7. **Self-hosting** — the only unchecked milestone left.
+8. **Runtime/compile performance** — incremental per-file compilation for
+   the LSP, arena memory reclamation for parse-heavy programs, collection
+   and sort hot paths.
 
 Deliberately **not** on the roadmap: borrow checker, macros, GC, OOP class
 hierarchies, exceptions. Simplicity is a feature, not a phase.

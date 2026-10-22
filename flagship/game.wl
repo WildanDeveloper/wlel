@@ -233,7 +233,8 @@ fn step(g: *Game, w: int, h: int) -> bool {
             g.tick = 0.05;
         }
         place_food(g, w, h);
-    } else {        for k in 0..g.len - 1 {
+    } else {
+        for k in 0..g.len - 1 {
             back := g.len - 1 - k;
             g.sx[back] = g.sx[back - 1];
             g.sy[back] = g.sy[back - 1];

@@ -2,3 +2,5 @@
 /fuzz/target
 /fuzz/artifacts
 /fuzz/coverage
+# scratch file written by flagship/json.wl's "file parse" test block
+wlel_json_test.tmp

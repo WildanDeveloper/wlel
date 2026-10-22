@@ -25,22 +25,26 @@ pub struct Comment {
     pub text: String,
 }
 
-pub struct Lexer {
-    src: Vec<u8>,
+pub struct Lexer<'a> {
+    src: &'a [u8],
     pos: usize,
     line: usize,
     col: usize,
     comments: Vec<Comment>,
+    /// `tokenize` only wants tokens: skip the per-comment String allocation
+    /// the formatter/documentation passes need
+    keep_comments: bool,
 }
 
-impl Lexer {
-    pub fn new(src: &str) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(src: &'a str) -> Self {
         Self {
-            src: src.as_bytes().to_vec(),
+            src: src.as_bytes(),
             pos: 0,
             line: 1,
             col: 1,
             comments: Vec::new(),
+            keep_comments: false,
         }
     }
 
@@ -88,7 +92,9 @@ impl Lexer {
                     self.bump();
                 }
                 Some(b'/') if self.peek2() == Some(b'/') => {
-                    // record the comment (the formatter replays it) and skip it
+                    // record the comment when the caller needs it (the
+                    // formatter replays them), otherwise just skip it —
+                    // a plain `tokenize` never allocates per comment
                     let (cline, ccol) = (self.line, self.col);
                     let start = self.pos + 2; // past the two slashes
                     while let Some(c) = self.peek() {
@@ -97,8 +103,11 @@ impl Lexer {
                         }
                         self.bump();
                     }
-                    let text = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
-                    self.comments.push(Comment { line: cline, col: ccol, text });
+                    if self.keep_comments {
+                        let text =
+                            String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+                        self.comments.push(Comment { line: cline, col: ccol, text });
+                    }
                 }
                 _ => break,
             }
@@ -106,12 +115,19 @@ impl Lexer {
     }
 
     pub fn tokenize(self) -> Result<Vec<SpannedToken>, LexError> {
-        self.tokenize_with_comments().map(|(t, _)| t)
+        self.tokenize_inner().map(|(t, _)| t)
     }
 
     /// tokens plus every comment seen, in source order (used by `wlel fmt`)
     pub fn tokenize_with_comments(mut self) -> Result<(Vec<SpannedToken>, Vec<Comment>), LexError> {
-        let mut out = Vec::new();
+        self.keep_comments = true;
+        self.tokenize_inner()
+    }
+
+    fn tokenize_inner(mut self) -> Result<(Vec<SpannedToken>, Vec<Comment>), LexError> {
+        // a token every ~6 source bytes in typical code; over-reserving is
+        // cheap (one allocation) compared to regrowing the vector
+        let mut out = Vec::with_capacity(self.src.len() / 6 + 16);
         loop {
             self.skip_trivia();
             // remember where the token starts so errors point at it
@@ -147,8 +163,8 @@ impl Lexer {
 
     fn token(&mut self, c: u8) -> Result<Token, LexError> {
         match c {
-            b'0'..=b'9' => self.number(c),
-            b'a'..=b'z' | b'A'..=b'Z' | b'_' => Ok(self.ident(c)),
+            b'0'..=b'9' => self.number(),
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => Ok(self.ident()),
             b'"' => self.string(),
             b'(' => Ok(Token::LParen),
             b')' => Ok(Token::RParen),
@@ -266,7 +282,9 @@ impl Lexer {
         }
     }
 
-    fn number(&mut self, first: u8) -> Result<Token, LexError> {
+    fn number(&mut self) -> Result<Token, LexError> {
+        // the leading digit was consumed by the caller
+        let first = self.src[self.pos - 1];
         // radix prefixes: 0x hex, 0b binary, 0o octal
         if first == b'0' {
             if let Some(c) = self.peek() {
@@ -318,31 +336,36 @@ impl Lexer {
                 }
             }
         }
-        let mut s = String::new();
-        s.push(first as char);
+        // scan the literal in place, then slice it out of the source: the
+        // old version grew a String character by character and immediately
+        // collected a second, underscore-free copy. Neither allocation is
+        // needed unless the literal actually contains `_`.
+        let src: &[u8] = self.src;
+        let start = self.pos - 1;
         let mut is_float = false;
         let mut has_exp = false;
+        let mut has_sep = false;
         while let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c == b'_' {
-                s.push(c as char);
+            if c.is_ascii_digit() {
+                self.bump();
+            } else if c == b'_' {
+                has_sep = true;
                 self.bump();
             } else if c == b'.' && !is_float && !has_exp && self.peek2().is_some_and(|d| d.is_ascii_digit()) {
                 is_float = true;
-                s.push('.');
                 self.bump();
             } else if (c == b'e' || c == b'E') && !has_exp {
                 // lookahead to confirm scientific notation
                 let next = self.peek2();
                 let next_is_sign = matches!(next, Some(b'+' | b'-'));
                 let next_is_digit = next.is_some_and(|d| d.is_ascii_digit());
-                let after_sign_is_digit = self.src.get(self.pos + 2).copied().is_some_and(|d| d.is_ascii_digit());
+                let after_sign_is_digit = src.get(self.pos + 2).copied().is_some_and(|d| d.is_ascii_digit());
                 if next_is_digit || (next_is_sign && after_sign_is_digit) {
                     is_float = true;
                     has_exp = true;
-                    s.push(c as char);
                     self.bump();
                     if self.peek().is_some_and(|d| d == b'+' || d == b'-') {
-                        s.push(self.bump().unwrap() as char);
+                        self.bump();
                     }
                 } else {
                     break;
@@ -351,18 +374,26 @@ impl Lexer {
                 break;
             }
         }
-        let cleaned: String = s.chars().filter(|c| *c != '_').collect();
+        // the scan only consumed ASCII bytes
+        let raw = std::str::from_utf8(&src[start..self.pos]).expect("numeric literal is ASCII");
         let suffix = self.literal_suffix();
+        let cleaned_buf;
+        let cleaned: &str = if has_sep {
+            cleaned_buf = raw.replace('_', "");
+            &cleaned_buf
+        } else {
+            raw
+        };
         if is_float {
             let v = match cleaned.parse::<f64>() {
                 Ok(v) => v,
-                Err(_) => return self.err(format!("bad float literal '{s}'")),
+                Err(_) => return self.err(format!("bad float literal '{raw}'")),
             };
             if !v.is_finite() {
                 // `1e999` overflows f64 to infinity; there is no way to
                 // spell a non-finite float literal, and emitting `inf` into
                 // C (or into `wlel fmt` output) produces broken source
-                return self.err(format!("float literal '{s}' out of range"));
+                return self.err(format!("float literal '{raw}' out of range"));
             }
             match suffix {
                 Some(suf) => match suf.as_str() {
@@ -374,7 +405,7 @@ impl Lexer {
         } else {
             let v = match cleaned.parse::<i128>() {
                 Ok(v) => v,
-                Err(_) => return self.err(format!("integer literal '{s}' out of range")),
+                Err(_) => return self.err(format!("integer literal '{raw}' out of range")),
             };
             match suffix {
                 Some(suf) => self.suffixed_int(v, &suf),
@@ -424,18 +455,23 @@ impl Lexer {
         }
     }
 
-    fn ident(&mut self, first: u8) -> Token {
-        let mut s = String::new();
-        s.push(first as char);
+    fn ident(&mut self) -> Token {
+        // the first character was consumed by the caller; the rest is a run
+        // of ASCII alphanumerics/underscores, so scan it as bytes and slice
+        // once instead of growing a String character by character. Keyword
+        // tokens never allocate.
+        let src: &[u8] = self.src;
+        let start = self.pos - 1;
         while let Some(c) = self.peek() {
             if c.is_ascii_alphanumeric() || c == b'_' {
-                s.push(c as char);
                 self.bump();
             } else {
                 break;
             }
         }
-        match s.as_str() {
+        // the scan only advances over ASCII bytes
+        let s = std::str::from_utf8(&src[start..self.pos]).expect("identifier is ASCII");
+        match s {
             "fn" => Token::Fn,
             "extern" => Token::Extern,
             "struct" => Token::Struct,
@@ -458,7 +494,7 @@ impl Lexer {
             "continue" => Token::Continue,
             "true" => Token::True,
             "false" => Token::False,
-            _ => Token::Ident(s),
+            _ => Token::Ident(s.to_string()),
         }
     }
 

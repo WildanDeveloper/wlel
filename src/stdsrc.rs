@@ -713,35 +713,48 @@ fn int_to_str(v: int) -> string {
 /// Lex + parse the embedded std source. Panics on failure: the library is a
 /// compiler-internal constant, and a broken std is a build error, not a
 /// user-facing diagnostic.
+///
+/// The result is parsed once per process and then cloned: `use std` is on
+/// the path of nearly every compile, and lexing + parsing ~750 lines of
+/// library source cost more than cloning the finished AST (measured ~4x).
+/// Every definition is tagged with STD_FILE here, so clones are ready to
+/// splice.
 pub fn parse_std() -> crate::ast::Program {
+    static CACHED: std::sync::OnceLock<crate::ast::Program> = std::sync::OnceLock::new();
+    CACHED.get_or_init(parse_std_uncached).clone()
+}
+
+fn parse_std_uncached() -> crate::ast::Program {
     let toks = crate::lexer::Lexer::new(STD_WL)
         .tokenize()
         .expect("std library lexes");
-    let (program, errs) = crate::parser::Parser::new(&toks).program();
+    let (mut program, errs) = crate::parser::Parser::new(&toks).program();
     assert!(
         errs.is_empty(),
         "std library parses cleanly: {errs:?}"
     );
+    for f in program.funcs.iter_mut() {
+        f.file = STD_FILE.into();
+    }
+    for s in program.structs.iter_mut() {
+        s.file = STD_FILE.into();
+    }
+    for e in program.enums.iter_mut() {
+        e.file = STD_FILE.into();
+    }
+    for i in program.impls.iter_mut() {
+        i.file = STD_FILE.into();
+    }
     program
 }
 
 /// Splice the embedded library into a parsed program (structs, enums,
-/// impls, functions), tagging every definition with STD_FILE — the exact
-/// transformation `use std` triggers in the CLI front end.
+/// impls, functions) — the exact transformation `use std` triggers in the
+/// CLI front end. The library definitions come first so user code can
+/// shadow nothing it should not, and every one carries STD_FILE so
+/// diagnostics and dead-code elimination can tell them apart.
 pub fn splice_std(program: &mut crate::ast::Program) {
-    let mut std_prog = parse_std();
-    for f in std_prog.funcs.iter_mut() {
-        f.file = STD_FILE.into();
-    }
-    for s in std_prog.structs.iter_mut() {
-        s.file = STD_FILE.into();
-    }
-    for e in std_prog.enums.iter_mut() {
-        e.file = STD_FILE.into();
-    }
-    for i in std_prog.impls.iter_mut() {
-        i.file = STD_FILE.into();
-    }
+    let std_prog = parse_std();
     program.structs.splice(0..0, std_prog.structs);
     program.enums.splice(0..0, std_prog.enums);
     program.impls.splice(0..0, std_prog.impls);
