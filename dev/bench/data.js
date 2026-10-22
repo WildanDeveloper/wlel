@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792706299047,
+  "lastUpdate": 1792707889967,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -477,6 +477,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 3,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "fc3ba84d990dea0fe1cc7311013a976ef9833583",
+          "message": "v0.7.0: add `wlel --version` and cut the release the tag has been missing since v0.3.0 — Cargo.toml already said 0.6.0 but the last tag was v0.3.0, so 16 commits (generics/collections/strings/file I/O/sort+search/projects/fmt/CI/FFI, enums+match/Result/Option/concurrency/LSP/doc/registry/QBE, the bugfix sweep and the profiling pass) never shipped as a version; `--version`/`-V`/`version` print the Cargo.toml value via env!(\"CARGO_PKG_VERSION\") so the binary can never disagree with its own release page (a drift the new cli test locks: all three spellings must print exactly \"wlel <CARGO_PKG_VERSION>\"), the usage banner now leads with the version, Cargo.toml + Cargo.lock bump 0.6.0 -> 0.7.0, README CLI line documents the flag and the content-cached `wlel build`; 512 cargo tests green (1 new: version flag), clippy -D warnings clean, wlel fmt canonical",
+          "timestamp": "2026-10-23T05:23:55+07:00",
+          "tree_id": "62de40acb01524e9e0224c84f664b19c6bb040b7",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/fc3ba84d990dea0fe1cc7311013a976ef9833583"
+        },
+        "date": 1792707889487,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 17.5,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 78,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wl (front-end)",
+            "value": 2.8,
             "unit": "ms"
           }
         ]
