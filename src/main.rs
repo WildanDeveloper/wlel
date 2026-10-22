@@ -16,7 +16,16 @@ enum Backend {
     Qbe,
 }
 
+/// compiler version, stamped from Cargo.toml at build time
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn print_version() -> ! {
+    println!("wlel {VERSION}");
+    exit(0);
+}
+
 fn usage() -> ! {
+    eprintln!("wlel {VERSION}");
     eprintln!("usage:");
     eprintln!("  wlel new   <dir>                          scaffold a new project");
     eprintln!("  wlel add  [<name>] github:user/repo[@x.y] add a git dependency (git-tag registry)");
@@ -33,6 +42,8 @@ fn usage() -> ! {
     eprintln!("  wlel lsp                                  language server (LSP over stdio)");
     eprintln!();
     eprintln!("  -l <lib> / -L <dir>  pass linker flags through to cc (FFI, repeatable)");
+    eprintln!();
+    eprintln!("  wlel --version       print the compiler version");
     exit(1);
 }
 
@@ -85,6 +96,7 @@ fn link_flag(a: &[String], i: &mut usize, kind: &str) -> String {
 fn parse_args() -> Args {
     let a: Vec<String> = env::args().skip(1).collect();
     match a.first().map(|s| s.as_str()) {
+        Some("--version" | "-V" | "version") if a.len() == 1 => print_version(),
         Some("new") if a.len() == 2 => Args {
             mode: Mode::New { dir: a[1].clone() },
         },

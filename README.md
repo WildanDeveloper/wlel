@@ -91,7 +91,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Safe-debug mode: `wlel run`/`wlel test` compile with array bounds checks, integer div-zero checks and arena poison-fill; `wlel build` stays zero-overhead (see [Safe-debug vs release](#safe-debug-vs-release))
 - [x] Arena stats: `arena_stats() -> ArenaStats { bytes, chunks, peak }` for the innermost active arena (root when none)
 - [x] `wlel build -sanitize` — ASan-instrumented release binary
-- [x] CLI: `wlel run` (content-cached binaries), `wlel build -o out [-O0..-O3] [-sanitize] [--emit-c] [-l <lib>] [-L <dir>]`, `wlel check`, `wlel test`
+- [x] CLI: `wlel run` (content-cached binaries), `wlel build -o out [-O0..-O3] [-sanitize] [--emit-c] [-l <lib>] [-L <dir>]` (content-cached too), `wlel check`, `wlel test`, `wlel --version`
 - [x] Lexer: hex/bin/oct/scientific/`_`-separated literals, strings with escapes + UTF-8
 - [x] Type checker: inference, annotations, return-path analysis, loop/arena depth tracking
 - [x] Generics: `fn id[T](x: T) -> T` and `struct Box[T] { val: T }` via checker-level monomorphization — type inference at call sites, per-type instantiation (mangled C like `Box__int`), no boxing, no vtables (see [Generics](#generics))

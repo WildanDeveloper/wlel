@@ -242,6 +242,26 @@ fn release_build_has_zero_checks() {
     assert_eq!(run.status.code(), Some(7));
 }
 
+/// `wlel --version` must report the Cargo.toml version; the release tag is
+/// cut from that number, so a drift between them would publish a binary that
+/// contradicts its own release page.
+#[test]
+fn version_flag_reports_cargo_version() {
+    for flag in ["--version", "-V", "version"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_wlel"))
+            .arg(flag)
+            .output()
+            .expect("spawn wlel");
+        assert!(out.status.success(), "{flag} must exit 0");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            text.trim(),
+            format!("wlel {}", env!("CARGO_PKG_VERSION")),
+            "{flag}: {text:?}"
+        );
+    }
+}
+
 /// `--emit-c -o out.c` must leave C source at exactly that path. The link
 /// step used to write the ELF binary over it (same output path), silently
 /// replacing the file the user asked for.
