@@ -602,11 +602,11 @@ fn line_directives_emitted_in_c() {
              return x + 1;
          }",
     );
-    p.funcs[0].file = "calc.wl".into();
+    p.funcs[0].file = "calc.wlel".into();
     let c = gen_program(&p);
-    assert!(c.contains("#line 1 \"calc.wl\""), "{c}");
-    assert!(c.contains("#line 2 \"calc.wl\""), "{c}");
-    assert!(c.contains("#line 3 \"calc.wl\""), "{c}");
+    assert!(c.contains("#line 1 \"calc.wlel\""), "{c}");
+    assert!(c.contains("#line 2 \"calc.wlel\""), "{c}");
+    assert!(c.contains("#line 3 \"calc.wlel\""), "{c}");
 }
 
 #[test]
@@ -745,11 +745,11 @@ fn assert_rewrite_carries_file_and_line() {
              return 0;
          }",
     );
-    p.funcs[0].file = "t.wl".into();
+    p.funcs[0].file = "t.wlel".into();
     Checker::check(&mut p).expect("typecheck");
     let c = gen_program(&p);
-    // assert on line 2 of t.wl reports that location at runtime
-    assert!(c.contains("_wlel_assert(1, \"t.wl\", 2);"), "{c}");
+    // assert on line 2 of t.wlel reports that location at runtime
+    assert!(c.contains("_wlel_assert(1, \"t.wlel\", 2);"), "{c}");
 }
 
 #[test]
@@ -800,7 +800,7 @@ fn safe_mode_emits_checks_release_does_not() {
              return a[1];
          }",
     );
-    p.funcs[0].file = "safe.wl".into();
+    p.funcs[0].file = "safe.wlel".into();
     Checker::check(&mut p).expect("typecheck");
     let dev = gen_program_safe(&p);
     let rel = gen_program(&p);
@@ -808,8 +808,8 @@ fn safe_mode_emits_checks_release_does_not() {
     assert!(dev.contains("_wlel_arr_at("), "{dev}");
     assert!(dev.contains("_wlel_divz("), "{dev}");
     assert!(dev.contains("memset(a->buf, 0xDE, a->cap)"), "{dev}");
-    // dev checks carry the .wl location for the runtime message
-    assert!(dev.contains("\"safe.wl\", 4"), "{dev}");
+    // dev checks carry the .wlel location for the runtime message
+    assert!(dev.contains("\"safe.wlel\", 4"), "{dev}");
     // release: none of it — zero overhead
     assert!(!rel.contains("_wlel_arr_at"), "{rel}");
     assert!(!rel.contains("_wlel_divz"), "{rel}");

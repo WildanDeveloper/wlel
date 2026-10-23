@@ -19,6 +19,18 @@ enum Backend {
 /// compiler version, stamped from Cargo.toml at build time
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The Wlel source extension. Kept in one place so a rename is a one-line
+/// change; the pre-1.0 extension was abandoned because GitHub Linguist, most
+/// editors and Wolfram's own tooling all claim it for Wolfram Language.
+const SOURCE_EXT: &str = "wlel";
+
+/// true for `path/to/file.wlel`. Uses `Path::extension` rather than a suffix
+/// test so the dependency cache directory (`.wlel/`) never looks like a
+/// source file.
+fn is_source_file(path: &str) -> bool {
+    Path::new(path).extension().and_then(|e| e.to_str()) == Some(SOURCE_EXT)
+}
+
 fn print_version() -> ! {
     println!("wlel {VERSION}");
     exit(0);
@@ -31,14 +43,14 @@ fn usage() -> ! {
     eprintln!("  wlel add  [<name>] github:user/repo[@x.y] add a git dependency (git-tag registry)");
     eprintln!("  wlel add  [<name>] <git-url>[@x.y]        add a git dependency by URL");
     eprintln!("  wlel add  [<name>] --path <dir>           add a path dependency");
-    eprintln!("  wlel run   <file.wl> [-l <lib>] [-L <dir>] [-- args...]   run a single file (dev checks)");
+    eprintln!("  wlel run   <file.wlel> [-l <lib>] [-L <dir>] [-- args...]   run a single file (dev checks)");
     eprintln!("  wlel run   [-l <lib>] [-L <dir>] [-- args...]             run the current project (wlel.toml)");
-    eprintln!("  wlel build <file.wl> -o <out> [-O0|-O1|-O2|-O3] [-sanitize] [--emit-c] [-l <lib>] [-L <dir>] [--backend qbe|c]");
+    eprintln!("  wlel build <file.wlel> -o <out> [-O0|-O1|-O2|-O3] [-sanitize] [--emit-c] [-l <lib>] [-L <dir>] [--backend qbe|c]");
     eprintln!("  wlel build [-o <out>] [-O0|-O1|-O2|-O3] [-sanitize] [--emit-c] [-l <lib>] [-L <dir>] [--backend qbe|c]");
-    eprintln!("  wlel check <file.wl> | (project)");
-    eprintln!("  wlel test  <file.wl> | (project) [-l <lib>] [-L <dir>]");
-    eprintln!("  wlel fmt   [<file.wl>...] [-check]        canonical formatter (idempotent)");
-    eprintln!("  wlel doc   [<file.wl>...] [--std] [-o <dir>]  markdown docs from /// comments");
+    eprintln!("  wlel check <file.wlel> | (project)");
+    eprintln!("  wlel test  <file.wlel> | (project) [-l <lib>] [-L <dir>]");
+    eprintln!("  wlel fmt   [<file.wlel>...] [-check]        canonical formatter (idempotent)");
+    eprintln!("  wlel doc   [<file.wlel>...] [--std] [-o <dir>]  markdown docs from /// comments");
     eprintln!("  wlel lsp                                  language server (LSP over stdio)");
     eprintln!();
     eprintln!("  -l <lib> / -L <dir>  pass linker flags through to cc (FFI, repeatable)");
@@ -69,7 +81,7 @@ enum Mode {
     },
     Check { file: Option<String> },
     Test { file: Option<String>, link: Vec<String> },
-    /// files: empty = all .wl files in the current project
+    /// files: empty = all .wlel files in the current project
     Fmt { files: Vec<String>, check: bool },
     /// markdown documentation: `--std` generates the stdlib page alone,
     /// `-o <dir>` overrides the output directory (default `docs`)
@@ -93,8 +105,29 @@ fn link_flag(a: &[String], i: &mut usize, kind: &str) -> String {
     format!("{kind}{v}")
 }
 
+/// The pre-1.0 extension now belongs to Wolfram Language. A stale file would
+/// otherwise be reported as a missing project manifest or an unknown flag, so
+/// name the rename explicitly and suggest the fix.
+fn reject_legacy_extension(a: &[String]) {
+    // everything after `--` belongs to the program being run/tested: a Wlel
+    // program may legitimately be handed a Wolfram Language file as data
+    let end = a.iter().position(|s| s == "--").unwrap_or(a.len());
+    for arg in &a[..end] {
+        if Path::new(arg).extension().and_then(|e| e.to_str()) == Some("wl") {
+            let renamed = format!("{}.wlel", arg.trim_end_matches(".wl"));
+            eprintln!(
+                "wlel: '{arg}' uses the .wl extension, which now belongs to Wolfram Language"
+            );
+            eprintln!("wlel: Wlel sources are .wlel since 1.0 — rename it:");
+            eprintln!("wlel:     mv {arg} {renamed}");
+            exit(1);
+        }
+    }
+}
+
 fn parse_args() -> Args {
     let a: Vec<String> = env::args().skip(1).collect();
+    reject_legacy_extension(&a);
     match a.first().map(|s| s.as_str()) {
         Some("--version" | "-V" | "version") if a.len() == 1 => print_version(),
         Some("new") if a.len() == 2 => Args {
@@ -130,7 +163,7 @@ fn parse_args() -> Args {
             Args { mode: Mode::Add { name, spec, path } }
         }
         Some("run") => {
-            if a.len() >= 2 && a[1].ends_with(".wl") {
+            if a.len() >= 2 && is_source_file(&a[1]) {
                 // `-l`/`-L` before `--` are wlel linker flags; everything
                 // else (including all of the `--` tail) is forwarded
                 let sep = a.iter().position(|s| s == "--").unwrap_or(a.len());
@@ -175,7 +208,7 @@ fn parse_args() -> Args {
                 Args { mode: Mode::Run { file: None, args: fwd, link } }
             }
         }
-        Some("build") if a.len() >= 2 && a[1].ends_with(".wl") => {
+        Some("build") if a.len() >= 2 && is_source_file(&a[1]) => {
             let file = a[1].clone();
             let mut out: Option<String> = None;
             let mut opt = 2u8;
@@ -269,7 +302,7 @@ fn parse_args() -> Args {
                 match a[i].as_str() {
                     "-l" => link.push(link_flag(&a, &mut i, "-l")),
                     "-L" => link.push(link_flag(&a, &mut i, "-L")),
-                    f if f.ends_with(".wl") && file.is_none() => {
+                    f if is_source_file(f) && file.is_none() => {
                         file = Some(f.to_string());
                         i += 1;
                     }
@@ -304,7 +337,7 @@ fn parse_args() -> Args {
                         std = true;
                         i += 1;
                     }
-                    f if f.ends_with(".wl") => {
+                    f if is_source_file(f) => {
                         files.push(f.to_string());
                         i += 1;
                     }
@@ -651,9 +684,9 @@ fn find_project() -> Project {
     }
 }
 
-/// every .wl file under `dir`, recursively; hidden directories (`.wlel`,
+/// every .wlel file under `dir`, recursively; hidden directories (`.wlel`,
 /// `.git`, ...) are skipped; sorted for deterministic output
-fn collect_wl_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_source_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -663,9 +696,9 @@ fn collect_wl_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         if p.is_dir() {
             if !name.starts_with('.') {
-                collect_wl_files(&p, out);
+                collect_source_files(&p, out);
             }
-        } else if name.ends_with(".wl") {
+        } else if is_source_file(&name) {
             out.push(p);
         }
     }
@@ -688,13 +721,13 @@ fn run_fmt(files: &[String], check: bool) -> ! {
             }
         };
         let mut found = Vec::new();
-        collect_wl_files(&dir, &mut found);
+        collect_source_files(&dir, &mut found);
         found
     } else {
         files.iter().map(PathBuf::from).collect()
     };
     if paths.is_empty() {
-        eprintln!("wlel: no .wl files to format");
+        eprintln!("wlel: no .wlel files to format");
         exit(1);
     }
     let mut changed = 0usize;
@@ -742,7 +775,7 @@ fn run_fmt(files: &[String], check: bool) -> ! {
 
 /// markdown documentation: one page per source module (plus the embedded
 /// stdlib page whenever std is part of the surface) and an index. `--std`
-/// alone documents just the stdlib; in project mode every `.wl` under
+/// alone documents just the stdlib; in project mode every `.wlel` under
 /// `wlel.toml` is documented (stdlib page included).
 fn run_doc(files: &[String], out_dir: Option<String>, std_only: bool) -> ! {
     let cwd = match env::current_dir() {
@@ -766,13 +799,13 @@ fn run_doc(files: &[String], out_dir: Option<String>, std_only: bool) -> ! {
     let paths: Vec<PathBuf> = match project_root {
         Some(ref dir) => {
             let mut found = Vec::new();
-            collect_wl_files(dir, &mut found);
+            collect_source_files(dir, &mut found);
             found
         }
         None => files.iter().map(PathBuf::from).collect(),
     };
     if paths.is_empty() && !std_only {
-        eprintln!("wlel: no .wl files to document");
+        eprintln!("wlel: no .wlel files to document");
         exit(1);
     }
     let out_root = match project_root {
@@ -820,7 +853,7 @@ fn run_doc(files: &[String], out_dir: Option<String>, std_only: bool) -> ! {
     let mut modules: Vec<wlel::doc::ModuleDoc> = Vec::new();
     if needs_std {
         // first available name: "std", then std-2, std-3, ... (a user module
-        // named std.wl keeps its name and the stdlib page moves aside)
+        // named std.wlel keeps its name and the stdlib page moves aside)
         let mut std_name = "std".to_string();
         let mut n = 2usize;
         while !used_names.insert(std_name.clone()) {
@@ -838,7 +871,7 @@ fn run_doc(files: &[String], out_dir: Option<String>, std_only: bool) -> ! {
         exit(1);
     }
     // module pages are named "<module>.md"; a source file called
-    // `index.wl` would be overwritten by the generated index below, so the
+    // `index.wlel` would be overwritten by the generated index below, so the
     // index gets the first free name instead (the page keeps its own name)
     let index_name = {
         let mut n = "index".to_string();
@@ -1052,7 +1085,7 @@ fn main() {
                 let p = find_project();
                 if !p.is_bin {
                     eprintln!(
-                        "wlel: project '{}' is a library (no src/main.wl) — nothing to build",
+                        "wlel: project '{}' is a library (no src/main.wlel) — nothing to build",
                         p.manifest.name
                     );
                     exit(1);
@@ -1136,7 +1169,7 @@ fn main() {
                 let p = find_project();
                 if !p.is_bin {
                     eprintln!(
-                        "wlel: project '{}' is a library (no src/main.wl) — nothing to run",
+                        "wlel: project '{}' is a library (no src/main.wlel) — nothing to run",
                         p.manifest.name
                     );
                     exit(1);

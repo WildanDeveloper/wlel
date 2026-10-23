@@ -335,7 +335,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// use std;   |   use "lib/math.wl";
+    /// use std;   |   use "lib/math.wlel";
     fn use_decl(&mut self) -> PResult<UseDecl> {
         let start = self.peek_span();
         self.expect(&Token::Use)?;

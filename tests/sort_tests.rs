@@ -20,7 +20,7 @@ fn front(src: &str) -> Result<String, String> {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "sort.wl".into();
+            f.file = "sort.wlel".into();
         }
     }
     Checker::check(&mut p).map_err(|e| e.msg)?;
@@ -34,7 +34,7 @@ fn check_err_msg(src: &str) -> String {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "sort.wl".into();
+            f.file = "sort.wlel".into();
         }
     }
     Checker::check(&mut p).expect_err("must be rejected").msg
@@ -45,7 +45,7 @@ fn run_cli(name: &str, src: &str) -> (bool, String, String) {
     let dir = std::env::temp_dir().join(format!("wlel_sort_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join(format!("{name}.wl"));
+    let path = dir.join(format!("{name}.wlel"));
     fs::write(&path, src).expect("write source");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
@@ -65,7 +65,7 @@ fn build_and_run(name: &str, src: &str, extra: &[&str]) -> (bool, String, String
     let dir = std::env::temp_dir().join(format!("wlel_sortb_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join(format!("{name}.wl"));
+    let path = dir.join(format!("{name}.wlel"));
     fs::write(&path, src).expect("write source");
     let bin = dir.join(name);
     let mut args = vec![
@@ -412,7 +412,7 @@ fn sort_program_is_asan_clean() {
     let dir = std::env::temp_dir().join(format!("wlel_sortasan_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("asan.wl");
+    let path = dir.join("asan.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -468,7 +468,7 @@ fn release_build_has_no_check_overhead_for_sort() {
 #[test]
 fn example_sort_test_blocks_pass() {
     let test = Command::new(env!("CARGO_BIN_EXE_wlel"))
-        .args(["test", "examples/sort.wl"])
+        .args(["test", "examples/sort.wlel"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("spawn wlel");

@@ -236,10 +236,10 @@ impl Drop for TempDir {
 fn cli_file_mode_writes_module_page() {
     let t = TempDir::new("file_mode");
     t.write(
-        "mathutil.wl",
+        "mathutil.wlel",
         "/// Doubles the input.\nfn twice(x: int) -> int { return x * 2; }\n",
     );
-    let (out, err, code) = t.wlel(&["doc", "mathutil.wl", "-o", "out"]);
+    let (out, err, code) = t.wlel(&["doc", "mathutil.wlel", "-o", "out"]);
     assert_eq!(code, Some(0), "stdout: {out}\nstderr: {err}");
     let page = fs::read_to_string(t.path.join("out/mathutil.md")).expect("read page");
     assert!(page.contains("# mathutil"), "{page}");
@@ -255,10 +255,10 @@ fn cli_file_mode_writes_module_page() {
 fn cli_file_mode_with_std_emits_stdlib_page() {
     let t = TempDir::new("std_page");
     t.write(
-        "app.wl",
+        "app.wlel",
         "use std;\n/// entry\nfn main() -> int { return 0; }\n",
     );
-    let (_out, err, code) = t.wlel(&["doc", "app.wl", "-o", "out"]);
+    let (_out, err, code) = t.wlel(&["doc", "app.wlel", "-o", "out"]);
     assert_eq!(code, Some(0), "{err}");
     assert!(t.path.join("out/std.md").exists());
     let index = fs::read_to_string(t.path.join("out/index.md")).expect("read index");
@@ -274,16 +274,16 @@ fn cli_project_mode_documents_everything() {
         "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\n",
     );
     t.write(
-        "src/lib.wl",
+        "src/lib.wlel",
         "use std;\n/// Doubles the input.\nfn twice(x: int) -> int { return x * 2; }\n",
     );
     t.write(
-        "src/extra.wl",
+        "src/extra.wlel",
         "/// Adds one.\nfn inc(x: int) -> int { return x + 1; }\n",
     );
     let (out, err, code) = t.wlel(&["doc"]);
     assert_eq!(code, Some(0), "stdout: {out}\nstderr: {err}");
-    // every .wl under the project gets a page; std always included
+    // every .wlel under the project gets a page; std always included
     for page in ["docs/std.md", "docs/lib.md", "docs/extra.md", "docs/index.md"] {
         assert!(t.path.join(page).is_file(), "missing {page}");
     }
@@ -311,19 +311,19 @@ fn cli_std_flag_works_without_files() {
 #[test]
 fn cli_broken_file_fails_without_writing() {
     let t = TempDir::new("broken");
-    t.write("bad.wl", "fn broken( {\n");
-    let (_out, err, code) = t.wlel(&["doc", "bad.wl", "-o", "out"]);
+    t.write("bad.wlel", "fn broken( {\n");
+    let (_out, err, code) = t.wlel(&["doc", "bad.wlel", "-o", "out"]);
     assert_ne!(code, Some(0));
-    assert!(err.contains("bad.wl"), "{err}");
+    assert!(err.contains("bad.wlel"), "{err}");
     assert!(!t.path.join("out").exists(), "nothing may be written on failure");
 }
 
 #[test]
 fn cli_name_collision_gets_suffixed() {
     let t = TempDir::new("collision");
-    t.write("a/util.wl", "fn f() { }\n");
-    t.write("b/util.wl", "fn g() { }\n");
-    let (_out, err, code) = t.wlel(&["doc", "a/util.wl", "b/util.wl", "-o", "out"]);
+    t.write("a/util.wlel", "fn f() { }\n");
+    t.write("b/util.wlel", "fn g() { }\n");
+    let (_out, err, code) = t.wlel(&["doc", "a/util.wlel", "b/util.wlel", "-o", "out"]);
     assert_eq!(code, Some(0), "{err}");
     assert!(t.path.join("out/util.md").is_file());
     assert!(t.path.join("out/util-2.md").is_file());

@@ -11,7 +11,7 @@
 
 Simple enough to learn in one afternoon. Fast as C. Zero leaks by construction.
 
-```wl
+```wlel
 use std;
 
 struct Node { val: int, next: *Node }
@@ -73,7 +73,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Pointers (`*T`, `&`, `*`), arrays `[T; N]` with C-style decay (implicit at call arguments, explicit `arr as *T` anywhere), `wlel_sizeof(T)`
 - [x] Casts: `expr as T` (numerics, pointers, int↔ptr)
 - [x] Compound assignment `+= -= *= /= %=`, bitwise `& | ^ ~ << >>`
-- [x] Modules: recursive `use "path.wl";` with diamond-import deduplication, `use std;`
+- [x] Modules: recursive `use "path.wlel";` with diamond-import deduplication, `use std;`
 - [x] FFI: `extern fn sqrt(x: f64) -> f64;` binds straight to C symbols; structs are C structs (see [FFI](#ffi))
 - [x] Reserved identifier prefix `_wlel_` protected by the compiler
 
@@ -84,7 +84,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Overflow is never UB — see [Overflow semantics](#overflow-semantics)
 
 ### Diagnostics & tooling
-- [x] Source spans everywhere: errors point at `file.wl:12:5`; `#line` directives map cc errors back to `.wl`
+- [x] Source spans everywhere: errors point at `file.wlel:12:5`; `#line` directives map cc errors back to `.wlel`
 - [x] Parser error recovery: one compile reports *all* syntax errors, not just the first
 - [x] Warning system: unused variables/parameters/imports, unreachable code — non-fatal, `_`-prefix opt-out
 - [x] Built-in tests: `test "name" { ... }` blocks + `wlel test` runner with `file:line` failures
@@ -101,7 +101,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Tagged enums + exhaustive `match`, `std::Result[T,E]` / `std::Option[T]`, the `?` try operator and the `result_*`/`option_*` helpers, `panic(msg)` (see [Tagged enums](#tagged-enums--match) and [File I/O](#file-io))
 - [x] Projects: `wlel new`, `wlel.toml` manifests, path + git dependencies (auto-cloned, revision-pinned by `wlel.lock`), nested deps, `wlel run/build/check/test` in project mode (see [Projects](#projects))
 - [x] Package registry v0: `wlel add github:user/repo[@x.y.z]` — no central server, git tags are the registry; caret version requirements verified against each tag's own manifest, offline-friendly resolution (see [Projects](#projects))
-- [x] Formatter: `wlel fmt` — canonical, idempotent, comment-preserving; `wlel fmt` in a project formats every `.wl`; `-check` mode for CI (see [Formatting](#formatting))
+- [x] Formatter: `wlel fmt` — canonical, idempotent, comment-preserving; `wlel fmt` in a project formats every `.wlel`; `-check` mode for CI (see [Formatting](#formatting))
 - [x] Language server: `wlel lsp` — diagnostics, hover types/signatures, go-to-definition (locals, methods, fields, imports), completion; hand-rolled LSP 3.17 over stdio, zero dependencies (see [Language server](#language-server))
 - [x] Documentation: `wlel doc` — markdown pages from `///` doc comments, one per module plus an index; the embedded stdlib documents itself (see [Documentation](#documentation))
 
@@ -134,31 +134,31 @@ the compiler for another platform and for cross-compiling *Wlel programs*
 (set `$CC` to a cross compiler, or use `--emit-c` and link by hand).
 
 ```bash
-cargo run --release -- run examples/arena.wl             # scoped arena demo
-cargo run --release -- run examples/loops.wl             # for-in range demo
-cargo run --release -- run examples/strings.wl           # string concat/eq demo
-cargo run --release -- run examples/args.wl -- greet you # CLI args demo
-cargo run --release -- run examples/fileio.wl -- examples/fileio.wl # cat demo (file I/O)
-cargo run --release -- run examples/generics.wl          # generic fn/struct demo
-cargo run --release -- run examples/sort.wl              # sort & search demo + 1M int benchmark
-cargo run --release -- run examples/overflow.wl          # wrap + checked ops demo
-cargo run --release -- run examples/concurrency.wl       # worker pool demo (threads + mutex + channel)
-cargo run --release -- run examples/fib.wl               # fibonacci benchmark
-cargo run --release -- test examples/strings.wl          # run the test blocks in a file
-cargo run --release -- test examples/kitchen.wl          # tests from imports run too
-cargo run --release -- check examples/kitchen.wl         # type-check only
-cargo run --release -- build examples/arena.wl -o arena -O3 --emit-c
+cargo run --release -- run examples/arena.wlel             # scoped arena demo
+cargo run --release -- run examples/loops.wlel             # for-in range demo
+cargo run --release -- run examples/strings.wlel           # string concat/eq demo
+cargo run --release -- run examples/args.wlel -- greet you # CLI args demo
+cargo run --release -- run examples/fileio.wlel -- examples/fileio.wlel # cat demo (file I/O)
+cargo run --release -- run examples/generics.wlel          # generic fn/struct demo
+cargo run --release -- run examples/sort.wlel              # sort & search demo + 1M int benchmark
+cargo run --release -- run examples/overflow.wlel          # wrap + checked ops demo
+cargo run --release -- run examples/concurrency.wlel       # worker pool demo (threads + mutex + channel)
+cargo run --release -- run examples/fib.wlel               # fibonacci benchmark
+cargo run --release -- test examples/strings.wlel          # run the test blocks in a file
+cargo run --release -- test examples/kitchen.wlel          # tests from imports run too
+cargo run --release -- check examples/kitchen.wlel         # type-check only
+cargo run --release -- build examples/arena.wlel -o arena -O3 --emit-c
 ```
 
 Project mode (needs `wlel` on PATH):
 
 ```bash
-wlel new myapp && cd myapp   # scaffold: wlel.toml + src/main.wl
+wlel new myapp && cd myapp   # scaffold: wlel.toml + src/main.wlel
 wlel run                     # run the project (dev checks)
 wlel test                    # project + dependency tests
 wlel build                   # binary named after the package
-wlel fmt                     # canonical formatting for every .wl
-wlel doc                     # markdown docs for every .wl + the stdlib
+wlel fmt                     # canonical formatting for every .wlel
+wlel doc                     # markdown docs for every .wlel + the stdlib
 wlel lsp                     # language server over stdio (VS Code, Neovim)
 wlel add github:user/repo    # add a git dependency (git tags = the registry)
 ```
@@ -167,7 +167,7 @@ wlel add github:user/repo    # add a git dependency (git tags = the registry)
 
 Declarations, functions, control flow:
 
-```wl
+```wlel
 fn fib(n: int) -> int {
     if n < 2 { return n; }
     return fib(n - 1) + fib(n - 2);
@@ -183,7 +183,7 @@ fn main() -> int {
 
 `defer` runs at scope exit — LIFO, and it runs on early returns and loop jumps:
 
-```wl
+```wlel
 fn process(path: string) -> int {
     defer std::println_str("done");
     defer {
@@ -197,7 +197,7 @@ fn process(path: string) -> int {
 
 Width types make data layouts exact; narrowing is always explicit:
 
-```wl
+```wlel
 let small: u8 = 250u8;      // suffix literal
 let wrapped: u8 = small + 10;   // wraps to 4 (mod 256), by design
 let big: u64 = 18_000_000_000_000_000_000u64;
@@ -209,7 +209,7 @@ let risky: u8 = small as u8;    // explicit cast required for narrowing
 `enum` declares a closed tagged union; `match` destructures it — the checker
 rejects missing variants, duplicates, and arms after the wildcard:
 
-```wl
+```wlel
 enum Shape {
     Circle(float),
     Rect(float, float),
@@ -231,7 +231,7 @@ variant out of the enclosing function, otherwise yield the payload. It is
 allowed directly as the value of a `let`, an assignment, a `return`, or as a
 statement:
 
-```wl
+```wlel
 fn parse_age(s: string) -> Result[int, string] {
     n := 0;
     if !str_parse_int(s, &n) { return Err("not a number"); }
@@ -247,7 +247,7 @@ fn double(s: string) -> Result[int, string] {
 Predicates, fallbacks and explicit unwraps live in the stdlib (written in Wlel
 itself): `result_is_ok/is_err/unwrap/unwrap_or/ok/err`,
 `option_is_some/is_none/unwrap/unwrap_or`. The unwraps `panic(msg)` — abort
-with the message and `.wl` position; a test run fails that one test and keeps
+with the message and `.wlel` position; a test run fails that one test and keeps
 going. Everything else in a Wlel program errors at compile time or returns a
 Result — implicit panics do not exist.
 
@@ -256,7 +256,7 @@ Result — implicit panics do not exist.
 Functions and structs can be generic over types; each use is monomorphized to a
 concrete instance at compile time — zero runtime cost:
 
-```wl
+```wlel
 struct Box[T] {
     val: T,
 }
@@ -285,7 +285,7 @@ method into a plain function (`Pt__len`) and `recv.method(args)` resolves into
 that call — no vtables, no dynamic dispatch, just sugar with compile-time
 resolution:
 
-```wl
+```wlel
 struct Pt {
     x: float,
     y: float,
@@ -322,7 +322,7 @@ generic functions. Enums take methods too, destructured with `match` inside.
 The stdlib carries a method layer over the free functions — same operations,
 attached to their types:
 
-```wl
+```wlel
 v := vec_new[int]();
 v.push(2);
 v.push(3);
@@ -355,7 +355,7 @@ fully defined in debug and release alike:
 When wrapping is *not* what you want, the stdlib detects overflow — no
 exceptions, no panics:
 
-```wl
+```wlel
 use std;
 
 fn main() -> int {
@@ -377,7 +377,7 @@ they return `false` — treat `*out` as valid only when the call returned `true`
 
 Two layers, both arena-aware. **Whole-file helpers** for the common case:
 
-```wl
+```wlel
 use std;
 
 fn cat(path: string) -> Result[int, string] {
@@ -400,7 +400,7 @@ fn main() -> int {
 **Streaming handles** for buffers and binary data — `close` is idempotent and
 defer-friendly, handles die with their arena, so LeakSanitizer stays clean:
 
-```wl
+```wlel
 f := std::fs::open("data.bin", "rb")?;      // in a fn returning Result
 defer std::fs::close(f);
 buf := new(u8, 4096);
@@ -436,7 +436,7 @@ The partition is median-of-three + Hoare crossing with an insertion-sort
 cutoff below 24 elements, so already-sorted, reverse-sorted and all-equal
 inputs finish in ~15-30 ms instead of degrading quadratically:
 
-```wl
+```wlel
 use std;
 
 fn asc(a: int, b: int) -> int {
@@ -471,7 +471,7 @@ tools and the sanitizer catches the fallout (`wlel build -sanitize` keeps
 the pool LeakSanitizer-clean; an OOB read inside any thread aborts with a
 `file:line` in dev mode).
 
-```wl
+```wlel
 fn worker(p: *Pool) {
     job := 0;
     while sys::chan_recv(p.jobs, &job) {   // blocks; false = closed + drained
@@ -503,13 +503,13 @@ fn worker(p: *Pool) {
   its `file:line` (it never jumps into a foreign test stack).
 
 The full demo — a worker pool computing a mutex-guarded total over a job
-channel — is `examples/concurrency.wl` (`wlel run examples/concurrency.wl`).
+channel — is `examples/concurrency.wlel` (`wlel run examples/concurrency.wlel`).
 
 ## Testing
 
-Tests live next to the code they verify, in plain `.wl` files:
+Tests live next to the code they verify, in plain `.wlel` files:
 
-```wl
+```wlel
 fn add(a: int, b: int) -> int {
     return a + b;
 }
@@ -525,7 +525,7 @@ test "string" {
 ```
 
 ```bash
-$ wlel test math.wl
+$ wlel test math.wlel
 pass: basic arithmetic
 pass: string
 2 passed, 0 failed
@@ -534,10 +534,10 @@ pass: string
 - **`assert(cond)`** and **`assert_eq(a, b)`** are builtins usable in tests and
   ordinary code. `assert_eq` uses the same comparison semantics as `==`
   (literal width adaptation, explicit casts for narrowing).
-- A failed assert reports the **source location**: `FAIL: kaput (main.wl:5)`.
+- A failed assert reports the **source location**: `FAIL: kaput (main.wlel:5)`.
 - One failing test does not stop the suite — the runner catches it and
   continues; the exit code is non-zero if anything failed.
-- `wlel test file.wl` also runs tests from **imported files** (`use "lib/x.wl"`),
+- `wlel test file.wlel` also runs tests from **imported files** (`use "lib/x.wlel"`),
   so libraries ship their own tests. `wlel run`/`wlel build` ignore test blocks
   entirely — zero overhead in the shipped binary.
 
@@ -547,7 +547,7 @@ type-checks, test-runs and builds the three flagship apps, smoke-tests the
 JSON parser's throughput, and enforces `wlel fmt -check` over both
 `examples/` and `flagship/` — the flagships are end-to-end programs, so a
 front-end regression that only breaks them (like the `Result` inference
-regression that had `flagship/json.wl` failing to type-check) can no longer
+regression that had `flagship/json.wlel` failing to type-check) can no longer
 pass CI behind a green test suite.
 
 ## FFI
@@ -555,7 +555,7 @@ pass CI behind a green test suite.
 `extern fn` declares a C function; the call compiles to a direct C call and
 the linker resolves the symbol.
 
-```wl
+```wlel
 use std;
 
 // double sqrt(double) — libm is linked by default
@@ -581,14 +581,15 @@ fn main() -> int {
   (raylib, SDL) name their structs exactly as C does; the C header is
   never included, so the Wlel declaration *is* the binding:
 
-  ```wl
+  ```wlel
   struct Vector2 { x: f32, y: f32 }
   extern fn begin_drawing();
   extern fn draw_circle_v(center: Vector2, radius: f32, color: Color);
   ```
 
   ```bash
-  wlel build examples/raylib.wl -o demo -l raylib -L raylib/lib
+  wlel build flagship/game.wlel -O2 -o game \
+      -l raylib -L <raylib-libdir> -l GL -l X11 -l dl
   ```
 
 - **Linker flags**: `-l <lib>` and `-L <dir>` are repeatable on
@@ -617,16 +618,16 @@ Layout:
 ```text
 myapp/
   wlel.toml      # manifest: name, version, deps
-  src/main.wl    # binary entry (run/build)
-  src/lib.wl     # library entry (optional; check/test work on library-only projects)
+  src/main.wlel    # binary entry (run/build)
+  src/lib.wlel     # library entry (optional; check/test work on library-only projects)
   .wlel/deps/    # git-dependency clones (generated — gitignore it)
   wlel.lock      # resolved git revisions (generated — commit it)
 ```
 
-All verbs work in project mode when no `.wl` file is given — `wlel run/build/
+All verbs work in project mode when no `.wlel` file is given — `wlel run/build/
 check/test` look for `wlel.toml` in the current directory (or any parent).
 `wlel build` writes a binary named after the package; `-o` overrides it.
-Library-only projects (with `src/lib.wl` but no `src/main.wl`) can be checked
+Library-only projects (with `src/lib.wlel` but no `src/main.wlel`) can be checked
 and tested but not built/run.
 
 Dependencies are declared in `[deps]` — either a path to another wlel project
@@ -678,11 +679,11 @@ falls back to already-fetched tags when the remote is unreachable.
 and **idempotent** — formatting twice changes nothing:
 
 ```bash
-$ wlel fmt src/main.wl        # format in place
-formatted: src/main.wl
-$ wlel fmt src/main.wl -check # CI mode: exit 1 if not canonical
+$ wlel fmt src/main.wlel        # format in place
+formatted: src/main.wlel
+$ wlel fmt src/main.wlel -check # CI mode: exit 1 if not canonical
 all formatted
-$ wlel fmt                    # project mode: every .wl under wlel.toml
+$ wlel fmt                    # project mode: every .wlel under wlel.toml
 ```
 
 The rules are deliberately few: 4-space indent, one statement per line,
@@ -700,15 +701,15 @@ is never touched.
 `wlel check`, `wlel build`, and `wlel run` report warnings without failing the build:
 
 ```
-$ wlel check main.wl
-main.wl:7:5: warning: unused variable 'unused'
-main.wl:1:1: warning: import 'geom.wl' is never used
-ok: main.wl type-checks
+$ wlel check main.wlel
+main.wlel:7:5: warning: unused variable 'unused'
+main.wlel:1:1: warning: import 'geom.wlel' is never used
+ok: main.wlel type-checks
 ```
 
 - **Unused variable / parameter** — declared but never read (a plain write
   `x = 5;` does not count as a read).
-- **Unused import** — `use std;` with no `std::` call, or `use "file.wl"`
+- **Unused import** — `use std;` with no `std::` call, or `use "file.wlel"`
   contributing no referenced function or struct.
 - **Unreachable statement** — code after `return`/`break`/`continue` in the same block.
 - **Opt-out** — prefix a name with `_` (`_x`, `_i`, `_cb`) to mark intentional
@@ -728,7 +729,7 @@ what the editor shows is what the compiler sees:
   and enum shapes, variant payloads, pattern-binding types.
 - **Go-to-definition** — locals (with shadowing), functions, methods
   (`v.push()` lands on the `impl` block), structs, enums, variants, struct
-  fields, and `use "file.wl"` imports (opens the file). Generic calls and
+  fields, and `use "file.wlel"` imports (opens the file). Generic calls and
   desugared method calls resolve back to their template declarations.
 - **Completion** — locals in scope, top-level symbols, spliced std symbols
   (`vec_new`, `push`, `Ok`, ...), keywords and primitive types.
@@ -761,7 +762,7 @@ Notes:
 - The stdlib is embedded in the compiler, so std symbols resolve even
   without a `std` source file on disk; go-to-definition on a std symbol
   reports a `wlel-std:` URI (the source is not a file you can open).
-- Unsaved buffers analyze fine, but `use "file.wl"` imports need the
+- Unsaved buffers analyze fine, but `use "file.wlel"` imports need the
   document saved next to its imports.
 
 ## Documentation
@@ -772,7 +773,7 @@ directly below it (a blank line in between still attaches); an unattached
 block at the top of the file becomes the module description. Plain `//`
 comments are never docs:
 
-```wl
+```wlel
 /// A point in the plane.
 struct Pt {
     x: float,
@@ -786,11 +787,11 @@ fn len(p: Pt) -> float {
 ```
 
 ```bash
-$ wlel doc                    # project mode: every .wl + the stdlib page
+$ wlel doc                    # project mode: every .wlel + the stdlib page
 doc: docs/std.md
 doc: docs/geom.md
 doc: docs/index.md
-$ wlel doc src/geom.wl        # single file (adds std.md when it `use std`)
+$ wlel doc src/geom.wlel        # single file (adds std.md when it `use std`)
 $ wlel doc --std              # just the stdlib reference
 $ wlel doc -o site            # write somewhere other than docs/
 ```
@@ -811,13 +812,13 @@ Wlel compiles the same program two ways:
 - **`wlel run` / `wlel test` (dev, safe)** — instrumented C. Every `[T; N]`
   array access is bounds-checked, every integer `/` and `%` is div-zero
   checked, and freed arena memory is poisoned with `0xDE` so use-after-free
-  reads deterministic garbage. Failures abort with the exact `.wl` position:
+  reads deterministic garbage. Failures abort with the exact `.wlel` position:
 
   ```
-  $ wlel run main.wl
-  bounds check failed at main.wl:12: index 7, length 3
-  $ wlel run div.wl
-  division by zero at div.wl:4
+  $ wlel run main.wlel
+  bounds check failed at main.wlel:12: index 7, length 3
+  $ wlel run div.wlel
+  division by zero at div.wlel:4
   ```
 
 - **`wlel build` (release)** — none of that exists in the generated C
@@ -840,7 +841,7 @@ Notes:
 `arena_stats()` reports the innermost active arena (the root arena when no
 block is open). `ArenaStats` is a built-in struct — the name is reserved:
 
-```wl
+```wlel
 arena(4096) {
     xs := new(int, 100);
     let s: ArenaStats = arena_stats();
@@ -855,7 +856,7 @@ produces an AddressSanitizer-instrumented binary (the same binary still
 passes LeakSanitizer at exit thanks to the root arena):
 
 ```bash
-wlel build app.wl -o app -sanitize && ./app
+wlel build app.wlel -o app -sanitize && ./app
 ```
 
 ## QBE backend (experimental)
@@ -897,10 +898,14 @@ production backend could track. Revisit when the language is closer to 1.0.
 
 ## Toolchain notes
 
+- Source files use the `.wlel` extension, which no other language claims. The
+  extension Wlel shipped before 1.0 belongs to Wolfram Language in GitHub
+  Linguist and in most editors, so it was dropped; the compiler rejects it
+  with a rename hint instead of failing obscurely.
 - Generated C is meant to be read: `wlel build --emit-c` writes the C99 source
   next to your binary, with `#line` directives so compiler diagnostics point
-  back into your `.wl` files. Naming the target `-o out.c` writes the source
-  *at that path* and stops before linking, so `wlel build app.wl -O2 --emit-c
+  back into your `.wlel` files. Naming the target `-o out.c` writes the source
+  *at that path* and stops before linking, so `wlel build app.wlel -O2 --emit-c
   -o app.c` is the way to read the C and the way to time the front end alone.
 - `wlel build` is content-cached: an unchanged rebuild reuses the object cc
   already produced instead of re-running it.
@@ -917,7 +922,7 @@ Shipped:
 2. **Expressiveness** — tagged enums + exhaustive `match`, `Result[T,E]`, method sugar, concurrency, LSP, `wlel doc`.
 3. **1.0 scope** — git-tag package registry, QBE backend, three flagship apps, fuzz soak, spec v1.0.
 4. **CI integrity** — flagship check/test/build/bench jobs and `fmt -check` over `flagship/`.
-5. **1.0 freeze** — the spec's open questions are resolved and documented in [§17](docs/spec.md#17-resolved-for-the-10-freeze) (mixed float widths take the wider side, f32→f64 widens implicitly, explicit array decay, evaluation order stays C-inherited, no pointer arithmetic); `wlel --version`; `scripts/release.sh` + `docs/cross-compile.md` for release binaries.
+5. **1.0 freeze** — the spec's open questions are resolved and documented in [§17](docs/spec.md#17-resolved-for-the-10-freeze) (mixed float widths take the wider side, f32→f64 widens implicitly, explicit array decay, evaluation order stays C-inherited, no pointer arithmetic); source extension is `.wlel` (the pre-1.0 one is claimed by Wolfram Language in Linguist/editors); `wlel --version`; `scripts/release.sh` + `docs/cross-compile.md` for release binaries.
 
 Next, ordered by impact-per-effort:
 

@@ -19,7 +19,7 @@ fn front(src: &str) -> Result<String, String> {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "tm.wl".into();
+            f.file = "tm.wlel".into();
         }
     }
     Checker::check(&mut p).map_err(|e| e.msg)?;
@@ -33,7 +33,7 @@ fn check_err_msg(src: &str) -> String {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "tm.wl".into();
+            f.file = "tm.wlel".into();
         }
     }
     Checker::check(&mut p).expect_err("must be rejected").msg
@@ -44,7 +44,7 @@ fn run_cli(name: &str, src: &str) -> (bool, String, String) {
     let dir = std::env::temp_dir().join(format!("wlel_tm_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join(format!("{name}.wl"));
+    let path = dir.join(format!("{name}.wlel"));
     fs::write(&path, src).expect("write source");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
@@ -314,7 +314,7 @@ fn math_values_end_to_end() {
 #[test]
 fn example_timemath_test_blocks_pass() {
     let test = Command::new(env!("CARGO_BIN_EXE_wlel"))
-        .args(["test", "examples/timemath.wl"])
+        .args(["test", "examples/timemath.wlel"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("spawn wlel");
@@ -332,7 +332,7 @@ fn timemath_program_is_asan_clean() {
     let dir = std::env::temp_dir().join(format!("wlel_tmasan_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("asan.wl");
+    let path = dir.join("asan.wlel");
     fs::write(
         &path,
         r#"use std;

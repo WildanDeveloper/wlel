@@ -1,4 +1,4 @@
-// collections.wl — std collections demo (Fase 2)
+// collections.wlel — std collections demo (Fase 2)
 // Vec[T] and HashMap[K, V] are written in Wlel itself, embedded in the
 // compiler, and monomorphized per concrete type: no boxing, arena-aware.
 use std;

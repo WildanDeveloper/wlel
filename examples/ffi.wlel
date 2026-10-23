@@ -1,6 +1,6 @@
 // FFI: `extern fn` declarations bind straight to C symbols at link time.
 //
-//   wlel run examples/ffi.wl
+//   wlel run examples/ffi.wlel
 //
 // The type checker guarantees the call shape; the linker guarantees the
 // symbol. `wlel build -l <lib> -L <dir>` passes extra linker flags through

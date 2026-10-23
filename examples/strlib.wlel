@@ -1,4 +1,4 @@
-// strlib.wl — std string library demo (Fase 2)
+// strlib.wlel — std string library demo (Fase 2)
 // str_find/str_sub/str_trim/str_split/str_parse_int/int_to_str ditulis di
 // Wlel sendiri (embedded in the compiler, monomorphized on demand);
 // std::format / std::parse_float / std::float_to_str are runtime builtins.

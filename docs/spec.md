@@ -42,7 +42,7 @@
 ## 1. Scope
 
 Wlel is an arena-first systems programming language. A Wlel source file
-(extension `.wl`, UTF-8 text) is compiled to C99 and then by a C compiler
+(extension `.wlel`, UTF-8 text) is compiled to C99 and then by a C compiler
 (`cc`/`gcc`/`clang`). The C99 backend is the normative semantics; any
 alternative backend (e.g. the experimental QBE backend) MUST either agree
 with it on the subset it accepts or reject the program.
@@ -56,9 +56,9 @@ language syntax* (§10); recoverable errors are values (`Result`/`Option`,
 
 ### 2.1 Source encoding
 
-Source files are UTF-8. Only ASCII characters are significant to the lexer
-outside string literals. Lines are terminated by `\n`; `\r\n` is accepted.
-There are no block comments.
+Source files are UTF-8 text and use the extension `.wlel`. Only ASCII
+characters are significant to the lexer outside string literals. Lines are
+terminated by `\n`; `\r\n` is accepted. There are no block comments.
 
 ### 2.2 Comments
 
@@ -649,7 +649,7 @@ enclosing function MUST return the same std enum with the same `E`.
 
 ### 9.1 Files
 
-A `.wl` file contains top-level items in any order: `fn`, `extern fn`,
+A `.wlel` file contains top-level items in any order: `fn`, `extern fn`,
 `struct`, `enum`, `impl`, `test`, `use`. Names live in one flat namespace
 after import merging; there are no module qualifiers except the hardcoded
 `std::` and `sys::` roots.
@@ -666,7 +666,7 @@ freeing, §10.1).
 
 ### 9.3 Imports
 
-- `use "path.wl";` — imports a file relative to the importing file,
+- `use "path.wlel";` — imports a file relative to the importing file,
   **recursively**, with diamond deduplication by canonical path. Imported
   items are tagged with their source file. A `use std;` in any imported
   file propagates to the whole import tree.
@@ -690,14 +690,14 @@ freeing, §10.1).
   management (see README).
 - Project mode: a `wlel.toml` manifest with `[package]` and `[deps]`
   (path and git dependencies, semver caret requirements, `wlel.lock` pin).
-  Entry point `src/main.wl`; `src/lib.wl` is library-only.
+  Entry point `src/main.wlel`; `src/lib.wlel` is library-only.
 
 ### 9.5 Diagnostics
 
 One compile reports **all** syntax errors (parser recovery at statement and
 top level). Type checking reports the first error with `file:line:col`.
 The generated C carries `#line` directives so C-compiler diagnostics point
-back to the `.wl` source.
+back to the `.wlel` source.
 
 ### 9.6 Warnings (non-fatal, sorted by position)
 

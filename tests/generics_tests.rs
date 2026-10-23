@@ -14,7 +14,7 @@ fn front(src: &str) -> Result<String, String> {
     let (mut p, errs) = Parser::new(&toks).program();
     assert!(errs.is_empty(), "parse errors: {errs:?}");
     for f in p.funcs.iter_mut() {
-        f.file = "gen.wl".into();
+        f.file = "gen.wlel".into();
     }
     Checker::check(&mut p).map_err(|e| e.msg)?;
     Ok(gen_program(&p))
@@ -237,7 +237,7 @@ fn generics_end_to_end_run_and_test() {
     let dir = std::env::temp_dir().join(format!("wlel_gen_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("gen.wl");
+    let path = dir.join("gen.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -251,7 +251,7 @@ fn generics_end_to_end_run_and_test() {
                assert_eq(box_get(Box { val: 5 }), 5);
            }"#,
     )
-    .expect("write gen.wl");
+    .expect("write gen.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
         .output()
@@ -274,7 +274,7 @@ fn generic_fns_compose_with_safe_mode_and_arena() {
     let dir = std::env::temp_dir().join(format!("wlel_gen2_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("gen_arena.wl");
+    let path = dir.join("gen_arena.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -298,7 +298,7 @@ fn generic_fns_compose_with_safe_mode_and_arena() {
                return 0;
            }"#,
     )
-    .expect("write gen_arena.wl");
+    .expect("write gen_arena.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
         .output()

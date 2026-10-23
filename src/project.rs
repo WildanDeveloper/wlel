@@ -6,8 +6,8 @@
 //! ```text
 //! myapp/
 //!   wlel.toml      [package] name/version, optional [deps]
-//!   src/main.wl    binary entry (required for `run`/`build`)
-//!   src/lib.wl     library entry (`check`/`test` work on library-only
+//!   src/main.wlel    binary entry (required for `run`/`build`)
+//!   src/lib.wlel     library entry (`check`/`test` work on library-only
 //!                  projects; every dependency must provide one)
 //!   .wlel/deps/    git dependency clones (generated, gitignore it)
 //!   wlel.lock      resolved git revisions (generated; commit it)
@@ -327,9 +327,9 @@ pub fn valid_dep_name(n: &str) -> bool {
 pub struct Project {
     pub dir: PathBuf,
     pub manifest: Manifest,
-    /// src/main.wl (binary) or src/lib.wl (library-only project)
+    /// src/main.wlel (binary) or src/lib.wlel (library-only project)
     pub entry: PathBuf,
-    /// true when the entry is src/main.wl (run/build need this)
+    /// true when the entry is src/main.wlel (run/build need this)
     pub is_bin: bool,
     pub program: Program,
     /// non-fatal notes from dependency resolution (e.g. offline tag fallback)
@@ -362,15 +362,15 @@ pub fn load_project(dir: &Path) -> Result<Project, String> {
     let manifest =
         parse_manifest(&src).map_err(|e| format!("{}: {e}", manifest_path.display()))?;
 
-    let main = dir.join("src/main.wl");
-    let lib = dir.join("src/lib.wl");
+    let main = dir.join("src/main.wlel");
+    let lib = dir.join("src/lib.wlel");
     let (entry, is_bin) = if main.is_file() {
         (main, true)
     } else if lib.is_file() {
         (lib, false)
     } else {
         return Err(format!(
-            "project '{}' has no src/main.wl or src/lib.wl",
+            "project '{}' has no src/main.wlel or src/lib.wlel",
             manifest.name
         ));
     };
@@ -487,10 +487,10 @@ fn resolve_deps(
                 dep.name, mf.name
             ));
         }
-        let lib = dep_root.join("src/lib.wl");
+        let lib = dep_root.join("src/lib.wlel");
         if !lib.is_file() {
             return Err(format!(
-                "dependency '{}' ({}) has no src/lib.wl",
+                "dependency '{}' ({}) has no src/lib.wlel",
                 dep.name,
                 dep_root.display()
             ));
@@ -509,7 +509,7 @@ fn resolve_deps(
 // loader (shared with single-file mode)
 // ---------------------------------------------------------------------------
 
-/// lex + parse a `.wl` file and recursively merge its `use "path.wl"` imports
+/// lex + parse a `.wlel` file and recursively merge its `use "path.wlel"` imports
 /// (relative to the importing file, diamond-deduped). Returns the merged
 /// program; every function/struct/test carries the absolute path of the file
 /// it was parsed from.
@@ -562,7 +562,7 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
         t.file = file_str.clone();
     }
 
-    // recursively merge `use "path.wl";` imports (relative to the importing file)
+    // recursively merge `use "path.wlel";` imports (relative to the importing file)
     let base_dir =
         canonical.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
     let mut import_resolved: Vec<Option<String>> = Vec::new();
@@ -937,7 +937,7 @@ pub fn scaffold(dir: &Path) -> Result<PathBuf, String> {
     let gitignore = format!("/{name}\n/{DEPS_DIR}/\n");
     let files: [(&str, String); 3] = [
         (MANIFEST_FILE, toml),
-        ("src/main.wl", main_wl.into()),
+        ("src/main.wlel", main_wl.into()),
         (".gitignore", gitignore),
     ];
     for (rel, content) in files {

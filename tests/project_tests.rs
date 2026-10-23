@@ -147,7 +147,7 @@ fn new_scaffolds_a_runnable_project() {
     let (out, err, code) = t.wlel(&["new", "app"], &t.path);
     assert_eq!(code, Some(0), "stdout: {out}\nstderr: {err}");
     assert!(t.path.join("app/wlel.toml").is_file());
-    assert!(t.path.join("app/src/main.wl").is_file());
+    assert!(t.path.join("app/src/main.wlel").is_file());
 
     let app = t.path.join("app");
     let (out, err, code) = t.wlel(&["run"], &app);
@@ -179,8 +179,8 @@ fn project_multifile_and_project_test() {
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
     );
     t.write(
-        "app/src/main.wl",
-        r#"use "util.wl";
+        "app/src/main.wlel",
+        r#"use "util.wlel";
 use std;
 
 fn main() -> int {
@@ -189,7 +189,7 @@ fn main() -> int {
 }"#,
     );
     t.write(
-        "app/src/util.wl",
+        "app/src/util.wlel",
         r#"fn twice(x: int) -> int { return x * 2; }
 test "menggandakan" {
     assert_eq(twice(21), 42);
@@ -210,7 +210,7 @@ fn run_forwards_args_to_the_program() {
     let t = TempDir::new("runargs");
     t.wlel(&["new", "app"], &t.path);
     t.write(
-        "app/src/main.wl",
+        "app/src/main.wlel",
         r#"use std;
 fn main() -> int {
     if sys::argc() > 1 {
@@ -261,7 +261,7 @@ fn path_dep_merges_functions_structs_and_tests() {
         "[package]\nname = \"pointlib\"\nversion = \"0.1.0\"\n",
     );
     t.write(
-        "pointlib/src/lib.wl",
+        "pointlib/src/lib.wlel",
         r#"use std;
 
 struct Pt {
@@ -293,7 +293,7 @@ test "pt sum" {
     // main deliberately has NO `use std`: the dependency's `use std` must
     // pull in the embedded library for the whole merge
     t.write(
-        "app/src/main.wl",
+        "app/src/main.wlel",
         r#"fn main() -> int {
     p := mk(40, 2);
     return sum(&p);
@@ -304,7 +304,7 @@ test "pt sum" {
     let (out, err, code) = t.wlel(&["run"], &app);
     assert_eq!(code, Some(42), "stdout: {out}\nstderr: {err}");
     t.write(
-        "app/src/main.wl",
+        "app/src/main.wlel",
         r#"use std;
 fn main() -> int {
     p := mk(40, 2);
@@ -325,13 +325,13 @@ fn main() -> int {
 fn path_dep_errors_are_actionable() {
     let t = TempDir::new("pathdeperr");
     // dep is not a wlel project (missing wlel.toml)
-    t.write("bare/lib.wl", "fn x() -> int { return 1; }");
+    t.write("bare/lib.wlel", "fn x() -> int { return 1; }");
     t.wlel(&["new", "app"], &t.path);
     t.write(
         "app/wlel.toml",
         "[package]\nname = \"app\"\n\n[deps]\nbare = { path = \"../bare\" }\n",
     );
-    t.write("app/src/main.wl", "fn main() -> int { return 0; }");
+    t.write("app/src/main.wlel", "fn main() -> int { return 0; }");
     let (_out, err, code) = t.wlel(&["check"], &t.path.join("app"));
     assert_ne!(code, Some(0));
     assert!(err.contains("not a wlel project"), "{err}");
@@ -341,7 +341,7 @@ fn path_dep_errors_are_actionable() {
         "mismatch/wlel.toml",
         "[package]\nname = \"other\"\n",
     );
-    t.write("mismatch/src/lib.wl", "fn x() -> int { return 1; }");
+    t.write("mismatch/src/lib.wlel", "fn x() -> int { return 1; }");
     t.write(
         "app/wlel.toml",
         "[package]\nname = \"app\"\n\n[deps]\nmismatch = { path = \"../mismatch\" }\n",
@@ -350,7 +350,7 @@ fn path_dep_errors_are_actionable() {
     assert_ne!(code, Some(0));
     assert!(err.contains("declares name 'other'"), "{err}");
 
-    // dep without src/lib.wl
+    // dep without src/lib.wlel
     t.write("nolib/wlel.toml", "[package]\nname = \"nolib\"\n");
     t.write(
         "app/wlel.toml",
@@ -358,7 +358,7 @@ fn path_dep_errors_are_actionable() {
     );
     let (_out, err, code) = t.wlel(&["check"], &t.path.join("app"));
     assert_ne!(code, Some(0));
-    assert!(err.contains("no src/lib.wl"), "{err}");
+    assert!(err.contains("no src/lib.wlel"), "{err}");
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +373,7 @@ fn init_remote(dir: &Path, name: &str, body: &str) -> String {
         format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
     )
     .expect("write dep toml");
-    fs::write(dir.join("src/lib.wl"), body).expect("write dep lib");
+    fs::write(dir.join("src/lib.wlel"), body).expect("write dep lib");
     let git = |args: &[&str]| {
         let out = Command::new("git")
             .args(args)
@@ -414,7 +414,7 @@ fn git_dep_clones_builds_and_lock_pins_the_revision() {
         ),
     );
     t.write(
-        "app/src/main.wl",
+        "app/src/main.wlel",
         r#"use std;
 fn main() -> int {
     std::println_int(hi());
@@ -434,7 +434,7 @@ fn main() -> int {
     // the remote moves on, but the lock keeps builds reproducible even
     // after the clone cache is wiped
     fs::write(
-        t.path.join("remote/src/lib.wl"),
+        t.path.join("remote/src/lib.wlel"),
         "fn hi() -> int { return 42; }",
     )
     .expect("advance remote");
@@ -466,7 +466,7 @@ fn library_project_checks_and_tests_but_cannot_build() {
         "[package]\nname = \"mathx\"\nversion = \"0.1.0\"\n",
     );
     t.write(
-        "src/lib.wl",
+        "src/lib.wlel",
         r#"fn square(x: int) -> int { return x * x; }
 test "square" {
     assert_eq(square(6), 36);

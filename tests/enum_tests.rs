@@ -417,12 +417,12 @@ fn wildcard_arm_assert_eq_rewrites_in_codegen() {
              return 0;
          }",
     );
-    p.funcs[0].file = "t.wl".into();
+    p.funcs[0].file = "t.wlel".into();
     Checker::check(&mut p).expect("typecheck");
     let c = gen_program(&p);
     assert_eq!(c.matches("_wlel_assert((").count(), 2, "{c}");
     assert!(!c.contains("assert_eq("), "{c}");
-    assert!(c.contains("_wlel_assert((2 == 2), \"t.wl\","), "{c}");
+    assert!(c.contains("_wlel_assert((2 == 2), \"t.wlel\","), "{c}");
 }
 
 #[test]
@@ -437,12 +437,12 @@ fn test_block_match_assert_eq_rewrites() {
              }
          }",
     );
-    p.funcs[0].file = "t.wl".into();
-    p.tests[0].file = "t.wl".into();
+    p.funcs[0].file = "t.wlel".into();
+    p.tests[0].file = "t.wlel".into();
     Checker::check(&mut p).expect("typecheck");
     let c = gen_program_tests(&p);
-    assert!(c.contains("_wlel_assert((v == 7), \"t.wl\","), "{c}");
-    assert!(c.contains("_wlel_assert((0 == 1), \"t.wl\","), "{c}");
+    assert!(c.contains("_wlel_assert((v == 7), \"t.wlel\","), "{c}");
+    assert!(c.contains("_wlel_assert((0 == 1), \"t.wlel\","), "{c}");
 }
 
 // ---------------------------------------------------------------------------
@@ -489,8 +489,8 @@ impl TempWl {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join(format!("{name}.wl"));
-        fs::write(&path, src).expect("write temp .wl");
+        let path = dir.join(format!("{name}.wlel"));
+        fs::write(&path, src).expect("write temp .wlel");
         TempWl { path }
     }
 

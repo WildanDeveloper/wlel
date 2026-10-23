@@ -163,7 +163,7 @@ fn line_index_word_at() {
 fn diagnostics_clean_program() {
     let text = "fn main() {\n    sys::exit(0);\n}\n";
     let mut srv = Server::new();
-    let msgs = open_doc(&mut srv, "file:///clean.wl", text);
+    let msgs = open_doc(&mut srv, "file:///clean.wlel", text);
     let diags = published_diags(&msgs);
     assert!(diags.is_empty(), "expected no diagnostics, got {diags:?}");
 }
@@ -172,7 +172,7 @@ fn diagnostics_clean_program() {
 fn diagnostics_parse_error_position() {
     let text = "fn main() {\n    x := ;\n}\n";
     let mut srv = Server::new();
-    let msgs = open_doc(&mut srv, "file:///bad.wl", text);
+    let msgs = open_doc(&mut srv, "file:///bad.wlel", text);
     let diags = published_diags(&msgs);
     assert!(!diags.is_empty());
     let d = &diags[0];
@@ -187,7 +187,7 @@ fn diagnostics_parse_error_position() {
 fn diagnostics_check_error() {
     let text = "fn main() {\n    x := 5;\n    y := x + \"s\";\n    sys::exit(0);\n}\n";
     let mut srv = Server::new();
-    let msgs = open_doc(&mut srv, "file:///check_err.wl", text);
+    let msgs = open_doc(&mut srv, "file:///check_err.wlel", text);
     let diags = published_diags(&msgs);
     assert!(!diags.is_empty());
     assert_eq!(diags[0].get("severity").and_then(|s| s.as_i64()), Some(1));
@@ -199,7 +199,7 @@ fn diagnostics_check_error() {
 fn diagnostics_warning_unused_var() {
     let text = "fn main() {\n    x := 5;\n    sys::exit(0);\n}\n";
     let mut srv = Server::new();
-    let msgs = open_doc(&mut srv, "file:///warn.wl", text);
+    let msgs = open_doc(&mut srv, "file:///warn.wlel", text);
     let diags = published_diags(&msgs);
     assert!(!diags.is_empty());
     assert_eq!(diags[0].get("severity").and_then(|s| s.as_i64()), Some(2));
@@ -211,11 +211,11 @@ fn diagnostics_update_on_change() {
     let bad = "fn main() {\n    x := ;\n}\n";
     let good = "fn main() {\n    sys::exit(0);\n}\n";
     let mut srv = Server::new();
-    open_doc(&mut srv, "file:///ch.wl", bad);
+    open_doc(&mut srv, "file:///ch.wlel", bad);
     let msgs = srv.handle(&notification(
         "textDocument/didChange",
         jobj(vec![
-            ("textDocument", jobj(vec![("uri", jstr("file:///ch.wl")), ("version", jint(2))])),
+            ("textDocument", jobj(vec![("uri", jstr("file:///ch.wlel")), ("version", jint(2))])),
             (
                 "contentChanges",
                 jarr(vec![jobj(vec![("text", jstr(good))])]),
@@ -235,8 +235,8 @@ fn diagnostics_update_on_change() {
 #[test]
 fn diagnostics_unresolved_import() {
     let dir = temp_wl_dir("imp");
-    let text = "use \"does_not_exist.wl\";\nfn main() {\n    sys::exit(0);\n}\n";
-    let path = dir.join("main.wl");
+    let text = "use \"does_not_exist.wlel\";\nfn main() {\n    sys::exit(0);\n}\n";
+    let path = dir.join("main.wlel");
     std::fs::write(&path, text).unwrap();
     let uri = format!("file://{}", path.display());
     let mut srv = Server::new();
@@ -249,7 +249,7 @@ fn diagnostics_unresolved_import() {
 
 #[test]
 fn unsaved_buffer_import_reported() {
-    let a = analyze("use \"x.wl\";\nfn main() { sys::exit(0); }\n");
+    let a = analyze("use \"x.wlel\";\nfn main() { sys::exit(0); }\n");
     assert!(a
         .diagnostics
         .iter()
@@ -430,22 +430,22 @@ fn definition_out_of_scope_not_resolved() {
 fn definition_across_import() {
     let dir = temp_wl_dir("depx");
     let lib = "struct Gadget {\n    id: int\n}\n";
-    let main = "use \"lib.wl\";\n\nfn main() {\n    g := Gadget { id: 1 };\n    sys::exit(g.id);\n}\n";
-    let lib_path = dir.join("lib.wl");
-    let main_path = dir.join("main.wl");
+    let main = "use \"lib.wlel\";\n\nfn main() {\n    g := Gadget { id: 1 };\n    sys::exit(g.id);\n}\n";
+    let lib_path = dir.join("lib.wlel");
+    let main_path = dir.join("main.wlel");
     std::fs::write(&lib_path, lib).unwrap();
     std::fs::write(&main_path, main).unwrap();
 
     let a = lsp::analyze(main, Some(&main_path));
     assert!(a.diagnostics.is_empty(), "{:?}", a.diagnostics);
     let d = def_at(&a, main, "Gadget {");
-    assert!(d.file.ends_with("lib.wl"), "{}", d.file);
+    assert!(d.file.ends_with("lib.wlel"), "{}", d.file);
     assert_eq!(d.span.start.line, 1);
 
-    // `use "lib.wl"` itself jumps to the file
+    // `use "lib.wlel"` itself jumps to the file
     let idx = LineIndex::new(main);
-    let d = lsp::definition(&a, &idx, pos_of(main, "lib.wl")).unwrap();
-    assert!(d.file.ends_with("lib.wl"));
+    let d = lsp::definition(&a, &idx, pos_of(main, "lib.wlel")).unwrap();
+    assert!(d.file.ends_with("lib.wlel"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -550,10 +550,10 @@ fn shutdown_then_exit_stops_server() {
 #[test]
 fn did_close_publishes_empty() {
     let mut srv = Server::new();
-    open_doc(&mut srv, "file:///c.wl", "fn main() { sys::exit(0); }\n");
+    open_doc(&mut srv, "file:///c.wlel", "fn main() { sys::exit(0); }\n");
     let msgs = srv.handle(&notification(
         "textDocument/didClose",
-        jobj(vec![("textDocument", jobj(vec![("uri", jstr("file:///c.wl"))]))]),
+        jobj(vec![("textDocument", jobj(vec![("uri", jstr("file:///c.wlel"))]))]),
     ));
     let diags = published_diags(&msgs);
     assert!(diags.is_empty());
@@ -562,7 +562,7 @@ fn did_close_publishes_empty() {
         5,
         "textDocument/hover",
         jobj(vec![
-            ("textDocument", jobj(vec![("uri", jstr("file:///c.wl"))])),
+            ("textDocument", jobj(vec![("uri", jstr("file:///c.wlel"))])),
             ("position", jobj(vec![("line", jint(0)), ("character", jint(0))])),
         ]),
     ));
@@ -573,12 +573,12 @@ fn did_close_publishes_empty() {
 fn hover_over_protocol_end_to_end() {
     let text = "fn main() {\n    x := 5;\n    sys::exit(x);\n}\n";
     let mut srv = Server::new();
-    open_doc(&mut srv, "file:///h.wl", text);
+    open_doc(&mut srv, "file:///h.wlel", text);
     let msgs = srv.handle(&request(
         42,
         "textDocument/hover",
         jobj(vec![
-            ("textDocument", jobj(vec![("uri", jstr("file:///h.wl"))])),
+            ("textDocument", jobj(vec![("uri", jstr("file:///h.wlel"))])),
             // cursor on `x` of `sys::exit(x)` (line index 2, char 14)
             ("position", jobj(vec![("line", jint(2)), ("character", jint(14))])),
         ]),
@@ -598,13 +598,13 @@ fn stdio_framing_loop() {
         request(1, "initialize", jobj(vec![("capabilities", jobj(vec![]))])),
         notification(
             "textDocument/didOpen",
-            jobj(vec![("textDocument", text_document("file:///f.wl", text, 1))]),
+            jobj(vec![("textDocument", text_document("file:///f.wlel", text, 1))]),
         ),
         request(
             2,
             "textDocument/hover",
             jobj(vec![
-                ("textDocument", jobj(vec![("uri", jstr("file:///f.wl"))])),
+                ("textDocument", jobj(vec![("uri", jstr("file:///f.wlel"))])),
                 ("position", jobj(vec![("line", jint(2)), ("character", jint(14))])),
             ]),
         ),
@@ -612,7 +612,7 @@ fn stdio_framing_loop() {
             3,
             "textDocument/definition",
             jobj(vec![
-                ("textDocument", jobj(vec![("uri", jstr("file:///f.wl"))])),
+                ("textDocument", jobj(vec![("uri", jstr("file:///f.wlel"))])),
                 ("position", jobj(vec![("line", jint(2)), ("character", jint(14))])),
             ]),
         ),
@@ -633,7 +633,7 @@ fn stdio_framing_loop() {
     assert!(out.contains("\"id\":2"));
     assert!(out.contains("x: int"));
     assert!(out.contains("\"id\":3"));
-    assert!(out.contains("file:///f.wl"));
+    assert!(out.contains("file:///f.wlel"));
     assert!(out.contains("\"id\":4"));
     assert!(out.contains("\"result\":null"));
     // framing is parseable end-to-end
@@ -649,7 +649,7 @@ fn stdio_framing_loop() {
 #[test]
 fn uri_roundtrip() {
     let dir = temp_wl_dir("uri");
-    let path = dir.join("a b.wl");
+    let path = dir.join("a b.wlel");
     let path_str = format!("{}", path.display()).replace(' ', "%20");
     let uri = format!("file://{path_str}");
     let got = lsp::uri_to_path(&uri).unwrap();

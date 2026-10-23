@@ -1,4 +1,4 @@
-// fib.wl — classic recursion test
+// fib.wlel — classic recursion test
 fn fib(n: int) -> int {
     if n < 2 {
         return n;

@@ -26,12 +26,12 @@ fn front(src: &str) -> Result<String, String> {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "methods.wl".into();
+            f.file = "methods.wlel".into();
         }
     }
     for i in p.impls.iter_mut() {
         if i.file.is_empty() {
-            i.file = "methods.wl".into();
+            i.file = "methods.wlel".into();
         }
     }
     Checker::check(&mut p).map_err(|e| e.msg)?;
@@ -47,7 +47,7 @@ fn run_cli(name: &str, src: &str) -> (bool, String, String) {
     let dir = std::env::temp_dir().join(format!("wlel_impl_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join(format!("{name}.wl"));
+    let path = dir.join(format!("{name}.wlel"));
     fs::write(&path, src).expect("write src");
     let out = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
@@ -399,7 +399,7 @@ fn cli_run_and_test_with_methods() {
     let dir = std::env::temp_dir().join(format!("wlel_impl_test_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("t.wl");
+    let path = dir.join("t.wlel");
     fs::write(
         &path,
         r#"struct Pt { x: int }
@@ -433,7 +433,7 @@ fn impls_flow_through_project_deps() {
     )
     .expect("write lib manifest");
     fs::write(
-        dir.join("lib/src/lib.wl"),
+        dir.join("lib/src/lib.wlel"),
         "use std;\nstruct Pt { x: float, y: float }\nimpl Pt {\n    fn len(self) -> float {\n        return std::math::sqrt(self.x * self.x + self.y * self.y);\n    }\n    fn scale(self: *Pt, k: float) {\n        self.x *= k;\n    }\n}\n",
     )
     .expect("write lib");
@@ -443,7 +443,7 @@ fn impls_flow_through_project_deps() {
     )
     .expect("write app manifest");
     fs::write(
-        dir.join("app/src/main.wl"),
+        dir.join("app/src/main.wlel"),
         "use std;\nfn main() -> int {\n    p := Pt { x: 3.0, y: 4.0 };\n    p.scale(2.0);\n    std::println_int(p.len() as int);\n    return 0;\n}\n",
     )
     .expect("write main");

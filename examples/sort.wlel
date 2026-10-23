@@ -1,8 +1,8 @@
-// sort.wl — std::sort & std::binary_search (Fase 2)
+// sort.wlel — std::sort & std::binary_search (Fase 2)
 //
-//   wlel run  examples/sort.wl           — demo + 1M int benchmark
-//   wlel test examples/sort.wl           — run the test blocks
-//   wlel build examples/sort.wl -o sort -O2  — release benchmark binary
+//   wlel run  examples/sort.wlel           — demo + 1M int benchmark
+//   wlel test examples/sort.wlel           — run the test blocks
+//   wlel build examples/sort.wlel -o sort -O2  — release benchmark binary
 //
 // std::sort takes a comparator `cmp(a, b) -> int` (negative / zero /
 // positive, like strcmp) over three collection forms:

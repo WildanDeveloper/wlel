@@ -1,6 +1,6 @@
 // Time, math and random: the pieces a benchmark harness needs.
 //
-//   wlel run examples/timemath.wl
+//   wlel run examples/timemath.wlel
 //
 // sys::mono_ms() is a monotonic millisecond clock (never jumps — measure
 // durations with it); sys::unix_ms() is the wall clock since the epoch.

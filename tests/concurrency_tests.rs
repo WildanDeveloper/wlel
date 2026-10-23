@@ -363,7 +363,7 @@ fn run_cli(tag: &str, src: &str) -> (bool, String, String) {
     let dir = std::env::temp_dir().join(format!("wlel_conc_{}_{tag}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("prog.wl");
+    let path = dir.join("prog.wlel");
     fs::write(&path, src).expect("write source");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .arg("run")
@@ -453,7 +453,7 @@ fn recv_blocks_until_thread_sends() {
 #[test]
 fn example_concurrency_test_blocks_pass() {
     let test = Command::new(env!("CARGO_BIN_EXE_wlel"))
-        .args(["test", "examples/concurrency.wl"])
+        .args(["test", "examples/concurrency.wlel"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("spawn wlel");
@@ -465,7 +465,7 @@ fn example_concurrency_test_blocks_pass() {
 #[test]
 fn example_concurrency_demo_runs() {
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
-        .args(["run", "examples/concurrency.wl"])
+        .args(["run", "examples/concurrency.wlel"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("spawn wlel");
@@ -482,7 +482,7 @@ fn div_zero_inside_thread_reports_wlel_position() {
     let dir = std::env::temp_dir().join(format!("wlel_concdiv_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("div.wl");
+    let path = dir.join("div.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -503,7 +503,7 @@ fn div_zero_inside_thread_reports_wlel_position() {
     assert!(!run.status.success(), "div-by-zero thread must abort");
     let err = String::from_utf8_lossy(&run.stderr);
     assert!(err.contains("division by zero at"), "{err}");
-    assert!(err.contains("div.wl:3"), "{err}");
+    assert!(err.contains("div.wlel:3"), "{err}");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -516,7 +516,7 @@ fn worker_pool_is_asan_clean() {
     let dir = std::env::temp_dir().join(format!("wlel_concasan_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("asan.wl");
+    let path = dir.join("asan.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -577,7 +577,7 @@ fn worker_pool_is_asan_clean() {
 
 #[test]
 fn example_is_fmt_canonical() {
-    let src = fs::read_to_string("examples/concurrency.wl").expect("read example");
+    let src = fs::read_to_string("examples/concurrency.wlel").expect("read example");
     let formatted = wlel::fmt::format_source(&src).expect("example parses");
-    assert_eq!(formatted, src, "examples/concurrency.wl is not fmt-canonical");
+    assert_eq!(formatted, src, "examples/concurrency.wlel is not fmt-canonical");
 }

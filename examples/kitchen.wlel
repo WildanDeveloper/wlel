@@ -1,6 +1,6 @@
-// kitchen.wl — casts, heap, arena, arrays, imports, std
+// kitchen.wlel — casts, heap, arena, arrays, imports, std
 use std;
-use "lib/geom.wl";
+use "lib/geom.wlel";
 
 fn sum(arr: *int, n: int) -> int {
     total := 0;

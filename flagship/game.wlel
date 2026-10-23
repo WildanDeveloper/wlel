@@ -1,7 +1,7 @@
-// game.wl — flagship app 3: a small arcade game (snake) with real raylib
+// game.wlel — flagship app 3: a small arcade game (snake) with real raylib
 // bindings, written in Wlel.
 //
-//   wlel build flagship/game.wl -O2 -o arena \
+//   wlel build flagship/game.wlel -O2 -o arena \
 //       -l raylib -L <raylib-libdir> -l GL -l X11 -l dl
 //   ./arena
 //

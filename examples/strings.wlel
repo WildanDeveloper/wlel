@@ -1,4 +1,4 @@
-// strings.wl — v0.6 string ops: concat (+), equality (==), strlen
+// strings.wlel — v0.6 string ops: concat (+), equality (==), strlen
 // Concatenation allocates from the ACTIVE arena (or heap if none) —
 // arena-first, just like everything else in Wlel.
 use std;

@@ -1,6 +1,6 @@
 // Concurrency v1: threads, mutexes, channels — the honest C-like model.
 //
-//   wlel run examples/concurrency.wl   (worker pool demo)
+//   wlel run examples/concurrency.wlel   (worker pool demo)
 //
 // sys::thread(work, data) spawns an OS thread running work(data): the
 // worker is resolved by name (Wlel has no function pointers), takes exactly

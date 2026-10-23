@@ -2,8 +2,8 @@
 /fuzz/target
 /fuzz/artifacts
 /fuzz/coverage
-# scratch file written by flagship/json.wl's "file parse" test block
+# scratch file written by flagship/json.wlel's "file parse" test block
 wlel_json_test.tmp
 /dist
-# scratch file written by examples/fileio.wl
+# scratch file written by examples/fileio.wlel
 wlel_fileio_demo.tmp

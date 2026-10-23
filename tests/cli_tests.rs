@@ -10,7 +10,7 @@ struct TempWl {
 }
 
 impl TempWl {
-    /// write a unique temp .wl file with the given source
+    /// write a unique temp .wlel file with the given source
     fn new(name: &str, src: &str) -> TempWl {
         let dir = std::env::temp_dir().join(format!(
             "wlel_cli_{}_{}",
@@ -19,8 +19,8 @@ impl TempWl {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join(format!("{name}.wl"));
-        fs::write(&path, src).expect("write temp .wl");
+        let path = dir.join(format!("{name}.wlel"));
+        fs::write(&path, src).expect("write temp .wlel");
         TempWl { path }
     }
 
@@ -81,7 +81,7 @@ fn test_runner_reports_failure_with_file_line() {
     assert!(out.contains("pass: ok"), "{out}");
     assert!(out.contains("FAIL: kaput ("), "{out}");
     // failure carries the source location of the assert
-    assert!(out.contains("one_fail.wl:5"), "{out}");
+    assert!(out.contains("one_fail.wlel:5"), "{out}");
     // a failed test does not stop the suite
     assert!(out.contains("pass: still runs"), "{out}");
     assert!(out.contains("2 passed, 1 failed"), "{out}");
@@ -122,22 +122,22 @@ fn test_mode_reports_syntax_errors() {
 
 #[test]
 fn tests_from_imported_files_run_too() {
-    // main.wl imports lib/geom.wl; geom's tests are part of the suite
+    // main.wlel imports lib/geom.wlel; geom's tests are part of the suite
     let t = TempWl::new(
         "with_import",
-        r#"use "lib/geom.wl";
+        r#"use "lib/geom.wlel";
            fn main() -> int { return 0; }"#,
     );
     let lib_dir = t.path.parent().unwrap().join("lib");
     fs::create_dir_all(&lib_dir).expect("mkdir lib");
     fs::write(
-        lib_dir.join("geom.wl"),
+        lib_dir.join("geom.wlel"),
         r#"fn twice(x: int) -> int { return x * 2; }
            test "menggandakan" {
                assert_eq(twice(21), 42);
            }"#,
     )
-    .expect("write geom.wl");
+    .expect("write geom.wlel");
     let (out, err, code) = t.run("test");
     assert_eq!(code, Some(0), "stdout: {out}\nstderr: {err}");
     assert!(out.contains("pass: menggandakan"), "{out}");
@@ -156,8 +156,8 @@ fn dev_mode_bounds_read_reports_file_line() {
     let (_out, err, code) = t.run("run");
     assert_eq!(code, Some(1), "stderr: {err}");
     assert!(err.contains("bounds check failed"), "{err}");
-    // the failure points back into the .wl source, not the generated C
-    assert!(err.contains("dev_bounds.wl:3"), "{err}");
+    // the failure points back into the .wlel source, not the generated C
+    assert!(err.contains("dev_bounds.wlel:3"), "{err}");
     assert!(err.contains("index 7, length 3"), "{err}");
 }
 
@@ -174,7 +174,7 @@ fn dev_mode_bounds_write_reports_file_line() {
     let (_out, err, code) = t.run("run");
     assert_eq!(code, Some(1), "stderr: {err}");
     assert!(err.contains("bounds check failed"), "{err}");
-    assert!(err.contains("dev_write.wl:3"), "{err}");
+    assert!(err.contains("dev_write.wlel:3"), "{err}");
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn dev_mode_div_zero_reports_file_line() {
     let (_out, err, code) = t.run("run");
     assert_eq!(code, Some(1), "stderr: {err}");
     assert!(err.contains("division by zero"), "{err}");
-    assert!(err.contains("dev_divz.wl:3"), "{err}");
+    assert!(err.contains("dev_divz.wlel:3"), "{err}");
 }
 
 #[test]
@@ -404,4 +404,108 @@ fn build_sanitize_catches_heap_overflow() {
     );
     assert!(err.contains("AddressSanitizer"), "{err}");
     assert!(err.contains("heap-buffer-overflow"), "{err}");
+}
+
+// ---------------------------------------------------------------------------
+// source extension: `.wlel` is the language; `.wl` belongs to Wolfram Language
+
+#[test]
+fn legacy_wl_extension_is_rejected_with_a_rename_hint() {
+    let t = TempWl::new("legacy_ext", "fn main() -> int { return 0; }");
+    // move the source to the pre-1.0 extension
+    let old = t.path.with_extension("wl");
+    fs::rename(&t.path, &old).expect("rename to .wl");
+
+    for mode in ["run", "check", "test", "build"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_wlel"))
+            .args([mode, old.to_str().unwrap()])
+            .output()
+            .expect("spawn wlel");
+        assert_eq!(out.status.code(), Some(1), "{mode} on .wl must fail");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(".wl extension"), "{mode}: {err}");
+        assert!(err.contains("Wolfram Language"), "{mode}: {err}");
+        assert!(err.contains("mv "), "{mode} must suggest the rename: {err}");
+        assert!(err.contains(".wlel"), "{mode}: {err}");
+    }
+
+    let _ = fs::remove_file(&old);
+}
+
+#[test]
+fn a_program_argument_ending_in_wl_is_still_forwarded() {
+    // everything after `--` belongs to the program: a Wlel program may well
+    // be given a Wolfram file to process, so the rename guard must stop there
+    let t = TempWl::new(
+        "forward_wl",
+        r#"use std;
+           fn main() -> int {
+               i := 1;
+               while i < sys::argc() {
+                   std::println_str(sys::arg(i));
+                   i += 1;
+               }
+               return 0;
+           }"#,
+    );
+    let out = Command::new(env!("CARGO_BIN_EXE_wlel"))
+        .args(["run", t.path.to_str().unwrap(), "--", "data.wl"])
+        .output()
+        .expect("spawn wlel");
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "data.wl");
+}
+
+#[test]
+fn the_repository_has_no_legacy_wl_sources() {
+    // guard against a rename regressing (new example, fuzz corpus, flagship):
+    // every Wlel source in the tree must use the .wlel extension
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut stack = vec![root.clone()];
+    let mut legacy = Vec::new();
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).expect("read dir").filter_map(|e| e.ok()) {
+            let p = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if p.is_dir() {
+                if !matches!(name.as_str(), "target" | ".git") {
+                    stack.push(p);
+                }
+            } else if p.extension().and_then(|e| e.to_str()) == Some("wl") {
+                legacy.push(p.display().to_string());
+            }
+        }
+    }
+    legacy.sort();
+    assert!(legacy.is_empty(), "legacy .wl sources found: {legacy:?}");
+}
+
+#[test]
+fn the_fuzz_corpus_type_checks() {
+    // the corpus is copied *flat* into the fuzzer's working directory, so
+    // every `use "…"` inside it must resolve next to the file. A dangling
+    // import would not break the fuzzer (it never loads imports) but would
+    // quietly stop the seed from exercising the checker.
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fuzz/corpus/parse");
+    let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+        .expect("read the fuzz corpus")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("wlel"))
+        .collect();
+    files.sort();
+    assert!(files.len() >= 6, "expected the parse corpus, found {}", files.len());
+
+    for f in files {
+        let out = Command::new(env!("CARGO_BIN_EXE_wlel"))
+            .args(["check", f.to_str().unwrap()])
+            .output()
+            .expect("spawn wlel check");
+        assert!(
+            out.status.success(),
+            "{} must type-check: {}",
+            f.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
 }

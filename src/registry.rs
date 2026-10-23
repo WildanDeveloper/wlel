@@ -285,9 +285,9 @@ fn check_dep_shape(dep_root: &Path, name: &str, req: Option<&str>) -> Result<(),
             mf.name
         ));
     }
-    if !dep_root.join("src/lib.wl").is_file() {
+    if !dep_root.join("src/lib.wlel").is_file() {
         return Err(format!(
-            "dependency '{name}' ({}) has no src/lib.wl",
+            "dependency '{name}' ({}) has no src/lib.wlel",
             dep_root.display()
         ));
     }

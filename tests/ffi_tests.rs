@@ -137,7 +137,7 @@ fn struct_layout_matches_c_with_static_asserts() {
 
 #[test]
 fn example_ffi_tests_pass() {
-    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ffi.wl");
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ffi.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["test", example.to_str().unwrap(), "-l", "m"])
         .output()
@@ -152,7 +152,7 @@ fn build_with_link_flag_runs() {
     let dir = std::env::temp_dir().join(format!("wlel_ffi_cli_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("ffi.wl");
+    let path = dir.join("ffi.wlel");
     fs::write(
         &path,
         r#"extern fn sqrt(x: f64) -> f64;
@@ -178,7 +178,7 @@ fn build_with_link_flag_runs() {
 fn bad_link_flag_is_a_usage_error() {
     let dir = std::env::temp_dir().join(format!("wlel_ffi_bad_{}", std::process::id()));
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("x.wl");
+    let path = dir.join("x.wlel");
     fs::write(&path, "fn main() -> int { return 0; }").expect("write source");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["build", path.to_str().unwrap(), "-o", dir.join("x").to_str().unwrap(), "-l", "-O2"])

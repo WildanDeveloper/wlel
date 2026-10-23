@@ -1,4 +1,4 @@
-// point.wl — structs, pointers, mutation through auto-deref
+// point.wlel — structs, pointers, mutation through auto-deref
 struct Pt {
     x: float,
     y: float

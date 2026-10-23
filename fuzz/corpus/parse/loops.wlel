@@ -1,4 +1,4 @@
-// loops.wl — v0.6 for-in range loop demo
+// loops.wlel — v0.6 for-in range loop demo
 use std;
 
 fn main() -> int {

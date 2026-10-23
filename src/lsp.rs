@@ -616,7 +616,7 @@ pub fn analyze(text: &str, doc_path: Option<&Path>) -> Analysis {
         t.file = file_str.clone();
     }
 
-    // merge `use "path.wl"` imports from disk — same semantics as
+    // merge `use "path.wlel"` imports from disk — same semantics as
     // project::load_program (recursive, diamond-dedup, imports first)
     let mut sub_structs: Vec<StructDef> = Vec::new();
     let mut sub_enums: Vec<EnumDef> = Vec::new();
@@ -1421,7 +1421,7 @@ pub fn definition(a: &Analysis, idx: &LineIndex, pos: Pos) -> Option<DefSite> {
             _ => {}
         }
     }
-    // `use "path.wl"` under the cursor → open the imported file
+    // `use "path.wlel"` under the cursor → open the imported file
     for u in &a.program.uses {
         if pos_in(u.span, pos) {
             if let Some(res) = &u.resolved {
@@ -1588,7 +1588,7 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// `file:///abs/path.wl` -> `/abs/path.wl` (percent-decoded)
+/// `file:///abs/path.wlel` -> `/abs/path.wlel` (percent-decoded)
 pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
     let rest = uri.strip_prefix("file://")?;
     // Windows drive form: file:///C:/x -> C:/x
@@ -1619,7 +1619,7 @@ fn file_to_uri(file: &str) -> String {
     if file == STD_FILE {
         // the embedded stdlib is not a file on disk; a private scheme keeps
         // the location honest (clients show it, cannot open it)
-        return "wlel-std:stdlib.wl".into();
+        return "wlel-std:stdlib.wlel".into();
     }
     format!("file://{}", percent_encode_path(file))
 }

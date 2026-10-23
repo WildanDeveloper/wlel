@@ -229,7 +229,7 @@ fn init_remote_tagged(dir: &Path, name: &str, releases: &[(&str, &str, &str)]) {
             format!("[package]\nname = \"{name}\"\nversion = \"{ver}\"\n"),
         )
         .expect("write dep toml");
-        fs::write(dir.join("src/lib.wl"), body).expect("write dep lib");
+        fs::write(dir.join("src/lib.wlel"), body).expect("write dep lib");
         if first {
             git(&["init", "-q", "--initial-branch=main"]);
             first = false;
@@ -265,7 +265,7 @@ fn add_resolves_the_best_tag_pins_the_lock_and_stays_offline() {
 
     t.wlel(&["new", "app"], &t.path);
     let app = t.path.join("app");
-    t.write("app/src/main.wl", "use std;\nfn main() -> int {\n    std::println_int(hi());\n    return 0;\n}\n");
+    t.write("app/src/main.wlel", "use std;\nfn main() -> int {\n    std::println_int(hi());\n    return 0;\n}\n");
 
     // add with a requirement: the manifest gains the dep, the best matching
     // tag (v1.1.0 for ^1.0.0) is checked out and reported
@@ -328,7 +328,7 @@ fn add_without_a_requirement_pins_head() {
 
     t.wlel(&["new", "app"], &t.path);
     let app = t.path.join("app");
-    t.write("app/src/main.wl", "use std;\nfn main() -> int {\n    std::println_int(hi());\n    return 0;\n}\n");
+    t.write("app/src/main.wlel", "use std;\nfn main() -> int {\n    std::println_int(hi());\n    return 0;\n}\n");
 
     let (out, err, code) = t.wlel(&["add", "loosex", &url], &app);
     assert_eq!(code, Some(0), "stdout: {out}\nstderr: {err}");
@@ -395,7 +395,7 @@ fn add_errors_never_touch_the_manifest() {
     assert_ne!(code, Some(0));
     assert!(err.contains("declares name 'notgreetx'"), "{err}");
 
-    // a repo without src/lib.wl is rejected (built without one from the start)
+    // a repo without src/lib.wlel is rejected (built without one from the start)
     let nolib_dir = t.path.join("nolib");
     fs::create_dir_all(&nolib_dir).expect("mkdir nolib");
     fs::write(
@@ -418,7 +418,7 @@ fn add_errors_never_touch_the_manifest() {
     let nolib_url = remote_url(&t, "nolib");
     let (_out, err, code) = t.wlel(&["add", "nolib", &nolib_url], &app);
     assert_ne!(code, Some(0));
-    assert!(err.contains("no src/lib.wl"), "{err}");
+    assert!(err.contains("no src/lib.wlel"), "{err}");
 
     // the manifest is byte-identical and no lock was written
     assert_eq!(t.read("app/wlel.toml"), before, "failed adds must not edit the manifest");
@@ -439,11 +439,11 @@ fn add_path_dep_creates_the_deps_section_and_derives_the_name() {
         "pointlib/wlel.toml",
         "[package]\nname = \"pointlib\"\nversion = \"0.1.0\"\n",
     );
-    t.write("pointlib/src/lib.wl", "fn triple(x: int) -> int { return x * 3; }\n");
+    t.write("pointlib/src/lib.wlel", "fn triple(x: int) -> int { return x * 3; }\n");
 
     t.wlel(&["new", "app"], &t.path);
     let app = t.path.join("app");
-    t.write("app/src/main.wl", "use std;\nfn main() -> int {\n    std::println_int(triple(14));\n    return 0;\n}\n");
+    t.write("app/src/main.wlel", "use std;\nfn main() -> int {\n    std::println_int(triple(14));\n    return 0;\n}\n");
 
     // no [deps] section yet: `wlel add --path` creates it, name derives from
     // the directory

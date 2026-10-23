@@ -1,9 +1,9 @@
-// httpd.wl — flagship app 2: an HTTP server on raw sockets, written in Wlel.
+// httpd.wlel — flagship app 2: an HTTP server on raw sockets, written in Wlel.
 //
-//   wlel run flagship/httpd.wl                 — echo + built-in index on :8080
-//   wlel run flagship/httpd.wl -- 9000 ./site  — port + static docroot
-//   wlel test flagship/httpd.wl                — end-to-end test over localhost
-//   wlel build flagship/httpd.wl -O2 -o httpd
+//   wlel run flagship/httpd.wlel                 — echo + built-in index on :8080
+//   wlel run flagship/httpd.wlel -- 9000 ./site  — port + static docroot
+//   wlel test flagship/httpd.wlel                — end-to-end test over localhost
+//   wlel build flagship/httpd.wlel -O2 -o httpd
 //
 // POSIX sockets are bound through `extern fn` (libc): socket/bind/listen/
 // accept/recv/send/close plus htons/htonl for byte order — no wrapper

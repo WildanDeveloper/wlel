@@ -1,4 +1,4 @@
-// arena.wl — first-class scoped arenas (Wlel v0.5 signature feature)
+// arena.wlel — first-class scoped arenas (Wlel v0.5 signature feature)
 // Zero manual free, zero GC pause, bump-allocated in cache-friendly chunks.
 use std;
 

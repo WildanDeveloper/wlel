@@ -51,7 +51,7 @@ min_internal_ms() {
 }
 
 # --- 1. fib(35): runtime ----------------------------------------------------
-cat > "$TMP/fib35.wl" <<'EOF'
+cat > "$TMP/fib35.wlel" <<'EOF'
 fn fib(n: int) -> int {
     if n < 2 {
         return n;
@@ -64,15 +64,15 @@ fn main() -> int {
     return 0;
 }
 EOF
-"$WLEL" build "$TMP/fib35.wl" -O2 -o "$TMP/fib35"
+"$WLEL" build "$TMP/fib35.wlel" -O2 -o "$TMP/fib35"
 fib_ms=$(min_ms "$TMP/fib35")
 
-# --- 2. sort 1M ints: internal timing printed by examples/sort.wl -----------
-"$WLEL" build examples/sort.wl -O2 -o "$TMP/sort"
+# --- 2. sort 1M ints: internal timing printed by examples/sort.wlel -----------
+"$WLEL" build examples/sort.wlel -O2 -o "$TMP/sort"
 sort_ms=$(min_internal_ms 'sorted .* ints in ' "$TMP/sort")
 
 # --- 2b. sort 1M already-sorted ints: worst-case guard ----------------------
-cat > "$TMP/sortshapes.wl" <<'EOF'
+cat > "$TMP/sortshapes.wlel" <<'EOF'
 use std;
 fn asc(a: int, b: int) -> int {
     if a < b { return -1; }
@@ -93,12 +93,12 @@ fn main() -> int {
     return 0;
 }
 EOF
-"$WLEL" build "$TMP/sortshapes.wl" -O2 -o "$TMP/sortshapes"
+"$WLEL" build "$TMP/sortshapes.wlel" -O2 -o "$TMP/sortshapes"
 sorted_ms=$(min_internal_ms 'asc ' "$TMP/sortshapes")
 
 # --- 3. front-end compile speed (no cc in the loop) -------------------------
-"$WLEL" build examples/kitchen.wl --emit-c -o "$TMP/kitchen.c"
-compile_ms=$(min_ms "$WLEL" build examples/kitchen.wl --emit-c -o "$TMP/kitchen.c")
+"$WLEL" build examples/kitchen.wlel --emit-c -o "$TMP/kitchen.c"
+compile_ms=$(min_ms "$WLEL" build examples/kitchen.wlel --emit-c -o "$TMP/kitchen.c")
 
 # --- emit JSON ---------------------------------------------------------------
 # github-action-benchmark customSmallerIsBetter wants ONE JSON array, not
@@ -108,7 +108,7 @@ compile_ms=$(min_ms "$WLEL" build examples/kitchen.wl --emit-c -o "$TMP/kitchen.
     printf '  {"name":"fib(35) runtime","unit":"ms","value":%s},\n' "$fib_ms"
     printf '  {"name":"sort 1M ints","unit":"ms","value":%s},\n' "$sort_ms"
     printf '  {"name":"sort 1M pre-sorted ints","unit":"ms","value":%s},\n' "$sorted_ms"
-    printf '  {"name":"compile kitchen.wl (front-end)","unit":"ms","value":%s}\n' "$compile_ms"
+    printf '  {"name":"compile kitchen.wlel (front-end)","unit":"ms","value":%s}\n' "$compile_ms"
     printf ']\n'
 } > "$OUT"
 cat "$OUT"

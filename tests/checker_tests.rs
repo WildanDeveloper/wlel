@@ -687,19 +687,19 @@ fn unused_std_import_warned() {
 
 #[test]
 fn unused_file_import_warned() {
-    let mut p = parse_ok("use \"geom.wl\";\nfn main() -> int { return 0; }");
-    p.uses[0].resolved = Some("/proj/geom.wl".into());
+    let mut p = parse_ok("use \"geom.wlel\";\nfn main() -> int { return 0; }");
+    p.uses[0].resolved = Some("/proj/geom.wlel".into());
     let ws = Checker::check(&mut p).unwrap();
     assert_eq!(ws.len(), 1, "{ws:?}");
-    assert!(ws[0].msg.contains("import 'geom.wl' is never used"), "{ws:?}");
+    assert!(ws[0].msg.contains("import 'geom.wlel' is never used"), "{ws:?}");
 
     // ...but a call into the imported file marks it used
-    let mut p2 = parse_ok("use \"geom.wl\";\nfn main() -> int { return area(2); }");
-    p2.uses[0].resolved = Some("/proj/geom.wl".into());
+    let mut p2 = parse_ok("use \"geom.wlel\";\nfn main() -> int { return area(2); }");
+    p2.uses[0].resolved = Some("/proj/geom.wlel".into());
     for f in p2.funcs.iter_mut() {
-        f.file = "/proj/main.wl".into();
+        f.file = "/proj/main.wlel".into();
     }
-    let mut imported = parse_file_with_fn("/proj/geom.wl", "area");
+    let mut imported = parse_file_with_fn("/proj/geom.wlel", "area");
     p2.funcs.append(&mut imported.funcs);
     let ws2 = Checker::check(&mut p2).unwrap();
     assert!(ws2.is_empty(), "{ws2:?}");
@@ -998,7 +998,7 @@ fn arena_stats_codegen_emits_helper_and_struct() {
 // ---------------------------------------------------------------------------
 // parser recursion guard: hostile nesting must be rejected with a syntax
 // error, never overflow the stack (nightly cargo-fuzz found this via a
-// mutated defer.wl with ~900 nested parens)
+// mutated defer.wlel with ~900 nested parens)
 
 fn parse_errors_of(src: String) -> Vec<String> {
     let toks = Lexer::new(&src).tokenize().expect("lex");

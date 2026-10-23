@@ -15,7 +15,7 @@ fn front(src: &str, safe: bool) -> String {
     let (mut p, errs) = Parser::new(&toks).program();
     assert!(errs.is_empty(), "parse errors: {errs:?}");
     Checker::check(&mut p).expect("typecheck");
-    p.funcs[0].file = "safe_asan.wl".into();
+    p.funcs[0].file = "safe_asan.wlel".into();
     if safe {
         gen_program_safe(&p)
     } else {
@@ -141,7 +141,7 @@ fn bounds_failure_exits_cleanly_under_asan() {
     let (code, out) = cc_asan_run(&front(src, true), "oob");
     // our own clean exit(1), not an ASan report or crash signal
     assert_eq!(code, Some(1), "{out}");
-    assert!(out.contains("bounds check failed at safe_asan.wl:3"), "{out}");
+    assert!(out.contains("bounds check failed at safe_asan.wlel:3"), "{out}");
     assert!(!out.contains("AddressSanitizer"), "{out}");
 }
 
@@ -153,6 +153,6 @@ fn div_zero_failure_exits_cleanly_under_asan() {
 }"#;
     let (code, out) = cc_asan_run(&front(src, true), "divz");
     assert_eq!(code, Some(1), "{out}");
-    assert!(out.contains("division by zero at safe_asan.wl:3"), "{out}");
+    assert!(out.contains("division by zero at safe_asan.wlel:3"), "{out}");
     assert!(!out.contains("AddressSanitizer"), "{out}");
 }

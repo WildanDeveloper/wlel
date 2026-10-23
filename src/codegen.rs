@@ -4,7 +4,7 @@ use crate::span::Spanned;
 /// Transpiles a Wlel program to C99 source.
 pub fn gen_program(p: &Program) -> String {
     let mut cg = Cg {
-        // the prelude alone is ~12 KiB and generated C runs ~3x the .wl
+        // the prelude alone is ~12 KiB and generated C runs ~3x the .wlel
         // source, so start with room instead of regrowing from zero
         out: String::with_capacity(24 * 1024),
         defers: Vec::new(),
@@ -42,7 +42,7 @@ pub fn gen_program(p: &Program) -> String {
 /// the plain release form (zero overhead).
 pub fn gen_program_safe(p: &Program) -> String {
     let mut cg = Cg {
-        // the prelude alone is ~12 KiB and generated C runs ~3x the .wl
+        // the prelude alone is ~12 KiB and generated C runs ~3x the .wlel
         // source, so start with room instead of regrowing from zero
         out: String::with_capacity(24 * 1024),
         defers: Vec::new(),
@@ -79,7 +79,7 @@ pub fn gen_program_safe(p: &Program) -> String {
 /// catching assertion failures via setjmp/longjmp.
 pub fn gen_program_tests(p: &Program) -> String {
     let mut cg = Cg {
-        // the prelude alone is ~12 KiB and generated C runs ~3x the .wl
+        // the prelude alone is ~12 KiB and generated C runs ~3x the .wlel
         // source, so start with room instead of regrowing from zero
         out: String::with_capacity(24 * 1024),
         defers: Vec::new(),
@@ -114,7 +114,7 @@ pub fn gen_program_tests(p: &Program) -> String {
 /// `wlel test` counterpart of `gen_program_safe`.
 pub fn gen_program_tests_safe(p: &Program) -> String {
     let mut cg = Cg {
-        // the prelude alone is ~12 KiB and generated C runs ~3x the .wl
+        // the prelude alone is ~12 KiB and generated C runs ~3x the .wlel
         // source, so start with room instead of regrowing from zero
         out: String::with_capacity(24 * 1024),
         defers: Vec::new(),
@@ -227,7 +227,7 @@ struct Cg {
 }
 
 fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
-    // generated C runs ~3x the .wl source; reserve from the program shape
+    // generated C runs ~3x the .wlel source; reserve from the program shape
     // so the buffer stops doubling-and-copying on large inputs (the prelude
     // alone is ~12 KiB)
     let estimate =
@@ -1408,7 +1408,7 @@ fn gen_test_main(cg: &mut Cg, p: &Program) {
 
 impl Cg {
     /// Emit a `#line` directive so cc diagnostics for the code that follows
-    /// point back into the originating `.wl` file (only when the mapped
+    /// point back into the originating `.wlel` file (only when the mapped
     /// position actually changes, to keep the C readable).
     fn sync_line(&mut self, line: usize) {
         if self.emit_file != self.src_file || self.emit_line != line {
@@ -2082,7 +2082,7 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
         ExprKind::Unary(UnOp::BitNot, x) => format!("(~{})", gen_expr(cg, x)),
         ExprKind::Binary(op, l, r) => {
             // safe mode: integer / and % abort on a zero divisor, reporting
-            // the .wl position; floats keep IEEE inf semantics everywhere
+            // the .wlel position; floats keep IEEE inf semantics everywhere
             if cg.safe
                 && matches!(op, BinOp::Div | BinOp::Mod)
                 && is_int_ty(&l.ty)

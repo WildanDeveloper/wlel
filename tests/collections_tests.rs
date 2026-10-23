@@ -19,12 +19,12 @@ fn front(src: &str) -> Result<String, String> {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "col.wl".into();
+            f.file = "col.wlel".into();
         }
     }
     for i in p.impls.iter_mut() {
         if i.file.is_empty() {
-            i.file = "col.wl".into();
+            i.file = "col.wlel".into();
         }
     }
     Checker::check(&mut p).map_err(|e| e.msg)?;
@@ -38,7 +38,7 @@ fn check_err_msg(src: &str) -> String {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "col.wl".into();
+            f.file = "col.wlel".into();
         }
     }
     Checker::check(&mut p).expect_err("must be rejected").msg
@@ -72,7 +72,7 @@ fn vec_growth_beyond_initial_capacity_end_to_end() {
     let dir = std::env::temp_dir().join(format!("wlel_vec_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("vec.wl");
+    let path = dir.join("vec.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -96,7 +96,7 @@ fn vec_growth_beyond_initial_capacity_end_to_end() {
                return 0;
            }"#,
     )
-    .expect("write vec.wl");
+    .expect("write vec.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
         .output()
@@ -133,7 +133,7 @@ fn vec_string_elements_roundtrip() {
     let dir = std::env::temp_dir().join(format!("wlel_vs_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("vs.wl");
+    let path = dir.join("vs.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -153,7 +153,7 @@ fn vec_string_elements_roundtrip() {
                return 0;
            }"#,
     )
-    .expect("write vs.wl");
+    .expect("write vs.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
         .output()
@@ -171,7 +171,7 @@ fn vec_in_arena_is_lsan_clean() {
     let dir = std::env::temp_dir().join(format!("wlel_va_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("va.wl");
+    let path = dir.join("va.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -188,7 +188,7 @@ fn vec_in_arena_is_lsan_clean() {
                return 0;
            }"#,
     )
-    .expect("write va.wl");
+    .expect("write va.wlel");
     let bin = dir.join("va");
     let build = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["build", path.to_str().unwrap(), "-o", bin.to_str().unwrap(), "-sanitize"])
@@ -209,7 +209,7 @@ fn for_in_over_array_and_vec_snapshot() {
     let dir = std::env::temp_dir().join(format!("wlel_forin_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("forin.wl");
+    let path = dir.join("forin.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -235,7 +235,7 @@ fn for_in_over_array_and_vec_snapshot() {
                return 0;
            }"#,
     )
-    .expect("write forin.wl");
+    .expect("write forin.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
         .output()
@@ -263,7 +263,7 @@ fn for_in_emits_bounds_checks_in_safe_mode_only() {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "col.wl".into();
+            f.file = "col.wlel".into();
         }
     }
     Checker::check(&mut p).expect("typecheck");
@@ -309,7 +309,7 @@ fn map_set_get_overwrite_delete() {
     let dir = std::env::temp_dir().join(format!("wlel_map_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("map.wl");
+    let path = dir.join("map.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -334,7 +334,7 @@ fn map_set_get_overwrite_delete() {
                return 0;
            }"#,
     )
-    .expect("write map.wl");
+    .expect("write map.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
         .output()
@@ -352,7 +352,7 @@ fn map_rehashes_across_many_inserts() {
     let dir = std::env::temp_dir().join(format!("wlel_rehash_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("rehash.wl");
+    let path = dir.join("rehash.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -382,7 +382,7 @@ fn map_rehashes_across_many_inserts() {
                return 0;
            }"#,
     )
-    .expect("write rehash.wl");
+    .expect("write rehash.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
         .output()
@@ -399,7 +399,7 @@ fn map_keys_enables_iteration() {
     let dir = std::env::temp_dir().join(format!("wlel_mk_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("mk.wl");
+    let path = dir.join("mk.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -418,7 +418,7 @@ fn map_keys_enables_iteration() {
                return 0;
            }"#,
     )
-    .expect("write mk.wl");
+    .expect("write mk.wlel");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
         .output()
@@ -559,7 +559,7 @@ fn collections_work_in_wlel_test_harness() {
     let dir = std::env::temp_dir().join(format!("wlel_ct_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("ct.wl");
+    let path = dir.join("ct.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -579,7 +579,7 @@ fn collections_work_in_wlel_test_harness() {
                assert(!map_has(&m, 41));
            }"#,
     )
-    .expect("write ct.wl");
+    .expect("write ct.wlel");
     let test = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["test", path.to_str().unwrap()])
         .output()

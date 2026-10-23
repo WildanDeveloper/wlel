@@ -1,4 +1,4 @@
-// bitwise.wl — v0.4 demo: compound assign, break, continue, bitwise, radix
+// bitwise.wlel — v0.4 demo: compound assign, break, continue, bitwise, radix
 use std;
 
 fn popcount(n: int) -> int {

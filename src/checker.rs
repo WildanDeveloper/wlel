@@ -344,7 +344,7 @@ pub struct Checker {
     /// function names referenced by calls (for unused-import detection)
     called_funcs: FSet<String>,
     /// callee -> files that called it. A call made from inside the callee's
-    /// own file does not prove an `use "file.wl"` import was needed.
+    /// own file does not prove an `use "file.wlel"` import was needed.
     called_from: FMap<String, FSet<String>>,
     /// struct names referenced anywhere (types, literals, casts)
     used_structs: FSet<String>,
@@ -4081,7 +4081,7 @@ impl Checker {
                     *e = self.wlel_assert_call(eq, sp);
                     return Ok(Type::Void);
                 }
-                // panic(msg) — builtin: abort with a message and the .wl
+                // panic(msg) — builtin: abort with a message and the .wlel
                 // position; never returns, so code after it is unreachable
                 // and functions ending in it need no further return
                 if name == "panic" {
@@ -5332,7 +5332,7 @@ impl Checker {
     }
 
     /// `panic(msg)` → `_wlel_panic(msg, file, line)` — aborts with the
-    /// message and the .wl position (a test run fails instead of exiting)
+    /// message and the .wlel position (a test run fails instead of exiting)
     fn wlel_panic_call(&self, msg: Expr, sp: Span) -> Expr {
         Spanned::new(
             ExprKind::Call(

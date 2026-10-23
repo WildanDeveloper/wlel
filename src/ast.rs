@@ -76,7 +76,7 @@ pub struct FuncDef {
     pub is_extern: bool,
     pub span: Span,
     /// absolute path of the source file this function was parsed from
-    /// (used for `#line` directives so cc errors map back to `.wl`)
+    /// (used for `#line` directives so cc errors map back to `.wlel`)
     pub file: String,
 }
 

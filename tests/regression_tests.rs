@@ -52,7 +52,7 @@ impl Case {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join(format!("{name}.wl")), src).expect("write");
+        fs::write(dir.join(format!("{name}.wlel")), src).expect("write");
         Case { dir }
     }
 
@@ -71,7 +71,7 @@ impl Case {
 
     /// build + run, returning (stdout, exit code of the binary)
     fn build_and_run(&self, name: &str) -> (String, i32) {
-        let (out, err, code) = self.run_cli(&["build", &format!("{name}.wl"), "-o", "bin"]);
+        let (out, err, code) = self.run_cli(&["build", &format!("{name}.wlel"), "-o", "bin"]);
         assert_eq!(code, Some(0), "build failed: {out}{err}");
         let run = Command::new(self.dir.join("bin")).output().expect("run");
         (
@@ -490,7 +490,7 @@ fn main() -> int {
 fn variant_payload_nested_call_keeps_expected_type() {
     // `Err(g("x"))` has no payload type that mentions T, so the Ok slot can
     // only come from the function's declared return type. Checking the
-    // nested call used to clear that hint (flagship/json.wl regressed on it).
+    // nested call used to clear that hint (flagship/json.wlel regressed on it).
     let c = Case::new(
         "variant_nested_hint",
         r#"use std;
@@ -545,12 +545,12 @@ fn lsp_did_change_publishes_new_diagnostics() {
     use wlel::lsp::{Json, Server};
     let mut srv = Server::new();
     let open = Json::parse(
-        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///z.wl","version":1,"text":"fn main() -> int { return 0; }"}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///z.wlel","version":1,"text":"fn main() -> int { return 0; }"}}}"#,
     )
     .expect("open");
     srv.handle(&open);
     let change = Json::parse(
-        r#"{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///z.wl","version":2},"contentChanges":[{"text":"fn main() -> int { return zzz; }"}]}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///z.wlel","version":2},"contentChanges":[{"text":"fn main() -> int { return zzz; }"}]}}"#,
     )
     .expect("change");
     let msgs = srv.handle(&change);

@@ -18,7 +18,7 @@ fn front(src: &str) -> Result<String, String> {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "freeze.wl".into();
+            f.file = "freeze.wlel".into();
         }
     }
     Checker::check(&mut p).map_err(|e| e.msg)?;
@@ -32,7 +32,7 @@ fn check_err_msg(src: &str) -> String {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "freeze.wl".into();
+            f.file = "freeze.wlel".into();
         }
     }
     Checker::check(&mut p).expect_err("must be rejected").msg
@@ -43,7 +43,7 @@ fn run_cli(name: &str, src: &str) -> (bool, String, String) {
     let dir = std::env::temp_dir().join(format!("wlel_freeze_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join(format!("{name}.wl"));
+    let path = dir.join(format!("{name}.wlel"));
     fs::write(&path, src).expect("write source");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])

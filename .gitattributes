@@ -1,4 +1,10 @@
-# the formatter's canonical form is LF; keep .wl sources LF on every OS so
+# the formatter's canonical form is LF; keep .wlel sources LF on every OS so
 # `wlel fmt -check` (and the repo-examples no-diff test) agree on Windows
-*.wl text eol=lf
+*.wlel text eol=lf
 *.sh text eol=lf
+
+# GitHub Linguist has no entry for Wlel, and the extension Wlel shipped before
+# 1.0 is taken by Wolfram Language — .wlel (unclaimed) is the extension, and
+# this line keeps the language bar honest if a future Linguist release guesses
+# wrong.
+*.wlel linguist-language=Wlel linguist-detectable=true

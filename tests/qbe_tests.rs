@@ -597,7 +597,7 @@ fn parity_with_c_backend() {
     let dir = std::env::temp_dir().join(format!("wlel_qbe_parity_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     for (name, src) in PARITY_PROGRAMS {
-        let path = dir.join(format!("{name}.wl"));
+        let path = dir.join(format!("{name}.wlel"));
         fs::write(&path, src).unwrap();
         let c_out = run_backend(
             path.to_str().unwrap(),
@@ -624,7 +624,7 @@ fn e2e_extern_libm_parity() {
     }
     let dir = std::env::temp_dir().join(format!("wlel_qbe_ffi_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("ffi.wl");
+    let path = dir.join("ffi.wlel");
     fs::write(
         &path,
         "extern fn sqrt(x: f64) -> f64;\nextern fn atoi(s: string) -> i32;\nfn main() -> int {\n    wlel_print_float(sqrt(2.0));\n    wlel_print_int(atoi(\"123\") as int);\n    return 0;\n}\n",
@@ -654,7 +654,7 @@ fn e2e_cli_args() {
     }
     let dir = std::env::temp_dir().join(format!("wlel_qbe_args_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("args.wl");
+    let path = dir.join("args.wlel");
     fs::write(
         &path,
         "fn main() -> int {\n    n := sys::argc();\n    wlel_print_int(n);\n    for i in 0..n {\n        wlel_print_str(sys::arg(i));\n    }\n    return 0;\n}\n",
@@ -680,7 +680,7 @@ fn e2e_cli_args() {
 fn e2e_cli_refusal_exit_code() {
     let dir = std::env::temp_dir().join(format!("wlel_qbe_refuse_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("std.wl");
+    let path = dir.join("std.wlel");
     fs::write(&path, "use std;\nfn main() -> int { std::println_int(1); return 0; }\n").unwrap();
     let bin = env!("CARGO_BIN_EXE_wlel");
     let st = Command::new(bin)
@@ -702,7 +702,7 @@ fn e2e_emit_ssa_flag() {
     }
     let dir = std::env::temp_dir().join(format!("wlel_qbe_emit_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("m.wl");
+    let path = dir.join("m.wlel");
     fs::write(&path, "fn main() -> int { return 0; }\n").unwrap();
     let bin = env!("CARGO_BIN_EXE_wlel");
     let st = Command::new(bin)
@@ -724,7 +724,7 @@ fn e2e_build_cache_reuse() {
     }
     let dir = std::env::temp_dir().join(format!("wlel_qbe_cache_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("c.wl");
+    let path = dir.join("c.wlel");
     fs::write(&path, "fn main() -> int { return 0; }\n").unwrap();
     let bin = env!("CARGO_BIN_EXE_wlel");
     let out = dir.join("c_bin");

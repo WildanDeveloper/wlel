@@ -1,4 +1,4 @@
-// defer.wl — LIFO cleanup at scope exit, incl. early returns & loops
+// defer.wlel — LIFO cleanup at scope exit, incl. early returns & loops
 fn work(n: int) -> int {
     defer wlel_print_str("  cleanup work\n");
     if n > 10 {

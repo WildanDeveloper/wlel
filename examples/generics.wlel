@@ -1,4 +1,4 @@
-// generics.wl — generic functions & structs via monomorphization (Fase 2)
+// generics.wlel — generic functions & structs via monomorphization (Fase 2)
 // fn id[T](x: T) -> T is compiled per concrete type: no boxing, no vtables,
 // C output is exactly what hand-written C would be.
 use std;

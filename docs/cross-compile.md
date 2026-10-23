@@ -41,13 +41,13 @@ cross-OS faking.
 
 ```bash
 # Linux x86_64 -> Linux aarch64
-CC=aarch64-linux-gnu-gcc wlel build app.wl -O2 -o app-arm64
+CC=aarch64-linux-gnu-gcc wlel build app.wlel -O2 -o app-arm64
 
 # Linux -> Windows
-CC=x86_64-w64-mingw32-gcc wlel build app.wl -O2 -o app.exe
+CC=x86_64-w64-mingw32-gcc wlel build app.wlel -O2 -o app.exe
 
 # statically linked Linux binary (musl)
-CC=musl-gcc wlel build app.wl -O2 -o app-static
+CC=musl-gcc wlel build app.wlel -O2 -o app-static
 ```
 
 `$CC` is used for both the compile and the link, so a wrapper script works
@@ -59,7 +59,7 @@ cat > cc-aarch64-static.sh <<'EOF'
 exec aarch64-linux-gnu-gcc "$@" -static
 EOF
 chmod +x cc-aarch64-static.sh
-CC=$PWD/cc-aarch64-static.sh wlel build app.wl -O2 -o app
+CC=$PWD/cc-aarch64-static.sh wlel build app.wlel -O2 -o app
 ```
 
 ### The two-step form (full control)
@@ -68,7 +68,7 @@ CC=$PWD/cc-aarch64-static.sh wlel build app.wl -O2 -o app
 for any toolchain the one-shot build cannot express:
 
 ```bash
-wlel build app.wl --emit-c -o app.c
+wlel build app.wlel --emit-c -o app.c
 aarch64-linux-gnu-gcc -O2 -std=c99 -fwrapv app.c -o app-arm64 -lm -lpthread
 ```
 
@@ -86,7 +86,7 @@ always passes it, and manual links must too.
 `-l <lib>` / `-L <dir>` pass straight through to the link, repeatable:
 
 ```bash
-wlel build app.wl -O2 -o app -L ./vendor/lib -l raylib -l GL
+wlel build app.wlel -O2 -o app -L ./vendor/lib -l raylib -l GL
 ```
 
 ### Running a cross-compiled binary

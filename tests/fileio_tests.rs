@@ -19,7 +19,7 @@ fn front(src: &str) -> Result<String, String> {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "fio.wl".into();
+            f.file = "fio.wlel".into();
         }
     }
     Checker::check(&mut p).map_err(|e| e.msg)?;
@@ -33,7 +33,7 @@ fn check_err_msg(src: &str) -> String {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "fio.wl".into();
+            f.file = "fio.wlel".into();
         }
     }
     Checker::check(&mut p).expect_err("must be rejected").msg
@@ -44,7 +44,7 @@ fn run_cli(name: &str, src: &str, fwd: &[&str]) -> (bool, String, String) {
     let dir = std::env::temp_dir().join(format!("wlel_fio_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join(format!("{name}.wl"));
+    let path = dir.join(format!("{name}.wlel"));
     fs::write(&path, src).expect("write source");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_wlel"));
     cmd.arg("run").arg(&path);
@@ -258,7 +258,7 @@ fn cat_like_tool_reads_argv_file() {
             std::print_str(content);
             return 0;
         }"#;
-    let wl = dir.join("cat.wl");
+    let wl = dir.join("cat.wlel");
     fs::write(&wl, src).expect("write source");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", wl.to_str().unwrap(), data.to_str().unwrap()])
@@ -362,7 +362,7 @@ fn example_fileio_test_blocks_pass() {
     let dir = std::env::temp_dir().join(format!("wlel_fio_example_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/fileio.wl");
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/fileio.wlel");
     let test = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["test", example.to_str().unwrap()])
         .current_dir(&dir)
@@ -386,7 +386,7 @@ fn file_io_program_is_asan_clean() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
     let tmp = dir.join("asan.tmp").to_str().unwrap().replace('\\', "/");
-    let path = dir.join("asan.wl");
+    let path = dir.join("asan.wlel");
     let src = r#"use std;
            fn main() -> int {
                arena(1 << 16) {
@@ -452,7 +452,7 @@ fn release_build_has_no_check_overhead_for_file_calls() {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "fio.wl".into();
+            f.file = "fio.wlel".into();
         }
     }
     Checker::check(&mut p).expect("typecheck");

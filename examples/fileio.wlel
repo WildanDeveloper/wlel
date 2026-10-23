@@ -1,6 +1,6 @@
 // File I/O: whole-file helpers and defer-friendly handles.
 //
-//   wlel run examples/fileio.wl -- examples/fileio.wl   (cat: dump a file)
+//   wlel run examples/fileio.wlel -- examples/fileio.wlel   (cat: dump a file)
 //
 // Every fallible std::fs operation reports std::Result[.., string] — the
 // Err payload is a C strerror message ("No such file or directory", ...),

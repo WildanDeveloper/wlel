@@ -33,8 +33,8 @@ jobs:
 
   # the three flagship apps are the end-to-end proof that the language
   # carries real programs. They were previously not exercised by CI at all,
-  # which let flagship/json.wl stop type-checking while every job stayed
-  # green. `game.wl` only needs raylib to *build* — its tests run windowless,
+  # which let flagship/json.wlel stop type-checking while every job stayed
+  # green. `game.wlel` only needs raylib to *build* — its tests run windowless,
   # so check/test need no graphics library.
   flagship:
     runs-on: ubuntu-latest
@@ -46,29 +46,29 @@ jobs:
         run: cargo build --release --locked
       - name: Type-check every flagship
         run: |
-          for f in flagship/*.wl; do
+          for f in flagship/*.wlel; do
             ./target/release/wlel check "$f"
           done
       - name: Run every flagship's test blocks
         run: |
-          for f in flagship/*.wl; do
+          for f in flagship/*.wlel; do
             ./target/release/wlel test "$f"
           done
       - name: Build the dependency-free flagships
         run: |
-          ./target/release/wlel build flagship/json.wl -O2 -o "$RUNNER_TEMP/json"
-          ./target/release/wlel build flagship/httpd.wl -O2 -o "$RUNNER_TEMP/httpd"
+          ./target/release/wlel build flagship/json.wlel -O2 -o "$RUNNER_TEMP/json"
+          ./target/release/wlel build flagship/httpd.wlel -O2 -o "$RUNNER_TEMP/httpd"
       # an explicit, deliberately low floor: shared CI runners are slower and
       # noisier than the reference machine, so this only catches the class of
       # regression that matters (the old O(n^2) parse ran at ~1.3 MB/s). Run
-      # locally with `wlel run flagship/json.wl -- bench` for the headline
+      # locally with `wlel run flagship/json.wlel -- bench` for the headline
       # number (the app's own default floor is 20 MB/s).
       - name: JSON parser throughput smoke
         run: |
           "$RUNNER_TEMP/json" bench 8 10
 
   # keep the quality bar the repo already claims: clippy -D warnings and
-  # canonical .wl formatting (wlel fmt -check, the fmt∘fmt == fmt guarantee)
+  # canonical .wlel formatting (wlel fmt -check, the fmt∘fmt == fmt guarantee)
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -82,7 +82,7 @@ jobs:
       - name: wlel fmt -check (examples + flagships)
         run: |
           cargo build --release --locked
-          find examples flagship -name '*.wl' -print0 | xargs -0 ./target/release/wlel fmt -check
+          find examples flagship -name '*.wlel' -print0 | xargs -0 ./target/release/wlel fmt -check
       # the tag-driven release workflow only runs on v* tags; exercise the
       # packaging script on every push so a broken artifact is caught here
       - name: Release packaging dry run

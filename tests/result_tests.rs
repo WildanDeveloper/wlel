@@ -403,8 +403,8 @@ impl TempWl {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join(format!("{name}.wl"));
-        fs::write(&path, src).expect("write temp .wl");
+        let path = dir.join(format!("{name}.wlel"));
+        fs::write(&path, src).expect("write temp .wlel");
         TempWl { path }
     }
 

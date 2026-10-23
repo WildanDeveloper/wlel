@@ -20,7 +20,7 @@ fn front(src: &str) -> Result<String, String> {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "str.wl".into();
+            f.file = "str.wlel".into();
         }
     }
     Checker::check(&mut p).map_err(|e| e.msg)?;
@@ -34,7 +34,7 @@ fn check_err_msg(src: &str) -> String {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "str.wl".into();
+            f.file = "str.wlel".into();
         }
     }
     Checker::check(&mut p).expect_err("must be rejected").msg
@@ -44,7 +44,7 @@ fn run_cli(name: &str, src: &str) -> (bool, String, String) {
     let dir = std::env::temp_dir().join(format!("wlel_str_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join(format!("{name}.wl"));
+    let path = dir.join(format!("{name}.wlel"));
     fs::write(&path, src).expect("write source");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", path.to_str().unwrap()])
@@ -229,7 +229,7 @@ fn bare_std_calls_mark_import_used() {
     let dir = std::env::temp_dir().join(format!("wlel_struse_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("use.wl");
+    let path = dir.join("use.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -330,7 +330,7 @@ fn string_works_in_test_harness() {
     let dir = std::env::temp_dir().join(format!("wlel_strh_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("h.wl");
+    let path = dir.join("h.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -365,7 +365,7 @@ fn string_arena_program_is_asan_clean() {
     let dir = std::env::temp_dir().join(format!("wlel_strasan_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
-    let path = dir.join("asan.wl");
+    let path = dir.join("asan.wlel");
     fs::write(
         &path,
         r#"use std;
@@ -412,7 +412,7 @@ fn release_build_has_no_format_or_check_overhead() {
     splice_std(&mut p);
     for f in p.funcs.iter_mut() {
         if f.file.is_empty() {
-            f.file = "str.wl".into();
+            f.file = "str.wlel".into();
         }
     }
     Checker::check(&mut p).expect("typecheck");

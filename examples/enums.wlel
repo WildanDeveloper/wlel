@@ -1,4 +1,4 @@
-// enums.wl — tagged enums + match (Fase 3)
+// enums.wlel — tagged enums + match (Fase 3)
 // A tagged enum is a closed set of variants, each optionally carrying
 // typed payloads. The C layout is a tag plus a union of payload structs;
 // `match` is the only way to destructure one, and the checker rejects a

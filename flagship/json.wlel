@@ -1,10 +1,10 @@
-// json.wl — flagship app 1: a JSON parser + encoder written in Wlel.
+// json.wlel — flagship app 1: a JSON parser + encoder written in Wlel.
 //
-//   wlel run flagship/json.wl              — demo: parse, query, dump, errors
-//   wlel run flagship/json.wl -- bench     — throughput benchmark (64 MB corpus)
-//   wlel run flagship/json.wl -- bench 8 50
-//   wlel test flagship/json.wl             — the test blocks below
-//   wlel build flagship/json.wl -O2 -o json
+//   wlel run flagship/json.wlel              — demo: parse, query, dump, errors
+//   wlel run flagship/json.wlel -- bench     — throughput benchmark (64 MB corpus)
+//   wlel run flagship/json.wlel -- bench 8 50
+//   wlel test flagship/json.wlel             — the test blocks below
+//   wlel build flagship/json.wlel -O2 -o json
 //
 // The parser is a hand-rolled recursive-descent scanner over the raw bytes
 // (strict RFC 8259): strings with full \uXXXX + surrogate-pair decoding,

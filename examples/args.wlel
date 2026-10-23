@@ -1,5 +1,5 @@
-// args.wl — v0.6 sys:: builtins: real CLI programs
-// usage: wlel run examples/args.wl -- hello world 123
+// args.wlel — v0.6 sys:: builtins: real CLI programs
+// usage: wlel run examples/args.wlel -- hello world 123
 use std;
 
 fn main() -> int {

@@ -41,7 +41,7 @@ fn collect(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             collect(&p, out);
-        } else if p.extension().map(|x| x == "wl").unwrap_or(false) {
+        } else if p.extension().map(|x| x == "wlel").unwrap_or(false) {
             out.push(p);
         }
     }
@@ -64,8 +64,8 @@ fn blank_lines_collapse_and_decls_separate() {
 
 #[test]
 fn adjacent_use_lines_stay_grouped() {
-    let out = fmt_idempotent("use std;\nuse \"lib/geom.wl\";\nfn main() -> int { return 0; }\n");
-    assert!(out.starts_with("use std;\nuse \"lib/geom.wl\";\n\nfn main() -> int {"), "{out}");
+    let out = fmt_idempotent("use std;\nuse \"lib/geom.wlel\";\nfn main() -> int { return 0; }\n");
+    assert!(out.starts_with("use std;\nuse \"lib/geom.wlel\";\n\nfn main() -> int {"), "{out}");
 }
 
 #[test]
@@ -255,7 +255,7 @@ impl TempFile {
         let dir = std::env::temp_dir().join(format!("wlel_fmt_{}_{}", std::process::id(), name));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
-        let path = dir.join(format!("{name}.wl"));
+        let path = dir.join(format!("{name}.wlel"));
         fs::write(&path, src).expect("write");
         TempFile { path }
     }
@@ -356,10 +356,10 @@ fn fmt_project_mode_formats_all_wl_files() {
         .expect("wlel new");
     assert!(st.status.success(), "{}", String::from_utf8_lossy(&st.stderr));
     // a second, messy file inside src/
-    fs::write(dir.join("app/src/util.wl"), "fn  twice( x:int )->int { return  x*2; }\n").unwrap();
+    fs::write(dir.join("app/src/util.wlel"), "fn  twice( x:int )->int { return  x*2; }\n").unwrap();
     // and a file that must be ignored (hidden dir)
     fs::create_dir_all(dir.join("app/.hidden")).unwrap();
-    fs::write(dir.join("app/.hidden/skip.wl"), "fn x() -> int { return 1;   }\n").unwrap();
+    fs::write(dir.join("app/.hidden/skip.wlel"), "fn x() -> int { return 1;   }\n").unwrap();
 
     let (out, err, code) = Command::new(wlel_bin)
         .args(["fmt"])
@@ -372,12 +372,12 @@ fn fmt_project_mode_formats_all_wl_files() {
         ))
         .unwrap();
     assert_eq!(code, Some(0), "{out}{err}");
-    assert!(out.contains("util.wl"), "{out}");
-    let util = fs::read_to_string(dir.join("app/src/util.wl")).unwrap();
+    assert!(out.contains("util.wlel"), "{out}");
+    let util = fs::read_to_string(dir.join("app/src/util.wlel")).unwrap();
     assert!(util.contains("fn twice(x: int) -> int {"), "{util}");
     // the hidden file is untouched
     assert_eq!(
-        fs::read_to_string(dir.join("app/.hidden/skip.wl")).unwrap(),
+        fs::read_to_string(dir.join("app/.hidden/skip.wlel")).unwrap(),
         "fn x() -> int { return 1;   }\n"
     );
     // second run: nothing to do
