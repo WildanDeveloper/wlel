@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792707889967,
+  "lastUpdate": 1792788997789,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -521,6 +521,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wl (front-end)",
             "value": 2.8,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "05e12a6a2d3d75b773d2354c80ea6f122873986c",
+          "message": "audit: full-source review — 28 findings fixed across checker/parser/codegen/qbe/project/registry/lexer/main/docs: two compiler crashes (a self-growing generic — `fn f[T](x: T) -> T { return f(Box { v: x }).v; }` — queued bodies until the OOM reaper killed the process, now capped by instance count + mangled-name length with a clean diagnostic; a 2000-term `1 + 1 + ...` chain or a 3000-link field chain built a left-deep tree that overflowed the checker stack with SIGABRT, now bounded by MAX_EXPR_DEPTH 256 matching the parser's MAX_NESTING and promoted into \"expression nested too deeply\", with the CLI running the pipeline on a 16 MiB thread so a legal 256-deep program cannot overflow whatever stack the shell provides), three UB classes in generated C (§11 promises none: `MIN / -1` and `MIN % -1` raised SIGFPE in both build modes and now wrap two's-complement through _wlel_sdiv/_wlel_srem, shift counts >= the operand width or negative were C UB and are now masked to the width so x << 64 is x, and safe mode's _wlel_divz returned `long long`, so a u32 `%` followed by `u32 - u32` was computed in 64 bits and gave 2342709264 instead of 130150416 — the helper result is now cast back to the operand's C type; the QBE backend had the same MIN/-1 and shift gaps and now matches the C backend on all 12 boundary cases), infinite-size types that reached cc instead of the checker (`struct N { next: N }`, A -> B -> A, `[S; 2]`, `enum E { A(E) }` and the generic `struct S[T] { me: S[int] }` all failed inside cc with \"field has incomplete type\" pointing at a temp .c that had already been deleted, now a cycle check runs before and after monomorphization and reports the loop in source terms; pointers still break the cycle), name collisions (a source `__` could shadow a monomorphized instance — `struct Vec__int` broke v.push — now rejected at parse time while the stdlib's generated `Result__is_ok` is unaffected; `struct main` emitted a type and a function with the same C name; builtin names like `struct string` were accepted but unreachable behind the builtin, so type names reject builtins, C keywords/runtime symbols and main), security (the build cache was a world-writable /tmp/wlel_cache whose file names are a public content hash, so any local user could pre-plant a binary that `wlel run` would execute — it now lives in the user's cache dir, 0700 on Unix with a WLEL_CACHE_DIR override, and scratch files use pid + clock + counter instead of just pid; a manifest `git = \"--upload-pack=...\"` was passed to git as an option rather than a URL, now rejected and `git clone` uses `--`; a package `name = \"../evil\"` was accepted and `wlel build` wrote its binary outside the project, now validated along with `version`; inline tables accepted duplicate keys and trailing text), and diagnostics (lexer errors printed the position twice; `0b102` said \"out of range\" instead of \"invalid digit for a base-2 literal\"; overflowing radix literals echoed the decimal value instead of the source spelling; the generated C was deleted before the cc error that named it and is now kept with its path printed; a newline in a source file name broke the `#line` directive; `wlel doc` and LSP hover emitted ```wl fences; docs/cross-compile.md's `-std=c99` one-liner did not compile because the runtime needs clock_gettime, now `-std=gnu99`); spec §2.3 documents the reserved-name rules and §11 the division-overflow and shift rules, the README overflow table gained both rows; 548 cargo tests green (20 new in tests/audit_tests.rs), clippy -D warnings clean, wlel fmt canonical, all examples/flagships pass, ASan+UBSan clean, 500/500 differential expressions match a Python oracle, C vs QBE parity on 30 programs, 6M libFuzzer runs with no crash",
+          "timestamp": "2026-10-23T20:54:30Z",
+          "tree_id": "af6c363326556575afb3c014109f30581d1802af",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/05e12a6a2d3d75b773d2354c80ea6f122873986c"
+        },
+        "date": 1792788997200,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 15.3,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 59,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 7,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.1,
             "unit": "ms"
           }
         ]
