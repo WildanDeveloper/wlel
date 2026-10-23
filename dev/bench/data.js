@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792795587159,
+  "lastUpdate": 1792796529623,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -765,6 +765,50 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/WildanDeveloper/wlel/commit/2dfc9d74766b111831d643356ec31d72094eb824"
         },
         "date": 1792795586399,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.4,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 66,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.5,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "1e3cbfb3fc3925aacf0cee68084d4d6d87655c2d",
+          "message": "distribution: fix the checks that passed for the wrong reason and refresh the manifests — the `sudo` assertion in tests/distribution_tests.rs matched the word inside install.sh's own comment (\"the script never runs sudo\"), so the test failed on macOS and Windows instead of checking behaviour; it now walks the code lines only (comments skipped) and looks for a sudo invocation, not the word. The same audit found the reason Linux stayed green: `have(\"sh\")` probed with `sh --version`, a bashism that dash (the /bin/sh of Debian/Ubuntu, and the platform Wlel ships from) rejects, so every shell test silently skipped on Linux and would have skipped forever; the probe now runs `sh -c \"exit 0\"` and the three shell tests actually execute. Also `scripts/packaging.sh` no longer deletes its own output directory (`rm -rf packaging/` removed packaging/README.md along with the manifests): it creates the two subdirectories and replaces only the two files it owns — confirmed with 1.3.0's real SHA256SUMS, where all four formula URL/hash pairs and the Scoop hash match the published archives byte for byte; packaging/homebrew/wlel.rb and packaging/scoop/wlel.json now point at v1.3.0; 590 cargo tests green, clippy -D warnings clean",
+          "timestamp": "2026-10-23T23:01:24Z",
+          "tree_id": "1277104d0d2c8223e60f492e0fbe5fa1503fb046",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/1e3cbfb3fc3925aacf0cee68084d4d6d87655c2d"
+        },
+        "date": 1792796529262,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
