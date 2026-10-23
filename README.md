@@ -99,7 +99,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Stdlib: `std::print*`/`println*`, `strlen`, `streq`, `abs`, `min`, `max`, `len`, `checked_add/sub/mul`, `format`, `parse_float`, `float_to_str`; collections `Vec[T]`, `HashMap[K,V]` + `for x in coll`; string library `str_find/sub/trim/split/parse_int`, `int_to_str`, `str_cmp`; sort & search `std::sort`, `std::binary_search`; file I/O `sys::read_file/write_file` + the Result layer `std::fs::open/read_all/write_all/read/write/close`; `sys::argc/arg/exit`
 - [x] Concurrency: `sys::thread/join` (name-resolved workers, per-thread arenas), `sys::mutex_new/lock/unlock/free`, `sys::chan_new[T]/send/recv/close/free`, `sys::sleep_ms` — data races are user discipline, like C (see [Concurrency](#concurrency))
 - [x] Tagged enums + exhaustive `match`, `std::Result[T,E]` / `std::Option[T]`, the `?` try operator and the `result_*`/`option_*` helpers, `panic(msg)` (see [Tagged enums](#tagged-enums--match) and [File I/O](#file-io))
-- [x] Projects: `wlel new`, `wlel.toml` manifests, path + git dependencies (auto-cloned, revision-pinned by `wlel.lock`), nested deps, `wlel run/build/check/test` in project mode (see [Projects](#projects))
+- [x] Projects: `wlel new` / `init`, `wlel.toml` manifests, path + git dependencies (auto-cloned, revision-pinned by `wlel.lock`), nested deps, `wlel add/remove/update/tree/clean`, `wlel run/build/check/test` in project mode; the scaffold ships a README and a CI workflow that installs the matching release (see [Projects](#projects))
 - [x] Package registry v0: `wlel add github:user/repo[@x.y.z]` — no central server, git tags are the registry; caret version requirements verified against each tag's own manifest, offline-friendly resolution (see [Projects](#projects))
 - [x] Formatter: `wlel fmt` — canonical, idempotent, comment-preserving; `wlel fmt` in a project formats every `.wlel`; `-check` mode for CI (see [Formatting](#formatting))
 - [x] Language server: `wlel lsp` — diagnostics, hover types/signatures, go-to-definition (locals, methods, fields, imports), completion; hand-rolled LSP 3.17 over stdio, zero dependencies (see [Language server](#language-server))
@@ -633,6 +633,18 @@ check/test` look for `wlel.toml` in the current directory (or any parent).
 Library-only projects (with `src/lib.wlel` but no `src/main.wlel`) can be checked
 and tested but not built/run.
 
+Start from an existing directory instead of an empty one — `wlel init` writes
+the manifest and the project metadata but never overwrites your sources:
+
+```bash
+$ wlel init          # adopt the current directory
+initialized wlel project in .
+```
+
+`wlel new` and `wlel init` both write `wlel.toml`, `src/main.wlel` (only when
+there is no entry point yet), a README and a GitHub Actions workflow that
+installs the exact compiler release that scaffolded the project.
+
 Dependencies are declared in `[deps]` — either a path to another wlel project
 or a git URL (cloned automatically into `.wlel/deps/<name>`):
 
@@ -663,6 +675,32 @@ dependencies sharing a name from different sources are rejected. Git
 revisions are pinned in `wlel.lock` after the first build — commit it, and
 every later build checks out exactly that revision, even on machines that
 have never seen the repo. Delete the lock to move to the remote's HEAD.
+
+The rest of the dependency lifecycle:
+
+```bash
+$ wlel tree                  # the resolved graph, with versions and pins
+myapp v0.1.0
+|-- pointlib v0.1.0 (path ../pointlib)
+`-- json v1.2.3 (git https://github.com/user/wlel-json @ 4f2a91c3d0)
+
+$ wlel update                # re-resolve git deps to the newest satisfying tag
+updated 'json' 4f2a91c3d0 -> 9c1e07ab42
+
+$ wlel update json           # or just one dependency
+up to date 'json' (9c1e07ab42)
+
+$ wlel remove pointlib       # manifest line, lock pin and clone cache
+removed 'pointlib' (path = "../pointlib")
+
+$ wlel clean                 # drop the clones; wlel.lock is kept
+removed 1 cached clone(s) from myapp/.wlel
+$ wlel clean --cache         # ... and the compiler's content cache too
+```
+
+`wlel update` keeps the version requirement and moves the pin within it, so a
+`1.2` requirement never jumps to `2.0`. Path dependencies are not pinned and
+are left alone.
 
 Git dependencies can pin a **version requirement** (`version = "1.2"`):
 caret semantics like Cargo's `^` — `1.2` matches `>=1.2.0 <2.0.0`, `0.2.3`
@@ -927,15 +965,27 @@ Shipped:
 4. **CI integrity** — flagship check/test/build/bench jobs and `fmt -check` over `flagship/`.
 5. **1.0 freeze** — the spec's open questions are resolved and documented in [§17](docs/spec.md#17-resolved-for-the-10-freeze) (mixed float widths take the wider side, f32→f64 widens implicitly, explicit array decay, evaluation order stays C-inherited, no pointer arithmetic); source extension is `.wlel` (the pre-1.0 one is claimed by Wolfram Language in Linguist/editors); `wlel --version`; `scripts/release.sh` + `docs/cross-compile.md` for release binaries.
 
-Next, ordered by impact-per-effort:
-
-6. **Module namespaces** — imports currently merge into one flat global
+6. **Ecosystem** — shipped in 1.1.0: Apache-2.0 license and package
+   metadata, the dependency lifecycle (`init/remove/update/tree/clean`), and
+   scaffolds with a README and a CI workflow. Remaining: editor support
+   (tree-sitter grammar, VS Code extension, GitHub Linguist registration),
+   an install script and package-manager manifests, and a documentation
+   site.
+7. **Module namespaces** — imports currently merge into one flat global
    scope (two files defining `helper` is a duplicate-symbol error); this is
    also the main blocker for self-hosting.
-7. **Self-hosting** — the only unchecked milestone left.
-8. **Runtime/compile performance** — incremental per-file compilation for
+8. **Self-hosting** — the only unchecked milestone left.
+9. **Runtime/compile performance** — incremental per-file compilation for
    the LSP, arena memory reclamation for parse-heavy programs, collection
    and sort hot paths.
 
 Deliberately **not** on the roadmap: borrow checker, macros, GC, OOP class
 hierarchies, exceptions. Simplicity is a feature, not a phase.
+
+## License
+
+[Apache-2.0](LICENSE). Generated C and the binaries you compile are yours —
+the license covers the compiler, not your programs. See [NOTICE](NOTICE).
+
+Contributions are accepted under the same terms; see
+[CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).

@@ -1,8 +1,15 @@
 [package]
 name = "wlel"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
+rust-version = "1.82"
 description = "Wlel: the arena-first systems language"
+license = "Apache-2.0"
+repository = "https://github.com/WildanDeveloper/wlel"
+homepage = "https://github.com/WildanDeveloper/wlel"
+readme = "README.md"
+keywords = ["language", "compiler", "transpiler", "arena", "systems"]
+categories = ["compilers", "development-tools"]
 
 [profile.release]
 opt-level = 3

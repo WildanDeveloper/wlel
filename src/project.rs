@@ -714,6 +714,64 @@ pub fn write_lock(dir: &Path, entries: &[LockEntry]) {
     let _ = fs::write(dir.join(LOCK_FILE), body);
 }
 
+/// Remove the `name = { ... }` line from the `[deps]` section, leaving every
+/// other byte alone (comments, ordering, the `[package]` block). Returns
+/// `None` when the dependency is not declared. The `[deps]` header stays even
+/// when it becomes empty — deleting it would silently change the file's shape.
+pub fn remove_dep_line(src: &str, name: &str) -> Option<String> {
+    let raw: Vec<&str> = src.lines().collect();
+    let h = raw.iter().position(|l| l.trim() == "[deps]")?;
+    let end = raw[h + 1..]
+        .iter()
+        .position(|l| l.trim_start().starts_with('['))
+        .map(|i| h + 1 + i)
+        .unwrap_or(raw.len());
+    let mut hit: Option<usize> = None;
+    for (i, l) in raw.iter().enumerate().take(end).skip(h + 1) {
+        let t = l.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if let Some((k, _)) = t.split_once('=') {
+            if k.trim() == name {
+                hit = Some(i);
+                break;
+            }
+        }
+    }
+    let hit = hit?;
+    let mut out: Vec<&str> = Vec::with_capacity(raw.len());
+    for (i, l) in raw.iter().enumerate() {
+        if i == hit {
+            continue;
+        }
+        out.push(l);
+    }
+    // collapse the blank line the removal may have left between two entries
+    let mut collapsed: Vec<&str> = Vec::with_capacity(out.len());
+    for l in out {
+        if l.trim().is_empty()
+            && collapsed.last().map(|p: &&str| p.trim().is_empty()).unwrap_or(false)
+        {
+            continue;
+        }
+        collapsed.push(l);
+    }
+    let mut s = collapsed.join("\n");
+    if !s.ends_with('\n') {
+        s.push('\n');
+    }
+    Some(s)
+}
+
+/// Read the manifest of `dir`, or a message naming the file.
+pub fn read_manifest(dir: &Path) -> Result<(String, Manifest), String> {
+    let p = dir.join(MANIFEST_FILE);
+    let src = fs::read_to_string(&p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
+    let mf = parse_manifest(&src).map_err(|e| format!("{}: {e}", p.display()))?;
+    Ok((src, mf))
+}
+
 // ---------------------------------------------------------------------------
 // git dependencies
 // ---------------------------------------------------------------------------
@@ -946,28 +1004,191 @@ pub fn fetch_git_dep(
 }
 
 // ---------------------------------------------------------------------------
+// dependency tree
+// ---------------------------------------------------------------------------
+
+/// one node of `wlel tree`
+#[derive(Debug, Clone)]
+pub struct DepNode {
+    /// "name v1.2.3", or "name (path ../lib)" / "name (git URL @ rev)"
+    pub label: String,
+    pub children: Vec<DepNode>,
+}
+
+/// Render the dependency graph rooted at `dir`. Path dependencies are read
+/// from disk, git dependencies from the `.wlel/deps` clone (so the revision
+/// shown is the one that will actually compile). Cycles and missing clones
+/// are reported inline instead of failing: `tree` is a diagnostic tool.
+pub fn dependency_tree(dir: &Path) -> Result<DepNode, String> {
+    let (_, root) = read_manifest(dir)?;
+    let lock = read_lock(dir);
+    let rev_of = |name: &str| {
+        lock.iter()
+            .find(|e| e.name == name)
+            .map(|e| e.rev.chars().take(10).collect::<String>())
+    };
+    let mut visited: HashSet<PathBuf> = HashSet::new();
+    visited.insert(dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()));
+    let children = tree_children(dir, &root, &rev_of, &mut visited, 0)?;
+    Ok(DepNode {
+        label: format!("{} v{}", root.name, root.version),
+        children,
+    })
+}
+
+fn tree_children(
+    root: &Path,
+    mf: &Manifest,
+    rev_of: &dyn Fn(&str) -> Option<String>,
+    visited: &mut HashSet<PathBuf>,
+    depth: u32,
+) -> Result<Vec<DepNode>, String> {
+    let mut out = Vec::new();
+    for dep in &mf.deps {
+        let (dep_dir, source) = match &dep.source {
+            DepSource::Path(p) => (root.join(p), format!("path {p}")),
+            DepSource::Git(url) => (
+                git_dep_cache_dir(root, &dep.name),
+                match rev_of(&dep.name) {
+                    Some(rev) => format!("git {url} @ {rev}"),
+                    None => format!("git {url} (not resolved yet)"),
+                },
+            ),
+        };
+        if depth + 1 > MAX_DEP_DEPTH {
+            out.push(DepNode {
+                label: format!("{} ({source}) — depth limit reached", dep.name),
+                children: Vec::new(),
+            });
+            continue;
+        }
+        let canonical = dep_dir.canonicalize().unwrap_or_else(|_| dep_dir.clone());
+        if !visited.insert(canonical.clone()) {
+            out.push(DepNode {
+                label: format!("{} ({source}) — already shown", dep.name),
+                children: Vec::new(),
+            });
+            continue;
+        }
+        let Ok((_, sub)) = read_manifest(&dep_dir) else {
+            out.push(DepNode {
+                label: format!(
+                    "{} ({source}) — not resolved (run `wlel build`)",
+                    dep.name
+                ),
+                children: Vec::new(),
+            });
+            continue;
+        };
+        let children = tree_children(root, &sub, rev_of, visited, depth + 1)?;
+        out.push(DepNode {
+            label: format!("{} v{} ({source})", sub.name, sub.version),
+            children,
+        });
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// update
+// ---------------------------------------------------------------------------
+
+/// Re-resolve the git dependency pins (`wlel update [name]`): drop the lock
+/// entries, resolve again (fetching tags), and report every revision that
+/// moved. Path dependencies are not pinned and are left alone. On failure the
+/// previous lock is restored.
+pub fn update_dependencies(dir: &Path, only: Option<&str>) -> Result<Vec<String>, String> {
+    let (_, mf) = read_manifest(dir)?;
+    if let Some(name) = only {
+        if !mf.deps.iter().any(|d| d.name == name) {
+            return Err(format!("'{name}' is not a dependency of '{}'", mf.name));
+        }
+        if !mf
+            .deps
+            .iter()
+            .any(|d| d.name == name && matches!(d.source, DepSource::Git(_)))
+        {
+            return Ok(vec![format!("'{name}' is a path dependency — nothing to update")]);
+        }
+    }
+    let before = read_lock(dir);
+    let mut reduced = before.clone();
+    match only {
+        Some(name) => reduced.retain(|e| e.name != name),
+        None => reduced.clear(),
+    }
+    write_lock(dir, &reduced);
+    let proj = match load_project(dir) {
+        Ok(p) => p,
+        Err(e) => {
+            write_lock(dir, &before);
+            return Err(e);
+        }
+    };
+    for w in &proj.warnings {
+        // resolution notes (offline fallbacks) go to the caller as-is
+        let _ = w;
+    }
+    let after = read_lock(dir);
+    let mut report = Vec::new();
+    for dep in &mf.deps {
+        if !matches!(dep.source, DepSource::Git(_)) {
+            continue;
+        }
+        if let Some(name) = only {
+            if dep.name != name {
+                continue;
+            }
+        }
+        let old = before.iter().find(|e| e.name == dep.name);
+        let new = after.iter().find(|e| e.name == dep.name);
+        let short = |r: &str| r.chars().take(10).collect::<String>();
+        match (old, new) {
+            (Some(o), Some(n)) if o.rev != n.rev => {
+                report.push(format!("updated '{}' {} -> {}", dep.name, short(&o.rev), short(&n.rev)));
+            }
+            (Some(o), Some(n)) => {
+                report.push(format!("up to date '{}' ({})", dep.name, short(&o.rev)));
+                let _ = n;
+            }
+            (None, Some(n)) => report.push(format!("resolved '{}' ({})", dep.name, short(&n.rev))),
+            (Some(_), None) => report.push(format!("dropped '{}' from wlel.lock", dep.name)),
+            (None, None) => {}
+        }
+    }
+    if report.is_empty() {
+        report.push("no git dependencies to update".into());
+    }
+    Ok(report)
+}
+
+// ---------------------------------------------------------------------------
+// clean
+// ---------------------------------------------------------------------------
+
+/// Remove the generated dependency clones (`.wlel/`). Returns the number of
+/// cached clones removed. `wlel.lock` is kept — it is meant to be committed.
+pub fn clean_project(dir: &Path) -> Result<usize, String> {
+    let deps = dir.join(DEPS_DIR);
+    let n = fs::read_dir(&deps)
+        .map(|rd| rd.filter_map(|e| e.ok()).count())
+        .unwrap_or(0);
+    let cache = dir.join(".wlel");
+    if cache.exists() {
+        fs::remove_dir_all(&cache)
+            .map_err(|e| format!("cannot remove {}: {e}", cache.display()))?;
+    }
+    Ok(n)
+}
+
+// ---------------------------------------------------------------------------
 // scaffolding (wlel new)
 // ---------------------------------------------------------------------------
 
-/// create a minimal runnable project at `dir` (`wlel new <dir>`)
-pub fn scaffold(dir: &Path) -> Result<PathBuf, String> {
-    if dir.exists() {
-        let entries =
-            fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
-        if entries.count() > 0 {
-            return Err(format!("'{}' is not empty", dir.display()));
-        }
-    }
-    let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-        return Err("invalid project directory".into());
-    };
-    if !valid_dep_name(&name) {
-        return Err(format!(
-            "invalid project name '{name}' (use letters, digits, '-', '_', '.')"
-        ));
-    }
-    fs::create_dir_all(dir.join("src"))
-        .map_err(|e| format!("cannot create {}: {e}", dir.join("src").display()))?;
+/// the files `wlel new` / `wlel init` write. `init` keeps an existing
+/// `src/main.wlel`, `.gitignore` and README; `new` writes everything into a
+/// fresh (empty) directory.
+fn project_files(name: &str) -> Vec<(&'static str, String)> {
     let toml = format!(
         "# {MANIFEST_FILE} - project manifest\n\
          [package]\n\
@@ -989,14 +1210,121 @@ pub fn scaffold(dir: &Path) -> Result<PathBuf, String> {
                    test \"sanity\" {\n\
                    \x20   assert_eq(2 + 2, 4);\n\
                    }\n";
+    let readme = format!(
+        "# {name}\n\
+         \n\
+         A Wlel project.\n\
+         \n\
+         ```bash\n\
+         wlel run      # run src/main.wlel (safe mode: bounds and div-zero checks)\n\
+         wlel test     # run every `test \"name\" {{ ... }}` block\n\
+         wlel check    # type-check only\n\
+         wlel build    # release binary named `{name}`\n\
+         wlel fmt      # canonical formatting\n\
+         ```\n\
+         \n\
+         Requires `wlel` 1.0+ and a C compiler (`cc`, `gcc` or `clang`).\n\
+         `wlel.lock` pins git dependency revisions — commit it. `.wlel/` is a\n\
+         generated clone cache — ignore it.\n"
+    );
+    // the project CI installs the exact compiler release that scaffolded the
+    // project, so a green build is reproducible
+    let version = env!("CARGO_PKG_VERSION");
+    let ci = format!(
+        "name: CI\n\
+         on: [push, pull_request]\n\
+         \n\
+         jobs:\n\
+         \x20 test:\n\
+         \x20   runs-on: ubuntu-latest\n\
+         \x20   steps:\n\
+         \x20     - uses: actions/checkout@v4\n\
+         \x20     - name: Install wlel {version}\n\
+         \x20       run: |\n\
+         \x20         url=https://github.com/WildanDeveloper/wlel/releases/download/v{version}/wlel-{version}-x86_64-unknown-linux-gnu.tar.gz\n\
+         \x20         curl -fsSL \"$url\" | tar -xz\n\
+         \x20         sudo mv wlel-{version}-x86_64-unknown-linux-gnu/wlel /usr/local/bin/\n\
+         \x20         wlel --version\n\
+         \x20     - name: Type-check\n\
+         \x20       run: wlel check\n\
+         \x20     - name: Tests\n\
+         \x20       run: wlel test\n\
+         \x20     - name: Formatting\n\
+         \x20       run: wlel fmt -check\n"
+    );
     let gitignore = format!("/{name}\n/{DEPS_DIR}/\n");
-    let files: [(&str, String); 3] = [
+    vec![
         (MANIFEST_FILE, toml),
         ("src/main.wlel", main_wl.into()),
+        ("README.md", readme),
+        (".github/workflows/ci.yml", ci),
         (".gitignore", gitignore),
-    ];
-    for (rel, content) in files {
+    ]
+}
+
+/// create a minimal runnable project at `dir` (`wlel new <dir>`)
+pub fn scaffold(dir: &Path) -> Result<PathBuf, String> {
+    if dir.exists() {
+        let entries =
+            fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
+        if entries.count() > 0 {
+            return Err(format!("'{}' is not empty", dir.display()));
+        }
+    }
+    let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return Err("invalid project directory".into());
+    };
+    if !valid_dep_name(&name) {
+        return Err(format!(
+            "invalid project name '{name}' (use letters, digits, '-', '_', '.')"
+        ));
+    }
+    fs::create_dir_all(dir.join("src"))
+        .map_err(|e| format!("cannot create {}: {e}", dir.join("src").display()))?;
+    for (rel, content) in project_files(&name) {
         let p = dir.join(rel);
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        }
+        fs::write(&p, content).map_err(|e| format!("cannot write {}: {e}", p.display()))?;
+    }
+    Ok(dir.to_path_buf())
+}
+
+/// `wlel init [dir]`: adopt an existing directory. Writes the manifest and the
+/// project metadata, and only creates `src/main.wlel` when there is no entry
+/// point yet, so it is safe on a directory that already has sources.
+pub fn init_project(dir: &Path) -> Result<PathBuf, String> {
+    if dir.join(MANIFEST_FILE).exists() {
+        return Err(format!("{} already has a {MANIFEST_FILE}", dir.display()));
+    }
+    let name = dir
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .ok_or("invalid project directory")?;
+    if !valid_dep_name(&name) {
+        return Err(format!(
+            "invalid project name '{name}' (use letters, digits, '-', '_', '.')"
+        ));
+    }
+    fs::create_dir_all(dir.join("src"))
+        .map_err(|e| format!("cannot create {}: {e}", dir.join("src").display()))?;
+    let has_main = dir.join("src/main.wlel").exists() || dir.join("src/lib.wlel").exists();
+    for (rel, content) in project_files(&name) {
+        let p = dir.join(rel);
+        if p.exists() {
+            continue; // never overwrite existing work
+        }
+        if rel == "src/main.wlel" && has_main {
+            continue; // the project already has an entry point
+        }
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        }
         fs::write(&p, content).map_err(|e| format!("cannot write {}: {e}", p.display()))?;
     }
     Ok(dir.to_path_buf())

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report (private)
+    url: https://github.com/WildanDeveloper/wlel/security/advisories/new
+    about: Please report crashes on hostile input, code-generation escapes and cache attacks privately.
+  - name: The specification
+    url: https://github.com/WildanDeveloper/wlel/blob/main/docs/spec.md
+    about: The normative description of the language — check here before filing a behavior question.
+  - name: Contributing guide
+    url: https://github.com/WildanDeveloper/wlel/blob/main/CONTRIBUTING.md
+    about: Build, test, and the change checklist.

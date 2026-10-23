@@ -269,6 +269,65 @@ pub fn add_dependency(
     Ok((format!("added '{name}' ({source_desc}){pin}"), warnings))
 }
 
+/// `wlel remove <name>`: drop the dependency from the manifest, the lock file
+/// and the clone cache. The manifest is only written after the edited text is
+/// re-parsed and proven to no longer contain the dependency.
+pub fn remove_dependency(dir: &Path, name: &str) -> Result<String, String> {
+    let (manifest_src, manifest) = project::read_manifest(dir)?;
+    let Some(dep) = manifest.deps.iter().find(|d| d.name == name) else {
+        return Err(format!(
+            "'{name}' is not a dependency of '{}' (see `wlel tree`)",
+            manifest.name
+        ));
+    };
+    let desc = match &dep.source {
+        project::DepSource::Path(p) => format!("path = \"{p}\""),
+        project::DepSource::Git(url) => format!("git = \"{url}\""),
+    };
+    let new_src = project::remove_dep_line(&manifest_src, name)
+        .ok_or_else(|| format!("internal error: cannot find the '{name}' line in the manifest"))?;
+    // guard against our own editor bugs before touching the disk
+    let edited = project::parse_manifest(&new_src)
+        .map_err(|e| format!("internal error: edited manifest no longer parses: {e}"))?;
+    if edited.deps.iter().any(|d| d.name == name) {
+        return Err(format!("internal error: edited manifest still declares '{name}'"));
+    }
+    let manifest_path = dir.join(project::MANIFEST_FILE);
+    fs::write(&manifest_path, &new_src)
+        .map_err(|e| format!("cannot write {}: {e}", manifest_path.display()))?;
+
+    // drop the pin (only git deps are pinned) and the clone cache
+    let mut lock = project::read_lock(dir);
+    let had_pin = lock.iter().any(|e| e.name == name);
+    if had_pin {
+        lock.retain(|e| e.name != name);
+        project::write_lock(dir, &lock);
+    }
+    let cache = project::git_dep_cache_dir(dir, name);
+    let had_cache = cache.exists();
+    if had_cache {
+        fs::remove_dir_all(&cache)
+            .map_err(|e| format!("cannot remove {}: {e}", cache.display()))?;
+    }
+    // the remaining project must still load; if not, restore everything
+    if let Err(e) = project::load_project(dir) {
+        let _ = fs::write(&manifest_path, &manifest_src);
+        if had_pin {
+            lock.push(project::LockEntry {
+                name: name.to_string(),
+                req: dep.version.clone(),
+                rev: String::new(),
+            });
+        }
+        return Err(format!("cannot remove '{name}': {e}"));
+    }
+    Ok(format!(
+        "removed '{name}' ({desc}){}{}",
+        if had_pin { ", unpinned wlel.lock" } else { "" },
+        if had_cache { ", deleted the clone cache" } else { "" }
+    ))
+}
+
 /// the dependency must be a well-formed wlel library project whose declared
 /// name matches, and (when a requirement is given) whose manifest version
 /// satisfies it — the same checks `load_project` applies, but before the

@@ -1,0 +1,72 @@
+name: Bug report
+description: Something in the compiler, tooling or stdlib is wrong.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A minimal reproduction is worth more than a
+        long description — if you can reduce it to a few lines of `.wlel`,
+        please do.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: The actual output, the exit code, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest `.wlel` source and the exact command.
+      render: wlel
+      placeholder: |
+        // app.wlel
+        fn main() -> int {
+            return 1 / 0;
+        }
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      placeholder: "wlel run app.wlel"
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Full output
+      description: Copy the whole stdout/stderr. For a miscompile, add `wlel build app.wlel --emit-c -o app.c` and paste the relevant C.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: wlel --version
+      placeholder: "wlel 1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and C compiler
+      placeholder: "Debian 13, gcc 14.2 / macOS 15, clang 17 / Windows 11, mingw-w64 gcc 15"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which mode?
+      multiple: true
+      options:
+        - wlel run (safe mode)
+        - wlel build (release)
+        - wlel test
+        - wlel check (type checker only)
+        - wlel fmt / doc / lsp
+        - QBE backend (--backend qbe)

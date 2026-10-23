@@ -1,0 +1,7 @@
+[toolchain]
+# One channel for everyone: CI (dtolnay/rust-toolchain@stable), contributors
+# and release builds resolve to the same compiler. `clippy` is what the lint
+# gate needs; rustfmt is deliberately not enforced (the repo is hand-formatted).
+channel = "stable"
+components = ["clippy"]
+profile = "minimal"

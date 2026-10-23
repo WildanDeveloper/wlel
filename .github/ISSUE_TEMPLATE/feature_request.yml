@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a language, stdlib or tooling change.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Wlel's syntax is frozen at 1.0, and the language deliberately has no
+        GC, no borrow checker, no macros, no exceptions and no operator
+        overloading. Proposals that add a concept need to argue why the
+        existing ones cannot express the same thing.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the code you cannot write today, not the syntax you want.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      render: wlel
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What works today?
+      description: The closest existing workaround, and why it is not enough.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Language (syntax or semantics)
+        - Standard library
+        - Compiler diagnostics
+        - Tooling (fmt, doc, lsp, project mode)
+        - Backends (C, QBE)
+        - Documentation

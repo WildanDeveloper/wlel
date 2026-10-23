@@ -39,10 +39,15 @@ fn print_version() -> ! {
 fn usage() -> ! {
     eprintln!("wlel {VERSION}");
     eprintln!("usage:");
-    eprintln!("  wlel new   <dir>                          scaffold a new project");
+    eprintln!("  wlel new   <dir>                          scaffold a new project (manifest, main, README, CI)");
+    eprintln!("  wlel init  [<dir>]                        adopt an existing directory as a project");
     eprintln!("  wlel add  [<name>] github:user/repo[@x.y] add a git dependency (git-tag registry)");
     eprintln!("  wlel add  [<name>] <git-url>[@x.y]        add a git dependency by URL");
     eprintln!("  wlel add  [<name>] --path <dir>           add a path dependency");
+    eprintln!("  wlel remove <name>                        remove a dependency (manifest, lock, clone cache)");
+    eprintln!("  wlel update [<name>]                      re-resolve git dependencies to their newest satisfying tag");
+    eprintln!("  wlel tree                                 print the dependency tree");
+    eprintln!("  wlel clean [--cache]                      remove generated dep clones (and the compiler cache)");
     eprintln!("  wlel run   <file.wlel> [-l <lib>] [-L <dir>] [-- args...]   run a single file (dev checks)");
     eprintln!("  wlel run   [-l <lib>] [-L <dir>] [-- args...]             run the current project (wlel.toml)");
     eprintln!("  wlel build <file.wlel> -o <out> [-O0|-O1|-O2|-O3] [-sanitize] [--emit-c] [-l <lib>] [-L <dir>] [--backend qbe|c]");
@@ -65,6 +70,16 @@ struct Args {
 
 enum Mode {
     New { dir: String },
+    /// `wlel init [<dir>]`: adopt an existing directory (default `.`)
+    Init { dir: Option<String> },
+    /// `wlel remove <name>`
+    Remove { name: String },
+    /// `wlel update [<name>]`
+    Update { name: Option<String> },
+    /// `wlel tree`
+    Tree,
+    /// `wlel clean [--cache]`
+    Clean { cache: bool },
     /// `wlel add [<name>] <spec> | --path <dir>`: edit the manifest, resolve,
     /// pin the lock
     Add { name: Option<String>, spec: Option<String>, path: Option<String> },
@@ -133,6 +148,23 @@ fn parse_args() -> Args {
         Some("new") if a.len() == 2 => Args {
             mode: Mode::New { dir: a[1].clone() },
         },
+        Some("init") if a.len() <= 2 => Args {
+            mode: Mode::Init { dir: a.get(1).cloned() },
+        },
+        Some("remove") if a.len() == 2 => Args {
+            mode: Mode::Remove { name: a[1].clone() },
+        },
+        Some("update") if a.len() <= 2 => Args {
+            mode: Mode::Update { name: a.get(1).cloned() },
+        },
+        Some("tree") if a.len() == 1 => Args { mode: Mode::Tree },
+        Some("clean") => {
+            let cache = a[1..].iter().any(|s| s == "--cache");
+            if a[1..].iter().any(|s| s != "--cache") {
+                usage()
+            }
+            Args { mode: Mode::Clean { cache } }
+        }
         Some("add") => {
             let mut path: Option<String> = None;
             let mut positional: Vec<String> = Vec::new();
@@ -970,6 +1002,127 @@ fn run_doc(files: &[String], out_dir: Option<String>, std_only: bool) -> ! {
     exit(0);
 }
 
+/// project directory of the current working directory, or exit with the
+/// standard "no manifest" message
+fn cwd_project() -> PathBuf {
+    let cwd = match env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("wlel: cannot get working directory: {e}");
+            exit(1);
+        }
+    };
+    match project::find_project_dir(&cwd) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("wlel: {e}");
+            exit(1);
+        }
+    }
+}
+
+fn run_init(dir: Option<&str>) -> ! {
+    let target = PathBuf::from(dir.unwrap_or("."));
+    match project::init_project(&target) {
+        Ok(p) => {
+            println!("initialized wlel project in {}", p.display());
+            println!("next: wlel check && wlel test");
+        }
+        Err(e) => {
+            eprintln!("wlel: {e}");
+            exit(1);
+        }
+    }
+    exit(0)
+}
+
+fn run_remove(name: &str) -> ! {
+    let dir = cwd_project();
+    match wlel::registry::remove_dependency(&dir, name) {
+        Ok(msg) => println!("{msg}"),
+        Err(e) => {
+            eprintln!("wlel: {e}");
+            exit(1);
+        }
+    }
+    exit(0)
+}
+
+fn run_update(name: Option<&str>) -> ! {
+    let dir = cwd_project();
+    match project::update_dependencies(&dir, name) {
+        Ok(lines) => {
+            for l in lines {
+                println!("{l}");
+            }
+        }
+        Err(e) => {
+            eprintln!("wlel: {e}");
+            exit(1);
+        }
+    }
+    exit(0)
+}
+
+fn print_tree(node: &project::DepNode, prefix: &str, last: bool, root: bool) {
+    if root {
+        println!("{}", node.label);
+    } else {
+        println!("{prefix}{}{}", if last { "`-- " } else { "|-- " }, node.label);
+    }
+    let child_prefix = if root {
+        String::new()
+    } else {
+        format!("{prefix}{}", if last { "    " } else { "|   " })
+    };
+    for (i, c) in node.children.iter().enumerate() {
+        let is_last = i + 1 == node.children.len();
+        print_tree(c, &child_prefix, is_last, false);
+    }
+}
+
+fn run_tree() -> ! {
+    let dir = cwd_project();
+    match project::dependency_tree(&dir) {
+        Ok(tree) => print_tree(&tree, "", true, true),
+        Err(e) => {
+            eprintln!("wlel: {e}");
+            exit(1);
+        }
+    }
+    exit(0)
+}
+
+fn run_clean(with_cache: bool) -> ! {
+    let dir = cwd_project();
+    match project::clean_project(&dir) {
+        Ok(n) => {
+            println!(
+                "removed {n} cached clone(s) from {}",
+                dir.join(".wlel").display()
+            );
+        }
+        Err(e) => {
+            eprintln!("wlel: {e}");
+            exit(1);
+        }
+    }
+    if with_cache {
+        let cache = cache_dir();
+        match fs::remove_dir_all(&cache) {
+            Ok(()) => println!("removed the compiler cache at {}", cache.display()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                println!("compiler cache already empty ({})", cache.display())
+            }
+            Err(e) => {
+                eprintln!("wlel: cannot remove {}: {e}", cache.display());
+                exit(1);
+            }
+        }
+    }
+    exit(0)
+}
+
 /// `wlel add [<name>] <spec> | --path <dir>`: resolve the dependency (cloning
 /// and tag-selection happen first, so a broken add never edits `wlel.toml`),
 /// write the `[deps]` line, then reload the project to pin `wlel.lock`
@@ -1064,6 +1217,11 @@ fn run(args: Args) {
                 exit(1);
             }
         },
+        Mode::Init { dir } => run_init(dir.as_deref()),
+        Mode::Remove { name } => run_remove(name),
+        Mode::Update { name } => run_update(name.as_deref()),
+        Mode::Tree => run_tree(),
+        Mode::Clean { cache } => run_clean(*cache),
         Mode::Add { name, spec, path } => run_add(name.clone(), spec.clone(), path.clone()),
         Mode::Fmt { files, check } => run_fmt(files, *check),
         Mode::Doc { files, out, std } => run_doc(files, out.as_ref().cloned(), *std),
