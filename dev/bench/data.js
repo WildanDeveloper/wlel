@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792788997789,
+  "lastUpdate": 1792790091523,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -565,6 +565,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.1,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "24989d1796ae32d37e6a0c519652b9e846b768d8",
+          "message": "release: build both Darwin targets on macos-14 — GitHub retired the Intel macos-13 label, so the v1.0.0 run queued that job forever (17 minutes with no runner) and publish, which needs the whole build matrix, could never start; the Apple SDK on an ARM runner cross-links x86_64, so both Darwin targets build on macos-14 and every job in the matrix now lands on a live label, plus timeout-minutes (30 test/build, 20 publish) so a stuck runner fails the run instead of hanging it; verified with scripts/release.sh (host archive + .sha256) and a YAML parse of the matrix",
+          "timestamp": "2026-10-23T21:14:04Z",
+          "tree_id": "018628f1f672c667ca94b5824ce29b57b12cd440",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/24989d1796ae32d37e6a0c519652b9e846b768d8"
+        },
+        "date": 1792790090890,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 11,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 58,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 4,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 2.8,
             "unit": "ms"
           }
         ]
