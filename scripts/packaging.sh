@@ -45,8 +45,8 @@ done
 url() { printf 'https://github.com/WildanDeveloper/wlel/releases/download/v%s/wlel-%s-%s.tar.gz' "$VERSION" "$VERSION" "$1"; }
 
 OUT="${WLEL_PACKAGING_OUT:-packaging}"
-rm -rf "$OUT"
 mkdir -p "$OUT/homebrew" "$OUT/scoop"
+rm -f "$OUT/homebrew/wlel.rb" "$OUT/scoop/wlel.json"
 
 # quoted heredoc so backticks and $version stay literal; the placeholders are
 # substituted afterwards

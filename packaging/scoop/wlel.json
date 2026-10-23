@@ -1,13 +1,13 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Arena-first systems programming language with a C backend",
   "homepage": "https://github.com/WildanDeveloper/wlel",
   "license": "Apache-2.0",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/WildanDeveloper/wlel/releases/download/v1.2.0/wlel-1.2.0-x86_64-pc-windows-msvc.tar.gz",
-      "hash": "306fd7cf73401a74beb8855d44790bba545a6fd2aff37b6e8884b1d9b5f9c04e",
-      "extract_dir": "wlel-1.2.0-x86_64-pc-windows-msvc"
+      "url": "https://github.com/WildanDeveloper/wlel/releases/download/v1.3.0/wlel-1.3.0-x86_64-pc-windows-msvc.tar.gz",
+      "hash": "57d158afd60f954aca27c2873e98b908fae26768e001f00e23162d3f98fd808a",
+      "extract_dir": "wlel-1.3.0-x86_64-pc-windows-msvc"
     }
   },
   "bin": "wlel.exe",

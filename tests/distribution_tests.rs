@@ -26,6 +26,17 @@ fn have(tool: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// `sh --version` is a bash-ism: dash (the /bin/sh on Debian and Ubuntu)
+/// rejects it, so probing that way silently skipped every shell test on the
+/// platform the project ships from. Run a command instead.
+fn have_sh() -> bool {
+    Command::new("sh")
+        .args(["-c", "exit 0"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn version() -> String {
     let manifest = fs::read_to_string(root().join("Cargo.toml")).expect("Cargo.toml");
     manifest
@@ -39,7 +50,7 @@ fn version() -> String {
 
 #[test]
 fn install_script_is_valid_posix_shell() {
-    if !have("sh") {
+    if !have_sh() {
         eprintln!("skipping: sh is not on PATH");
         return;
     }
@@ -69,10 +80,18 @@ fn install_script_is_valid_posix_shell() {
     ] {
         assert!(text.contains(needle), "install.sh lost `{needle}`");
     }
-    assert!(
-        !text.contains("sudo"),
-        "install.sh must never run sudo: it installs to ~/.local/bin instead"
-    );
+    // `sudo` may appear in prose, but never as a command
+    for (n, line) in text.lines().enumerate() {
+        let code = line.trim_start();
+        if code.starts_with('#') {
+            continue;
+        }
+        assert!(
+            !code.starts_with("sudo") && !code.contains("| sudo ") && !code.contains("$(sudo"),
+            "install.sh runs sudo on line {} — it should fall back to ~/.local/bin instead",
+            n + 1
+        );
+    }
 
     // every platform the release workflow builds must be mapped
     for target in [
@@ -104,7 +123,7 @@ fn install_script_names_the_current_archive_layout() {
 
 #[test]
 fn packaging_script_renders_manifests_for_the_current_version() {
-    if !have("sh") {
+    if !have_sh() {
         eprintln!("skipping: sh is not on PATH");
         return;
     }
@@ -334,7 +353,7 @@ fn playground_wasm_module_builds() {
 
 #[test]
 fn site_script_is_valid_and_wired() {
-    if !have("sh") {
+    if !have_sh() {
         eprintln!("skipping: sh is not on PATH");
         return;
     }

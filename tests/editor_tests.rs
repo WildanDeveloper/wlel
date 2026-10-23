@@ -26,6 +26,8 @@ fn tree_sitter() -> PathBuf {
     root().join("editors/tree-sitter-wlel")
 }
 
+/// `node --version`, `cc --version`, `tree-sitter --version` all exist. This
+/// is a probe, not a guarantee: a tool that answers is used.
 fn have(tool: &str) -> bool {
     Command::new(tool)
         .arg("--version")
