@@ -19,6 +19,8 @@ pub fn gen_program(p: &Program) -> String {
         used_arr_at: false,
         used_divz: false,
         used_nonneg: false,
+        used_divovf: false,
+        used_shift: false,
         used_conc: false,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
@@ -57,6 +59,8 @@ pub fn gen_program_safe(p: &Program) -> String {
         used_arr_at: false,
         used_divz: false,
         used_nonneg: false,
+        used_divovf: false,
+        used_shift: false,
         used_conc: false,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
@@ -94,6 +98,8 @@ pub fn gen_program_tests(p: &Program) -> String {
         used_arr_at: false,
         used_divz: false,
         used_nonneg: false,
+        used_divovf: false,
+        used_shift: false,
         used_conc: false,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
@@ -129,6 +135,8 @@ pub fn gen_program_tests_safe(p: &Program) -> String {
         used_arr_at: false,
         used_divz: false,
         used_nonneg: false,
+        used_divovf: false,
+        used_shift: false,
         used_conc: false,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
@@ -183,6 +191,11 @@ struct Cg {
     used_divz: bool,
     /// safe-mode arena-capacity guard (negative capacity → huge malloc)
     used_nonneg: bool,
+    /// signed division/shift guards: MIN/-1 and an out-of-range shift count
+    /// are undefined (division: an actual trap) in C, but §11 promises
+    /// defined arithmetic in every build mode, so these are emitted always
+    used_divovf: bool,
+    used_shift: bool,
     /// concurrency layer (threads/mutexes/channels) in use; the whole
     /// runtime is spliced only when the program actually touches it
     used_conc: bool,
@@ -725,6 +738,42 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
         cg.out.insert_str(cg.fs_helpers_at, &h);
     }
 
+    // defined-arithmetic guards, emitted in release *and* safe mode: C
+    // leaves `MIN / -1` (a real SIGFPE on x86) and an out-of-range shift
+    // count undefined, while §11 promises defined two's-complement results
+    if cg.used_divovf || cg.used_shift {
+        let mut h = String::new();
+        if cg.used_divovf {
+            // the quotient wraps to MIN, the remainder is 0 — two's
+            // complement, exactly like the rest of Wlel's arithmetic
+            h.push_str("static long long _wlel_sdiv(long long a, long long b) {\n");
+            h.push_str("    if (b == -1) return (long long)(0ULL - (unsigned long long)a);\n");
+            h.push_str("    return a / b;\n");
+            h.push_str("}\n");
+            h.push_str("static long long _wlel_srem(long long a, long long b) {\n");
+            h.push_str("    if (b == -1) return 0;\n");
+            h.push_str("    return a % b;\n");
+            h.push_str("}\n");
+        }
+        if cg.used_shift {
+            // count taken modulo the operand width, so `x << 64` is `x` and
+            // `x << -1` is `x << (width-1)` — defined on every backend
+            h.push_str("static long long _wlel_shl(long long x, unsigned long long n, unsigned long long w) {\n");
+            h.push_str("    return (long long)(((unsigned long long)x) << (n & (w - 1)));\n");
+            h.push_str("}\n");
+            h.push_str("static unsigned long long _wlel_shlu(unsigned long long x, unsigned long long n, unsigned long long w) {\n");
+            h.push_str("    return x << (n & (w - 1));\n");
+            h.push_str("}\n");
+            h.push_str("static long long _wlel_sar(long long x, unsigned long long n, unsigned long long w) {\n");
+            h.push_str("    return x >> (n & (w - 1));\n");
+            h.push_str("}\n");
+            h.push_str("static unsigned long long _wlel_shr(unsigned long long x, unsigned long long n, unsigned long long w) {\n");
+            h.push_str("    return x >> (n & (w - 1));\n");
+            h.push_str("}\n");
+        }
+        cg.out.insert_str(safe_helpers_at, &h);
+    }
+
     // splice in only the safe-mode helpers the generated code actually calls
     if cg.safe && (cg.used_arr_at || cg.used_divz || cg.used_nonneg) {
         let mut h = String::new();
@@ -1195,15 +1244,22 @@ fn push_usize(out: &mut String, mut v: usize) {
 
 /// escape a path for use inside a generated C string literal
 fn escape_c_string(s: &str) -> String {
-    if !s.contains(['\\', '"']) {
-        return s.to_string();
-    }
+    // a file name is embedded in a `#line "..."` directive, so quotes,
+    // backslashes *and control characters* have to be escaped: a newline in
+    // a path used to terminate the directive early and emit invalid C
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
-        if c == '\\' || c == '"' {
-            out.push('\\');
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c == '\x7f' => {
+                out.push_str(&format!("\\{:03o}", c as u32));
+            }
+            c => out.push(c),
         }
-        out.push(c);
     }
     out
 }
@@ -1628,6 +1684,36 @@ fn gen_stmt(cg: &mut Cg, s: &Stmt, level: usize) {
                     c_string_literal(&cg.src_file),
                     s.span.start.line
                 );
+            }
+            // `x /= y` is `x = x / y` (§5.6), so it inherits the MIN/-1
+            // guard; a plain C `/=` would trap on x86
+            let signed = matches!(
+                a.target.ty.as_deref(),
+                Some("int" | "i8" | "i16" | "i32" | "i64")
+            );
+            if matches!(a.op, CompoundOp::Div | CompoundOp::Mod)
+                && is_int_ty(&a.target.ty)
+                && signed
+            {
+                // guard MIN/-1 without evaluating the lvalue twice: bind its
+                // address once, then update through the pointer
+                cg.used_divovf = true;
+                let f = if a.op == CompoundOp::Div { "_wlel_sdiv" } else { "_wlel_srem" };
+                let ty = a.target.ty.clone().unwrap_or_else(|| "int".into());
+                let tmp = format!("_wlel_p{}", cg.tmp_id);
+                cg.tmp_id += 1;
+                indent(&mut cg.out, level);
+                cg.out.push_str(&format!(
+                    "{{ {}* {} = &({}); *{} = {}(*{}, {}); }}\n",
+                    c_type(&ty),
+                    tmp,
+                    lhs,
+                    tmp,
+                    f,
+                    tmp,
+                    rhs
+                ));
+                return;
             }
             cg.out.push_str(&format!("{} {} {};\n", lhs, op_sym, rhs));
         }
@@ -2081,29 +2167,62 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
         ExprKind::Unary(UnOp::Not, x) => format!("(!{})", gen_expr(cg, x)),
         ExprKind::Unary(UnOp::BitNot, x) => format!("(~{})", gen_expr(cg, x)),
         ExprKind::Binary(op, l, r) => {
+            let lc = gen_expr(cg, l);
+            let mut rc = gen_expr(cg, r);
+            let ints = is_int_ty(&l.ty) && is_int_ty(&r.ty);
             // safe mode: integer / and % abort on a zero divisor, reporting
             // the .wlel position; floats keep IEEE inf semantics everywhere
-            if cg.safe
-                && matches!(op, BinOp::Div | BinOp::Mod)
-                && is_int_ty(&l.ty)
-                && is_int_ty(&r.ty)
-            {
+            // the operand's own C type, so a helper's `long long` return
+            // never widens the surrounding expression (a u32 subtraction
+            // after a safe-mode `%` used to be computed in 64 bits and
+            // change the result)
+            let op_cty = c_type(l.ty.as_deref().unwrap_or("int"));
+            if cg.safe && ints && matches!(op, BinOp::Div | BinOp::Mod) {
                 cg.used_divz = true;
-                return format!(
-                    "({} {} _wlel_divz({}, {}, {}))",
-                    gen_expr(cg, l),
-                    binop_str(*op),
-                    gen_expr(cg, r),
+                rc = format!(
+                    "(({op_cty})_wlel_divz({}, {}, {}))",
+                    rc,
                     c_string_literal(&cg.src_file),
                     e.span.start.line
                 );
             }
-            format!(
-                "({} {} {})",
-                gen_expr(cg, l),
-                binop_str(*op),
-                gen_expr(cg, r)
-            )
+            // `/` and `%` guard MIN/-1 (a SIGFPE on x86) and shifts mask the
+            // count to the operand width. Both are C undefined behavior,
+            // which §11 forbids in every build mode, so these helpers are
+            // emitted in release builds too.
+            let signed = matches!(
+                l.ty.as_deref(),
+                Some("int" | "i8" | "i16" | "i32" | "i64")
+            );
+            let bits = match l.ty.as_deref() {
+                Some("i8" | "u8") => 8,
+                Some("i16" | "u16") => 16,
+                Some("i32" | "u32") => 32,
+                _ => 64,
+            };
+            if ints {
+                match op {
+                    BinOp::Div | BinOp::Mod if signed => {
+                        cg.used_divovf = true;
+                        let f = if *op == BinOp::Div { "_wlel_sdiv" } else { "_wlel_srem" };
+                        return format!("(({op_cty}){f}({lc}, {rc}))");
+                    }
+                    BinOp::Shl | BinOp::Shr => {
+                        cg.used_shift = true;
+                        let f = match (op, signed) {
+                            (BinOp::Shl, true) => "_wlel_shl",
+                            (BinOp::Shl, false) => "_wlel_shlu",
+                            (BinOp::Shr, true) => "_wlel_sar",
+                            _ => "_wlel_shr",
+                        };
+                        return format!(
+                            "(({op_cty}){f}({lc}, (unsigned long long)({rc}), {bits}))"
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            format!("({} {} {})", lc, binop_str(*op), rc)
         }
         ExprKind::Call(f, _ty_args, args) => {
             if f == "std::len" {

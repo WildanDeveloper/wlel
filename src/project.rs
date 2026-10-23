@@ -194,11 +194,18 @@ pub fn parse_manifest(src: &str) -> Result<Manifest, String> {
         }
     }
     let name = name.ok_or("[package] name is required")?;
-    Ok(Manifest {
-        name,
-        version: version.unwrap_or_else(|| "0.1.0".into()),
-        deps,
-    })
+    // the name becomes the default binary name and a path component, so it
+    // follows the same rules as a dependency name (`../x` used to be accepted
+    // and produced a binary outside the project directory)
+    if !valid_dep_name(&name) || name == "." || name == ".." {
+        return Err(format!(
+            "invalid package name '{name}' (use letters, digits, '-', '_', '.')"
+        ));
+    }
+    let version = version.unwrap_or_else(|| "0.1.0".into());
+    crate::registry::Version::parse(&version)
+        .map_err(|e| format!("invalid package version '{version}': {e}"))?;
+    Ok(Manifest { name, version, deps })
 }
 
 /// drop a trailing `#` comment (outside string literals)
@@ -255,7 +262,37 @@ fn parse_inline_table(v: &str, line_no: usize) -> Result<Vec<(String, String)>, 
         ));
     }
     let inner = &v[1..v.len() - 1];
-    let mut pairs = Vec::new();
+    // `{ path = "a" } junk = { path = "b" }` starts and ends with braces, so
+    // the cheap first/last check above passes; walk the value to prove the
+    // *first* table closes exactly at the end
+    let mut depth = 0usize;
+    let mut in_str = false;
+    let mut escaped = false;
+    for (i, c) in v.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' if in_str => escaped = true,
+            '"' => in_str = !in_str,
+            '{' if !in_str => depth += 1,
+            '}' if !in_str => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && i + c.len_utf8() != v.len() {
+                    return Err(format!(
+                        "line {line_no}: trailing text after the inline table: '{}'",
+                        v[i + c.len_utf8()..].trim()
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    if in_str || depth != 0 {
+        return Err(format!("line {line_no}: unterminated inline table '{v}'"));
+    }
+    let mut pairs: Vec<(String, String)> = Vec::new();
     for part in split_top(inner, ',') {
         let part = part.trim();
         if part.is_empty() {
@@ -264,7 +301,13 @@ fn parse_inline_table(v: &str, line_no: usize) -> Result<Vec<(String, String)>, 
         let (k, val) = part
             .split_once('=')
             .ok_or_else(|| format!("line {line_no}: expected 'key = value' inside '{{ }}'"))?;
-        pairs.push((k.trim().to_string(), parse_basic_string(val.trim(), line_no)?));
+        let key = k.trim().to_string();
+        if pairs.iter().any(|(prev, _)| *prev == key) {
+            return Err(format!(
+                "line {line_no}: duplicate key '{key}' inside an inline table"
+            ));
+        }
+        pairs.push((key, parse_basic_string(val.trim(), line_no)?));
     }
     Ok(pairs)
 }
@@ -531,7 +574,9 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
         .map_err(|e| format!("cannot read {}: {e}", canonical.display()))?;
     let toks = Lexer::new(&src)
         .tokenize()
-        .map_err(|e| format!("{}:{}:{}: {e}", canonical.display(), e.line, e.col))?;
+        // LexError's Display already carries `line:col`; prefixing it again
+        // produced `file:1:5: 1:5: message`
+        .map_err(|e| format!("{}:{e}", canonical.display()))?;
     let (mut program, parse_errors) = Parser::new(&toks).program();
     if !parse_errors.is_empty() {
         // report every syntax error found, not just the first
@@ -789,7 +834,17 @@ pub fn fetch_git_dep(
     locked: Option<&LockEntry>,
     warnings: &mut Vec<String>,
 ) -> Result<GitResolve, String> {
+    // a manifest is untrusted input: a "URL" starting with `-` would be
+    // parsed by git as an option (`--upload-pack=...`), not a repository
+    if url.starts_with('-') || url.is_empty() {
+        return Err(format!(
+            "wlel: git dependency URL must not start with '-': '{url}'"
+        ));
+    }
     let checkout = |dir: &Path, rev: &str| -> Result<(), String> {
+        if rev.starts_with('-') || rev.is_empty() {
+            return Err(format!("wlel: refusing to check out '{rev}'"));
+        }
         run_git(
             {
                 let mut c = Command::new("git");
@@ -826,7 +881,7 @@ pub fn fetch_git_dep(
         run_git(
             {
                 let mut c = Command::new("git");
-                c.arg("clone").arg(url).arg(dir);
+                c.arg("clone").arg("--").arg(url).arg(dir);
                 c
             },
             &format!("clone {url}"),

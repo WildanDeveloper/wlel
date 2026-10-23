@@ -466,6 +466,49 @@ fn fnv64(data: &[u8]) -> u64 {
     h
 }
 
+/// Per-user cache directory. A world-writable `/tmp/wlel_cache` let any
+/// local user pre-plant a binary at a content-hash path (the hash is
+/// public: it is derived from the C source), which `wlel run` would then
+/// execute. The cache now lives under the user's cache dir, created
+/// 0700 on Unix; `WLEL_CACHE_DIR` overrides it for sandboxes/CI.
+fn cache_dir() -> PathBuf {
+    let base = if let Some(d) = env::var_os("WLEL_CACHE_DIR") {
+        PathBuf::from(d)
+    } else if let Some(d) = env::var_os("XDG_CACHE_HOME") {
+        PathBuf::from(d).join("wlel")
+    } else if cfg!(windows) {
+        env::var_os("LOCALAPPDATA")
+            .map(|d| PathBuf::from(d).join("wlel"))
+            .unwrap_or_else(|| env::temp_dir().join("wlel-cache"))
+    } else {
+        env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join(".cache").join("wlel"))
+            .unwrap_or_else(|| env::temp_dir().join("wlel-cache"))
+    };
+    let _ = fs::create_dir_all(&base);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // best effort: the directory must not be group/world writable
+        let _ = fs::set_permissions(&base, fs::Permissions::from_mode(0o700));
+    }
+    base
+}
+
+/// A scratch file name unique to this process, inside the private cache
+/// directory. `pid` alone is guessable; the counter plus the nanosecond
+/// clock makes pre-planting a symlink impractical.
+fn scratch_path(ext: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    cache_dir().join(format!("scratch-{}-{nanos:x}-{n}.{ext}", std::process::id()))
+}
+
 fn parse_backend(v: &str) -> Backend {
     match v {
         "c" => Backend::C,
@@ -514,7 +557,7 @@ fn emit_binary_qbe(il: &str, out: &Path, link: &[String]) -> PathBuf {
         eprintln!("wlel: qbe not found in PATH (apt install qbe / see https://c9x.me/compile/)");
         exit(1);
     }
-    let cache_dir = env::temp_dir().join("wlel_cache");
+    let cache_dir = cache_dir();
     let key = fnv64(format!("qbe|{}\n{il}", link.join("\u{1}")).as_bytes());
     let cache_bin = with_exe(&cache_dir.join(format!("{key:016x}")));
     let out = with_exe(out);
@@ -531,12 +574,17 @@ fn emit_binary_qbe(il: &str, out: &Path, link: &[String]) -> PathBuf {
         return out;
     }
     let _ = fs::create_dir_all(&cache_dir);
-    let pid = std::process::id();
-    let ssa_path = env::temp_dir().join(format!("wlel_{pid}.ssa"));
-    let s_path = env::temp_dir().join(format!("wlel_{pid}.s"));
-    let rt_path = env::temp_dir().join(format!("wlel_qbe_rt_{pid}.c"));
-    fs::write(&ssa_path, il).expect("write temp ssa");
-    fs::write(&rt_path, wlel::qbe::RUNTIME_C).expect("write qbe runtime");
+    let ssa_path = scratch_path("ssa");
+    let s_path = scratch_path("s");
+    let rt_path = scratch_path("rt.c");
+    if let Err(e) = fs::write(&ssa_path, il) {
+        eprintln!("wlel: cannot write {}: {e}", ssa_path.display());
+        exit(1);
+    }
+    if let Err(e) = fs::write(&rt_path, wlel::qbe::RUNTIME_C) {
+        eprintln!("wlel: cannot write {}: {e}", rt_path.display());
+        exit(1);
+    }
     let out_s = Command::new("qbe")
         .arg(&ssa_path)
         .arg("-o")
@@ -596,7 +644,7 @@ fn emit_binary(
         // AddressSanitizer build (`wlel build -sanitize`)
         flags.push_str(" -fsanitize=address -fno-omit-frame-pointer");
     }
-    let cache_dir = env::temp_dir().join("wlel_cache");
+    let cache_dir = cache_dir();
     let key = fnv64(
         format!("{cc}|O{opt}|{flags}|{}\n{c_src}", link.join("\u{1}")).as_bytes(),
     );
@@ -627,8 +675,11 @@ fn emit_binary(
         }
         return out;
     }
-    let c_path = env::temp_dir().join(format!("wlel_{}.c", std::process::id()));
-    fs::write(&c_path, c_src).expect("write temp c");
+    let c_path = scratch_path("c");
+    if let Err(e) = fs::write(&c_path, c_src) {
+        eprintln!("wlel: cannot write {}: {e}", c_path.display());
+        exit(1);
+    }
     let _ = fs::create_dir_all(&cache_dir);
     let status = Command::new(cc)
         .arg(format!("-O{opt}"))
@@ -643,11 +694,14 @@ fn emit_binary(
         .args(link)
         .status()
         .expect("spawn cc");
-    let _ = fs::remove_file(&c_path);
     if !status.success() {
+        // keep the generated C around: the cc diagnostics name this path,
+        // and deleting it first left the user chasing a ghost file
         eprintln!("wlel: C backend failed");
+        eprintln!("wlel: generated C kept at {}", c_path.display());
         exit(1);
     }
+    let _ = fs::remove_file(&c_path);
     let _ = fs::create_dir_all(&cache_dir);
     if out != cache_bin {
         if let Err(e) = fs::copy(&cache_bin, &out) {
@@ -973,8 +1027,32 @@ fn exit_code_of(status: std::process::ExitStatus) -> i32 {
     status.code().unwrap_or(1)
 }
 
+/// Stack reserved for the compiler pipeline. The parser, checker and codegen
+/// are recursive walks over the expression tree, bounded by
+/// `checker::MAX_EXPR_DEPTH` (256) and `parser::MAX_NESTING` (256). Those
+/// limits were chosen for a 2 MiB thread stack; running on a bigger one means
+/// a deeply nested (but legal) program cannot overflow even when the user's
+/// shell sets `ulimit -s` low.
+const WORKER_STACK: usize = 16 * 1024 * 1024;
+
 fn main() {
     let args = parse_args();
+    // the LSP is long-lived and the CLI is short-lived: both run on a thread
+    // with a predictable stack instead of whatever the shell provided
+    let worker = std::thread::Builder::new()
+        .name("wlel".into())
+        .stack_size(WORKER_STACK)
+        .spawn(move || run(args))
+        .expect("spawn compiler thread");
+    match worker.join() {
+        Ok(()) => {}
+        // a panic inside the pipeline is already reported on stderr; exit
+        // with a failure code instead of the abort signal a panic would give
+        Err(_) => exit(101),
+    }
+}
+
+fn run(args: Args) {
     match &args.mode {
         Mode::New { dir } => match project::scaffold(Path::new(dir)) {
             Ok(p) => {

@@ -549,6 +549,18 @@ impl<'a> Parser<'a> {
     fn ident(&mut self) -> PResult<String> {
         match self.peek().clone() {
             Token::Ident(s) => {
+                // `__` is the monomorphization separator: `Vec[int]` is
+                // emitted as `Vec__int`, so a source name containing it could
+                // collide with (and silently shadow) a generated instance
+                if s.contains("__") {
+                    let sp = self.peek_span();
+                    return err_at(
+                        sp,
+                        format!(
+                            "identifier '{s}' contains '__', which is reserved for generic instantiation"
+                        ),
+                    );
+                }
                 self.advance();
                 Ok(s)
             }

@@ -58,6 +58,19 @@ type Build = std::hash::BuildHasherDefault<FxHasher>;
 type FMap<K, V> = std::collections::HashMap<K, V, Build>;
 type FSet<T> = std::collections::HashSet<T, Build>;
 
+/// Bound on expression-tree depth. The parser's MAX_NESTING guard covers
+/// *nested* forms, but a left-associative chain (`1 + 1 + 1 + ...`) builds a
+/// left-deep tree iteratively, so the checker's recursive walk has to stop
+/// somewhere: past this the compiler would overflow its own stack.
+const MAX_EXPR_DEPTH: u32 = 256;
+
+/// Bound on monomorphized instances. A generic that calls itself with a
+/// larger type on every step (`f(Box { v: x })`) would otherwise enqueue new
+/// bodies forever and exhaust memory; the name-length cap catches the shape
+/// early, the count cap catches breadth.
+const MAX_INSTANTIATIONS: usize = 4096;
+const MAX_MANGLED_LEN: usize = 160;
+
 /// Integer width. `int` in source is an alias for `I64`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntW {
@@ -393,6 +406,10 @@ pub struct Checker {
     pending_structs: Vec<StructDef>,
     /// monomorphized enum definitions to append to the program
     pending_enums: Vec<EnumDef>,
+    /// current expression-tree depth (guarded by MAX_EXPR_DEPTH)
+    expr_depth: u32,
+    /// monomorphized function/struct/enum instances created so far
+    instantiations: usize,
     /// expected-type hint for direct enum construction in an annotated
     /// `let`/`return`: (template enum name, concrete argument types) —
     /// lets `Ok(5)` fill in the `E` of `Result[int, E]` from the annotation
@@ -439,6 +456,8 @@ impl Checker {
             pending_funcs: Vec::new(),
             pending_structs: Vec::new(),
             pending_enums: Vec::new(),
+            expr_depth: 0,
+            instantiations: 0,
             expected: None,
         };
 
@@ -630,11 +649,11 @@ impl Checker {
         cx.structs.insert("Thread".into(), Vec::new());
         cx.structs.insert("Mutex".into(), Vec::new());
         for st in &program.structs {
-            if c_reserved(&st.name) {
+            if type_name_reserved(&st.name) {
                 return err_at(
                     st.span,
                     format!(
-                        "struct name '{}' collides with a C keyword or type name",
+                        "struct name '{}' is reserved (builtin type, C keyword, runtime symbol, or 'main')",
                         st.name
                     ),
                 );
@@ -695,11 +714,11 @@ impl Checker {
         // any field/payload resolution so structs and enums can reference
         // each other's names freely
         for e in &program.enums {
-            if c_reserved(&e.name) {
+            if type_name_reserved(&e.name) {
                 return err_at(
                     e.span,
                     format!(
-                        "enum name '{}' collides with a C keyword or type name",
+                        "enum name '{}' is reserved (builtin type, C keyword, runtime symbol, or 'main')",
                         e.name
                     ),
                 );
@@ -768,6 +787,14 @@ impl Checker {
             }
             cx.structs.insert(st.name.clone(), fields);
         }
+
+        // pass 0a: a struct cannot contain itself by value (directly or
+        // through a cycle) — C would reject the emitted definition with
+        // "field has incomplete type" pointing into a temp .c file the user
+        // never sees. Report it here, with the Wlel span and the fix.
+        let struct_spans: FMap<String, Span> =
+            program.structs.iter().map(|s| (s.name.clone(), s.span)).collect();
+        cx.check_struct_cycles(&struct_spans)?;
 
         // pass 0b: resolve enum variant payload types
         for e in &program.enums {
@@ -978,6 +1005,17 @@ impl Checker {
         program.structs.append(&mut cx.pending_structs);
         program.enums.append(&mut cx.pending_enums);
 
+        // a monomorphized struct can close a cycle that the source-level
+        // pass could not see: `struct S[T] { me: S[int] }` looks acyclic
+        // until `S[int]` exists. Re-check with the concrete definitions.
+        let struct_spans: FMap<String, Span> = program
+            .structs
+            .iter()
+            .map(|s| (s.name.clone(), s.span))
+            .chain(cx.pending_structs.iter().map(|s| (s.name.clone(), s.span)))
+            .collect();
+        cx.check_struct_cycles(&struct_spans)?;
+
         // unused imports: a file import is used when any function or struct
         // defined in it is referenced; `use std` when any std:: call exists
         let used_files: FSet<String> = called_files(
@@ -1128,11 +1166,11 @@ impl Checker {
 
     /// register a `struct Name[T, ...]` template
     fn register_generic_struct(&mut self, s: StructDef) -> CResult<()> {
-        if c_reserved(&s.name) {
+        if type_name_reserved(&s.name) {
             return err_at(
                 s.span,
                 format!(
-                    "struct name '{}' collides with a C keyword or type name",
+                    "struct name '{}' is reserved (builtin type, C keyword, runtime symbol, or 'main')",
                     s.name
                 ),
             );
@@ -1177,11 +1215,11 @@ impl Checker {
     /// register an `enum Name[T, ...]` template; its variant names enter the
     /// global variant namespace immediately (construction resolves by name)
     fn register_generic_enum(&mut self, e: EnumDef) -> CResult<()> {
-        if c_reserved(&e.name) {
+        if type_name_reserved(&e.name) {
             return err_at(
                 e.span,
                 format!(
-                    "enum name '{}' collides with a C keyword or type name",
+                    "enum name '{}' is reserved (builtin type, C keyword, runtime symbol, or 'main')",
                     e.name
                 ),
             );
@@ -1367,6 +1405,7 @@ impl Checker {
         if self.structs.contains_key(&mangled) {
             return Ok(mangled);
         }
+        self.note_instantiation(&mangled, name, sp)?;
         // resolve the concrete argument types first (they may reference
         // other generics), then register a placeholder so recursive field
         // types like `next: *Node[T]` terminate
@@ -1727,6 +1766,7 @@ impl Checker {
         if self.sigs.contains_key(&mangled) {
             return Ok(mangled); // already instantiated or queued
         }
+        self.note_instantiation(&mangled, name, sp)?;
         // register the concrete signature first so recursive calls inside
         // the body resolve to this instantiation instead of recursing here
         let mut params = Vec::with_capacity(gen.params.len());
@@ -1756,6 +1796,24 @@ impl Checker {
         self.canon_block(&mut body_fn.body, &map, sp)?;
         self.pending_funcs.push(body_fn);
         Ok(mangled)
+    }
+
+    /// Count one new monomorphized instance and refuse runaway expansion.
+    /// A generic whose body instantiates itself with a bigger type (or a
+    /// struct whose field mentions `Box[Box[T]]`) is legal syntax but has no
+    /// finite instantiation set, so the compiler must stop with a diagnostic
+    /// instead of allocating until the machine dies.
+    fn note_instantiation(&mut self, mangled: &str, base: &str, sp: Span) -> CResult<()> {
+        self.instantiations += 1;
+        if mangled.len() > MAX_MANGLED_LEN || self.instantiations > MAX_INSTANTIATIONS {
+            return err_at(
+                sp,
+                format!(
+                    "'{base}' needs an unbounded number of generic instances — a generic cannot instantiate itself with a bigger type"
+                ),
+            );
+        }
+        Ok(())
     }
 
     /// unify a (possibly generic) type pattern against a concrete argument
@@ -2156,7 +2214,17 @@ impl Checker {
     /// codegen can emit mode-specific code (safe-mode bounds/div checks)
     /// without a second type pass.
     fn expr_ty(&mut self, e: &mut Expr) -> CResult<Type> {
-        let t = self.expr_ty_inner(e)?;
+        self.expr_depth += 1;
+        if self.expr_depth > MAX_EXPR_DEPTH {
+            self.expr_depth -= 1;
+            return err_at(
+                e.span,
+                format!("expression nested too deeply (limit {MAX_EXPR_DEPTH})"),
+            );
+        }
+        let t = self.expr_ty_inner(e);
+        self.expr_depth -= 1;
+        let t = t?;
         e.ty = Some(t.name());
         Ok(t)
     }
@@ -4921,6 +4989,108 @@ impl Checker {
     }
 
 
+    /// Reject a struct or enum that stores itself by value, directly
+    /// (`struct N { next: N }`, `enum E { A(E) }`) or through a cycle
+    /// (`struct A { b: B } struct B { a: A }`). A pointer (`*N`) or an
+    /// array of pointers breaks the cycle and stays legal.
+    fn check_struct_cycles(&self, spans: &FMap<String, Span>) -> CResult<()> {
+        // 0 = unvisited, 1 = on the current path, 2 = known acyclic
+        let mut state: FMap<String, u8> = FMap::default();
+        let mut path: Vec<String> = Vec::new();
+        let mut names: Vec<String> = self
+            .structs
+            .keys()
+            .chain(self.enums.keys())
+            .cloned()
+            .collect();
+        // deterministic diagnostics
+        names.sort();
+        for name in names {
+            self.walk_struct_cycle(&name, &mut state, &mut path, spans)?;
+        }
+        Ok(())
+    }
+
+    fn walk_struct_cycle(
+        &self,
+        name: &str,
+        state: &mut FMap<String, u8>,
+        path: &mut Vec<String>,
+        spans: &FMap<String, Span>,
+    ) -> CResult<()> {
+        match state.get(name) {
+            Some(2) => return Ok(()),
+            Some(1) => {
+                // found a cycle: report the whole loop so the fix is obvious
+                let start = path.iter().position(|p| p == name).unwrap_or(0);
+                let mut cycle: Vec<&str> = path[start..].iter().map(String::as_str).collect();
+                cycle.push(name);
+                let shown = self.source_type_name(name);
+                // render the whole loop through the same source names
+                let shown_cycle: Vec<String> =
+                    cycle.iter().map(|n| self.source_type_name(n)).collect();
+                return err_at(
+                    spans.get(name).copied().unwrap_or(Span::point(1, 1)),
+                    format!(
+                        "'{shown}' contains itself by value ({}) — store a pointer instead",
+                        shown_cycle.join(" -> ")
+                    ),
+                );
+            }
+            _ => {}
+        }
+        state.insert(name.to_string(), 1);
+        path.push(name.to_string());
+        // a struct embeds its fields, an enum embeds every variant payload;
+        // both are by-value storage, so a cycle through either is an
+        // infinitely sized type
+        if let Some(fields) = self.structs.get(name) {
+            for (_, t) in fields {
+                for inner in self.by_value_types(t) {
+                    self.walk_struct_cycle(&inner, state, path, spans)?;
+                }
+            }
+        }
+        if let Some(variants) = self.enums.get(name) {
+            for (_, payloads) in variants {
+                for t in payloads {
+                    for inner in self.by_value_types(t) {
+                        self.walk_struct_cycle(&inner, state, path, spans)?;
+                    }
+                }
+            }
+        }
+        path.pop();
+        state.insert(name.to_string(), 2);
+        Ok(())
+    }
+
+    /// the name a user wrote for a (possibly monomorphized) type: the
+    /// mangled C name `S__int` is an implementation detail, `S[int]` is not
+    fn source_type_name(&self, mangled: &str) -> String {
+        match self.struct_origin.get(mangled) {
+            Some(origin) => match self.struct_args.get(mangled) {
+                Some(args) if !args.is_empty() => format!(
+                    "{}[{}]",
+                    origin,
+                    args.iter().map(Type::name).collect::<Vec<_>>().join(", ")
+                ),
+                _ => origin.clone(),
+            },
+            None => mangled.to_string(),
+        }
+    }
+
+    /// names a field/payload type stores *inline* (by value): a bare struct
+    /// or enum, or an array of them; pointers are indirection, not storage
+    fn by_value_types(&self, t: &Type) -> Vec<String> {
+        match t {
+            Type::Struct(n) | Type::Enum(n) => vec![n.clone()],
+            Type::Array(el, _) => self.by_value_types(el),
+            _ => Vec::new(),
+        }
+    }
+
     /// Build an enum value from a call to a variant name. Concrete enums
     /// construct directly; generic enums infer type arguments from the
     /// payload expressions (like generic struct literals), falling back to
@@ -5801,6 +5971,15 @@ impl Checker {
 /// Names that cannot appear as C identifiers in generated code: C keywords
 /// and built-in type names (a local `int := 5` emits `long long int = 5;`),
 /// plus the runtime/std symbol prefixes the prelude defines.
+/// A type name becomes a C identifier: `main` is not a keyword but is the
+/// entry symbol every program must define, so a struct/enum named `main`
+/// collides with the generated `int main(...)`.
+fn type_name_reserved(name: &str) -> bool {
+    // a builtin type name (`string`, `u8`, `float`, …) always resolves to the
+    // builtin, so a user type with that spelling could never be named again
+    c_reserved(name) || name == "main" || Type::from_builtin(name).is_some()
+}
+
 fn c_reserved(name: &str) -> bool {
     matches!(
         name,

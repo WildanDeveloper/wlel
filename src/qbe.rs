@@ -704,33 +704,77 @@ impl Qb {
                 let lv = self.convert(&lv, &lt, &common, l.span);
                 let rv = self.convert(&rv, &rt, &common, r.span);
                 match op {
-                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                        let name = match (op, *signed) {
-                            (BinOp::Add, _) => "add",
-                            (BinOp::Sub, _) => "sub",
-                            (BinOp::Mul, _) => "mul",
-                            (BinOp::Div, true) | (BinOp::Mod, true) => {
-                                if op == BinOp::Div { "div" } else { "rem" }
-                            }
-                            _ => {
-                                if op == BinOp::Div { "udiv" } else { "urem" }
-                            }
+                    BinOp::Add | BinOp::Sub | BinOp::Mul => {
+                        let name = match op {
+                            BinOp::Add => "add",
+                            BinOp::Sub => "sub",
+                            _ => "mul",
                         };
                         let x = self.tmp();
                         self.emit(format!("{x} ={b} {name} {lv}, {rv}"));
                         (self.narrow_fixup(&x, &out_ty), out_ty)
                     }
-                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                    BinOp::Div | BinOp::Mod => {
+                        if *signed {
+                            // §11: MIN / -1 wraps to MIN and MIN % -1 is 0,
+                            // but the hardware instruction traps. Rewrite the
+                            // divisor -1 to 1 branch-free (QBE has no phi and
+                            // one temporary may only be defined once):
+                            //   d' = d + (is_m1 & (1 - d))
+                            // lv / 1 == lv == the wrapped quotient, and
+                            // lv % 1 == 0 == the wrapped remainder, so no
+                            // second fixup is needed.
+                            let is_m1 = self.tmp();
+                            self.emit(format!("{is_m1} =w ceq{b} {rv}, -1"));
+                            // widen the 0/1 word result to the operand width
+                            let flag = self.tmp();
+                            if b == "l" {
+                                self.emit(format!("{flag} =l extuw {is_m1}"));
+                            } else {
+                                self.emit(format!("{flag} =w copy {is_m1}"));
+                            }
+                            let mask = self.tmp();
+                            self.emit(format!("{mask} ={b} sub 0, {flag}"));
+                            let one_minus = self.tmp();
+                            self.emit(format!("{one_minus} ={b} sub 1, {rv}"));
+                            let adj = self.tmp();
+                            self.emit(format!("{adj} ={b} and {mask}, {one_minus}"));
+                            let d2 = self.tmp();
+                            self.emit(format!("{d2} ={b} add {rv}, {adj}"));
+                            let name = if op == BinOp::Div { "div" } else { "rem" };
+                            let x = self.tmp();
+                            self.emit(format!("{x} ={b} {name} {lv}, {d2}"));
+                            (self.narrow_fixup(&x, &out_ty), out_ty)
+                        } else {
+                            let name = if op == BinOp::Div { "udiv" } else { "urem" };
+                            let x = self.tmp();
+                            self.emit(format!("{x} ={b} {name} {lv}, {rv}"));
+                            (self.narrow_fixup(&x, &out_ty), out_ty)
+                        }
+                    }
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                        let name = match op {
+                            BinOp::BitAnd => "and",
+                            BinOp::BitOr => "or",
+                            _ => "xor",
+                        };
+                        let x = self.tmp();
+                        self.emit(format!("{x} ={b} {name} {lv}, {rv}"));
+                        (self.narrow_fixup(&x, &out_ty), out_ty)
+                    }
+                    BinOp::Shl | BinOp::Shr => {
+                        // count masked to the operand width: C/QBE leave an
+                        // out-of-range count undefined
+                        let mask = self.tmp();
+                        let m = bits - 1;
+                        self.emit(format!("{mask} ={b} and {rv}, {m}"));
                         let name = match (op, *signed) {
-                            (BinOp::BitAnd, _) => "and",
-                            (BinOp::BitOr, _) => "or",
-                            (BinOp::BitXor, _) => "xor",
                             (BinOp::Shl, _) => "shl",
                             (BinOp::Shr, true) => "sar",
                             _ => "shr",
                         };
                         let x = self.tmp();
-                        self.emit(format!("{x} ={b} {name} {lv}, {rv}"));
+                        self.emit(format!("{x} ={b} {name} {lv}, {mask}"));
                         (self.narrow_fixup(&x, &out_ty), out_ty)
                     }
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {

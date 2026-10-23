@@ -1039,9 +1039,9 @@ fn variant_sig(v: &VariantDef) -> String {
 
 fn hover_md(code: &str, note: &str) -> String {
     if note.is_empty() {
-        format!("```wl\n{code}\n```")
+        format!("```wlel\n{code}\n```")
     } else {
-        format!("```wl\n{code}\n```\n{note}")
+        format!("```wlel\n{code}\n```\n{note}")
     }
 }
 

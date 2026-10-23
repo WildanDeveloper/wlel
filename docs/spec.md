@@ -84,6 +84,14 @@ parameter or function with this prefix is a compile-time error. Identifiers
 beginning with a single `_` (but not `_wlel_`) are ordinary names that opt
 out of unused warnings (§9.6).
 
+A *declaration name* MUST NOT contain `__` (two consecutive underscores):
+that sequence is the monomorphization separator (`Vec[int]` is emitted as
+`Vec__int`), so allowing it in source would let a user type or function
+shadow a generated instance. A struct or enum name MUST also not be a
+builtin type name (`string`, `u8`, `float`, …), a C keyword/runtime symbol,
+or `main` — the first would be unreachable behind the builtin, the last
+would collide with the C entry point.
+
 Because Wlel compiles to C, names that are C keywords or built-in type names
 (`int`, `long`, `double`, `char`, `void`, `size_t`, ...) and names defined by
 the generated prelude (`printf`, `malloc`, `strlen`, `wlel_alloc`, `std__*`,
@@ -271,7 +279,8 @@ For a binary arithmetic or comparison operator with integer operands:
 - **Both typed, different widths → compile-time error**
   ("mixed int widths: A and B — cast explicitly").
 - **Exception — shifts**: the shift amount converts freely to any integer
-  width; the result takes the **left** operand's width.
+  width and is reduced modulo the left operand's width (§11.6); the result
+  takes the **left** operand's width.
 
 For float operands: int op float widens implicitly. When both operands are
 float typed, the **wider width wins** (`f32 + f64` is `f64`; `f32 + f32` is
@@ -790,9 +799,19 @@ thread; the checker imposes no discipline beyond types.
    promotion width.
 4. **Integer division by zero**: in release mode it inherits C semantics
    (undefined); in safe mode it aborts with a `file:line` message (§12.1).
-5. **Float** arithmetic is IEEE-754: division by zero yields `inf`/`NaN` in
+5. **Division overflow is defined, not a trap.** The one overflow pair
+   `MIN / -1` (for `i32`/`int`) yields `MIN` — two's complement, like every
+   other signed operation — and `MIN % -1` yields `0`. C leaves this
+   undefined and an x86 `idiv` raises `SIGFPE`, so the backend guards it in
+   **both** build modes.
+6. **Shift counts are masked to the operand width.** `x << n` and `x >> n`
+   shift by `n mod width` (8/16/32/64 according to the left operand's type),
+   so `x << 64` is `x`, a negative count wraps like any other two's
+   complement value, and no shift is undefined. `>>` on a signed value is an
+   arithmetic (sign-preserving) shift.
+7. **Float** arithmetic is IEEE-754: division by zero yields `inf`/`NaN` in
    **both** modes; float `%` does not exist (§4.3).
-6. `std::checked_add(a, b, &out) -> bool` (and `sub`, `mul`) computes
+8. `std::checked_add(a, b, &out) -> bool` (and `sub`, `mul`) computes
    overflow-checked integer math; on overflow it returns `false` **and
    still stores the wrapped result** in `*out`.
 

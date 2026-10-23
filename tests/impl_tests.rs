@@ -338,13 +338,35 @@ fn auto_borrow_needs_an_lvalue() {
 
 #[test]
 fn method_name_colliding_with_function_rejected() {
-    let msg = check_err_msg(
+    // a method desugars to `Pt__f`; since `__` is reserved for that
+    // mangling, a source-level function can no longer claim the name at all
+    // (the collision is impossible by construction, not just diagnosed)
+    let toks = Lexer::new(
         "struct Pt { x: int }
          fn Pt__f(v: int) -> int { return v; }
          impl Pt { fn f(self) -> int { return self.x; } }
          fn main() -> int { return 0; }",
+    )
+    .tokenize()
+    .expect("lex");
+    let (_, errs) = Parser::new(&toks).program();
+    assert!(!errs.is_empty(), "must be rejected");
+    assert!(
+        errs[0].msg.contains("reserved for generic instantiation"),
+        "{}",
+        errs[0].msg
     );
-    assert!(msg.contains("duplicate function 'Pt__f'"), "{msg}");
+
+    // two methods with the same name in one impl are still a checker error
+    let msg = check_err_msg(
+        "struct Pt { x: int }
+         impl Pt {
+             fn f(self) -> int { return self.x; }
+             fn f(self) -> int { return 0; }
+         }
+         fn main() -> int { return 0; }",
+    );
+    assert!(msg.contains("duplicate"), "{msg}");
 }
 
 // ---------------------------------------------------------------------------

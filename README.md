@@ -75,7 +75,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Compound assignment `+= -= *= /= %=`, bitwise `& | ^ ~ << >>`
 - [x] Modules: recursive `use "path.wlel";` with diamond-import deduplication, `use std;`
 - [x] FFI: `extern fn sqrt(x: f64) -> f64;` binds straight to C symbols; structs are C structs (see [FFI](#ffi))
-- [x] Reserved identifier prefix `_wlel_` protected by the compiler
+- [x] Reserved names rejected by the compiler: the `_wlel_` prefix, `__` (the monomorphization separator), builtin type names, C keywords and `main`
 
 ### Numbers
 - [x] Width types: `u8 u16 u32 u64, i8 i16 i32 i64, usize, f32 f64` (`int` = i64, `float` = f64, `byte`/`char` = u8)
@@ -351,6 +351,9 @@ fully defined in debug and release alike:
 | Unsigned (`u8..u64`, `usize`) | wrap modulo 2^N (standard C) |
 | Signed (`i8..i64`) | two's-complement wrap — the backend compiles with `-fwrapv` |
 | Widths below 32 bits | the compiler inserts explicit wrap casts, so wrapping happens at the original width, not in C's `int` |
+| `MIN / -1` | wraps to `MIN`; `MIN % -1` is `0` (C calls this undefined and x86 traps) |
+| Shift count ≥ width or negative | masked to the width: `x << 64` is `x`, `x << -1` is `x << 63` |
+| Division by zero | release: C semantics; `wlel run`/`wlel test`: abort with `file:line` |
 
 When wrapping is *not* what you want, the stdlib detects overflow — no
 exceptions, no panics:

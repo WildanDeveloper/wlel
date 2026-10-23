@@ -275,7 +275,7 @@ fn render(name: &str, program: &Program, comments: Vec<Comment>) -> ModuleDoc {
         out.push_str("## Structs\n\n");
         for (s, doc) in &structs {
             out.push_str(&format!("### {}\n\n", type_heading(&s.name, &s.type_params)));
-            out.push_str(&format!("```wl\n{}\n```\n\n", struct_def_text(s)));
+            out.push_str(&format!("```wlel\n{}\n```\n\n", struct_def_text(s)));
             push_doc(&mut out, doc);
         }
     }
@@ -283,7 +283,7 @@ fn render(name: &str, program: &Program, comments: Vec<Comment>) -> ModuleDoc {
         out.push_str("## Enums\n\n");
         for (e, doc) in &enums {
             out.push_str(&format!("### {}\n\n", type_heading(&e.name, &e.type_params)));
-            out.push_str(&format!("```wl\n{}\n```\n\n", enum_def_text(e)));
+            out.push_str(&format!("```wlel\n{}\n```\n\n", enum_def_text(e)));
             push_doc(&mut out, doc);
         }
     }
@@ -291,7 +291,7 @@ fn render(name: &str, program: &Program, comments: Vec<Comment>) -> ModuleDoc {
         out.push_str("## Functions\n\n");
         for (f, doc) in &funcs {
             out.push_str(&format!("### {}\n\n", f.name));
-            out.push_str(&format!("```wl\n{}\n```\n\n", fn_sig(f)));
+            out.push_str(&format!("```wlel\n{}\n```\n\n", fn_sig(f)));
             push_doc(&mut out, doc);
         }
     }
@@ -308,7 +308,7 @@ fn render(name: &str, program: &Program, comments: Vec<Comment>) -> ModuleDoc {
             out.push_str(&format!("### {}\n\n", type_heading(ty, params)));
             for (m, doc) in ms {
                 out.push_str(&format!("#### {}\n\n", m.name));
-                out.push_str(&format!("```wl\n{}\n```\n\n", fn_sig(m)));
+                out.push_str(&format!("```wlel\n{}\n```\n\n", fn_sig(m)));
                 push_doc(&mut out, doc);
             }
         }

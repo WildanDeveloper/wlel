@@ -69,8 +69,13 @@ for any toolchain the one-shot build cannot express:
 
 ```bash
 wlel build app.wlel --emit-c -o app.c
-aarch64-linux-gnu-gcc -O2 -std=c99 -fwrapv app.c -o app-arm64 -lm -lpthread
+aarch64-linux-gnu-gcc -O2 -std=gnu99 -fwrapv app.c -o app-arm64 -lm -lpthread
 ```
+
+`-std=gnu99` (not strict `c99`): the runtime uses `clock_gettime` /
+`CLOCK_MONOTONIC` and `pthread_*` from `sys::mono_ms`, `sys::unix_ms` and the
+concurrency layer, which strict ISO C99 hides. If you must use `-std=c99`,
+add `-D_POSIX_C_SOURCE=200809L`.
 
 The generated C needs `-lm` when `std::math`, `std::random` or
 `parse_float` is used, and `-lpthread` when `sys::thread`/`sys::mutex`/

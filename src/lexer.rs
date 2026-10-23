@@ -324,14 +324,34 @@ impl<'a> Lexer<'a> {
                     }
                     let v = match i128::from_str_radix(cleaned, radix) {
                         Ok(v) => v,
-                        Err(_) => {
+                        Err(e) => {
+                            // a bad digit (`0b102`) is not an overflow; say so
+                            use std::num::IntErrorKind;
+                            let why = match e.kind() {
+                                IntErrorKind::InvalidDigit => {
+                                    format!("invalid digit for a base-{radix} literal")
+                                }
+                                _ => "out of range".to_string(),
+                            };
                             return self
-                                .err(format!("integer literal '0{}{digits}' out of range", radix_char(radix)))
+                                .err(format!("integer literal '0{}{digits}' {why}", radix_char(radix)));
                         }
                     };
                     return match suffix {
                         Some(suf) => self.suffixed_int(v, &suf),
-                        None => self.plain_int(v),
+                        // `plain_int` prints the decimal value; for a radix
+                        // literal the user wrote hex, so quote what they wrote
+                        None => match self.plain_int(v) {
+                            Err(e) if e.msg.contains("out of range") => Err(LexError {
+                                line: e.line,
+                                col: e.col,
+                                msg: format!(
+                                    "integer literal '0{}{digits}' out of range (i64)",
+                                    radix_char(radix)
+                                ),
+                            }),
+                            other => other,
+                        },
                     };
                 }
             }
@@ -405,7 +425,14 @@ impl<'a> Lexer<'a> {
         } else {
             let v = match cleaned.parse::<i128>() {
                 Ok(v) => v,
-                Err(_) => return self.err(format!("integer literal '{raw}' out of range")),
+                Err(e) => {
+                    use std::num::IntErrorKind;
+                    let why = match e.kind() {
+                        IntErrorKind::InvalidDigit => "has an invalid digit",
+                        _ => "out of range",
+                    };
+                    return self.err(format!("integer literal '{raw}' {why}"));
+                }
             };
             match suffix {
                 Some(suf) => self.suffixed_int(v, &suf),
