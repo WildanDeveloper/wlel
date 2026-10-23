@@ -34,7 +34,7 @@ jobs:
             -print_final_stats=1 /tmp/fuzz-corpus
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashes
           path: fuzz/artifacts
