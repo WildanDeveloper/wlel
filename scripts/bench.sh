@@ -17,7 +17,9 @@
 # a median of 5 samples still lands on a contended sample often enough to
 # swing fib(35) between 11 and 20 ms run to run, which tripped the trend
 # alert on a commit whose generated C was byte-identical to the previous one.
-# The fastest sample is the closest estimate of the true cost.
+# The fastest sample is the closest estimate of the true cost — 15 samples,
+# because a 2-3 ms front-end metric needs more draws before the fastest one
+# is actually uncontended.
 set -euo pipefail
 
 OUT="${1:?usage: bench.sh <out.json>}"
@@ -25,10 +27,10 @@ WLEL="./target/release/wlel"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# fastest of 7 wall-clock runs of "$@", in milliseconds (µs clock → awk)
+# fastest of 15 wall-clock runs of "$@", in milliseconds (µs clock → awk)
 min_ms() {
     local vals=() t0 t1
-    for _ in 1 2 3 4 5 6 7; do
+    for _ in $(seq 1 15); do
         t0=${EPOCHREALTIME/./}
         "$@" >/dev/null 2>&1
         t1=${EPOCHREALTIME/./}
@@ -37,12 +39,12 @@ min_ms() {
     printf '%s\n' "${vals[@]}" | sort -n | sed -n '1p' | awk '{printf "%.1f", $1/1000}'
 }
 
-# fastest of 7 samples of an internally-timed metric: read the number that
+# fastest of 15 samples of an internally-timed metric: read the number that
 # precedes " ms" on the line matching $1, from the output of $2
 min_internal_ms() {
     local pattern="$1"; shift
     local vals=() line v
-    for _ in 1 2 3 4 5 6 7; do
+    for _ in $(seq 1 15); do
         line=$("$@" | grep -- "$pattern" | head -1)
         v=$(sed -n 's/.* \([0-9][0-9]*\) ms.*/\1/p' <<<"$line")
         [ -n "$v" ] && vals+=( "$v" )

@@ -3,6 +3,14 @@ name: benchmark
 # Benchmark trend on every push to main (and on demand): results are
 # appended to the `gh-pages` branch via github-action-benchmark, which
 # alerts when a change regresses beyond the threshold.
+#
+# The gate is deliberately loose (250%): these are wall-clock numbers on a
+# shared runner and every sample can only be inflated by a noisy neighbour,
+# which is how a byte-identical codegen change once tripped a 150% alert
+# twice in a row (fib(35) 11 -> 18 ms, a 4 -> 8 ms front-end sample). Real
+# regressions this gate exists for are order-of-magnitude events — the
+# sorted-input quicksort regression was 184x, the JSON parser one ~100x —
+# so the threshold catches them without failing on scheduler noise.
 
 on:
   push:
@@ -32,5 +40,5 @@ jobs:
           output-file-path: benchmark-data.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
-          alert-threshold: "150%"
+          alert-threshold: "250%"
           fail-on-alert: true
