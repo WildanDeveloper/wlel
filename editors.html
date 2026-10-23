@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor support — Wlel</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="spec.html">Spec</a>
+    <a href="editors.html" class="current">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main>
+<div class="docs-layout"><nav class="docs-nav"><ol><li class="lvl-2"><a href="#what-gets-checked">What gets checked</a></li><li class="lvl-2"><a href="#regenerating-the-tree-sitter-parser">Regenerating the tree-sitter parser</a></li></ol></nav><article class="docs-body"><h1 id="wlel-editor-support">Wlel editor support</h1>
+<p>Three independent pieces, all Apache-2.0:</p>
+<table>
+<thead><tr><th>Directory</th><th>What it is</th></tr></thead>
+<tbody>
+<tr><td><a href="vscode.html"><code>vscode-wlel</code></a></td><td>VS Code extension: TextMate grammar + a zero-dependency client for <code>wlel lsp</code></td></tr>
+<tr><td><a href="tree-sitter.html"><code>tree-sitter-wlel</code></a></td><td>tree-sitter grammar <code>source.wlel</code>, with highlight/local queries and corpus tests</td></tr>
+<tr><td><a href="linguist.html"><code>linguist</code></a></td><td>GitHub Linguist registration kit (YAML fragments, sample staging, PR checklist)</td></tr>
+</tbody></table>
+<p>None of them needs a build step to be used: the VS Code extension is plain
+JavaScript, and the tree-sitter grammar ships its generated <code>src/</code>.</p>
+<h2 id="what-gets-checked">What gets checked</h2>
+<p><code>tests/editor_tests.rs</code> in the repository root validates all of it:</p>
+<ul><li>manifest, TextMate grammar and language-configuration JSON parse, every <code>include</code>/path resolves, and the extension has no scripts or dependencies;</li><li><code>node --check</code> passes on <code>src/extension.js</code> and <code>test/bridge.js</code>;</li><li>the extension is loaded against a stub <code>vscode</code> module and driven against the real <code>wlel lsp</code> binary — hover, go-to-definition, completion and diagnostics;</li><li><code>src/parser.c</code> compiles as C11, and regenerating the grammar reproduces the committed <code>src/</code> byte-for-byte;</li><li><code>tree-sitter test</code> passes and both query files compile;</li><li>every <code>.wlel</code> file in the repository parses with zero <code>ERROR</code>/<code>MISSING</code>.</li></ul>
+<p>Tests that need <code>node</code>, <code>cc</code> or <code>tree-sitter</code> print a skip line when the tool
+is missing, so <code>cargo test</code> stays green on a bare machine. CI runs them with
+the tools installed (the <code>editors</code> job in <code>.github/workflows/ci.yml</code>).</p>
+<h2 id="regenerating-the-tree-sitter-parser">Regenerating the tree-sitter parser</h2>
+<pre><code class="language-sh">cd editors/tree-sitter-wlel
+npm install -g tree-sitter-cli   # once
+tree-sitter generate
+tree-sitter test</code></pre>
+<p><code>grammar.js</code> is the source of truth; <code>src/</code> is committed so consumers only
+need a C compiler. The editor test fails if the two disagree.</p>
+<p>One wrinkle: <code>src/parser.c</code> embeds a language version derived from
+<code>tree-sitter.json</code>'s <code>metadata.version</code>, so <strong>a version bump requires
+<code>tree-sitter generate</code></strong>. The <code>tree_sitter_generated_sources_are_current</code> test
+is what catches it.</p></article></div>
+</main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

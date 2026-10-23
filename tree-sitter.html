@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tree-sitter — Wlel</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="spec.html">Spec</a>
+    <a href="editors.html">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main>
+<div class="docs-layout"><nav class="docs-nav"><ol><li class="lvl-2"><a href="#use-it">Use it</a></li><li class="lvl-3"><a href="#neovim-nvim-treesitter">Neovim (nvim-treesitter)</a></li><li class="lvl-3"><a href="#helix">Helix</a></li><li class="lvl-3"><a href="#emacs-tree-sitter">Emacs (tree-sitter)</a></li><li class="lvl-3"><a href="#node">Node</a></li><li class="lvl-2"><a href="#build-from-source">Build from source</a></li><li class="lvl-2"><a href="#layout">Layout</a></li><li class="lvl-2"><a href="#notes-on-the-grammar">Notes on the grammar</a></li><li class="lvl-2"><a href="#license">License</a></li></ol></nav><article class="docs-body"><h1 id="tree-sitter-wlel">tree-sitter-wlel</h1>
+<p>A <a href="https://tree-sitter.github.io/tree-sitter/">tree-sitter</a> grammar for
+<a href="https://github.com/WildanDeveloper/wlel">Wlel</a>, the arena-first systems
+language (<code>.wlel</code> files).</p>
+<p>The grammar mirrors the reference parser in
+<a href="https://github.com/WildanDeveloper/wlel/blob/main/docs/spec.md#16-grammar"><code>docs/spec.md</code> §16</a>
+and parses every file in <code>examples/</code> and <code>flagship/</code> with zero <code>ERROR</code> or
+<code>MISSING</code> nodes.</p>
+<h2 id="use-it">Use it</h2>
+<h3 id="neovim-nvim-treesitter">Neovim (nvim-treesitter)</h3>
+<pre><code class="language-lua">local parser_config = require(&#x27;nvim-treesitter.parsers&#x27;).get_parser_configs()
+parser_config.wlel = {
+  install_info = {
+    url = &#x27;https://github.com/WildanDeveloper/wlel&#x27;,
+    files = { &#x27;editors/tree-sitter-wlel/src/parser.c&#x27; },
+    location = &#x27;editors/tree-sitter-wlel&#x27;,
+  },
+  filetype = &#x27;wlel&#x27;,
+}</code></pre>
+<p>Then <code>:TSInstall wlel</code>, and copy <code>queries/highlights.scm</code> and
+<code>queries/locals.scm</code> into <code>queries/wlel/</code>.</p>
+<h3 id="helix">Helix</h3>
+<p>Add to <code>languages.toml</code>:</p>
+<pre><code class="language-toml">[[language]]
+name = &quot;wlel&quot;
+scope = &quot;source.wlel&quot;
+file-types = [&quot;wlel&quot;]
+comment-token = &quot;//&quot;
+indent = { tab-width = 4, unit = &quot;    &quot; }
+grammar = &quot;wlel&quot;
+
+[[grammar]]
+name = &quot;wlel&quot;
+source = { git = &quot;https://github.com/WildanDeveloper/wlel&quot;, subpath = &quot;editors/tree-sitter-wlel&quot; }</code></pre>
+<p>Then <code>hx --grammar fetch &amp;&amp; hx --grammar build</code>, and copy the two query
+files into <code>runtime/queries/wlel/</code>.</p>
+<h3 id="emacs-tree-sitter">Emacs (tree-sitter)</h3>
+<p><code>tree-sitter-langs</code>-style build:</p>
+<pre><code class="language-elisp">(add-to-list &#x27;treesit-language-source-alist
+             &#x27;(wlel &quot;https://github.com/WildanDeveloper/wlel&quot;
+                    &quot;main&quot; &quot;editors/tree-sitter-wlel/src&quot;))
+(treesit-install-language-grammar &#x27;wlel)</code></pre>
+<h3 id="node">Node</h3>
+<pre><code class="language-js">const Parser = require(&#x27;tree-sitter&#x27;);
+const Wlel = require(&#x27;tree-sitter-wlel&#x27;);
+
+const parser = new Parser();
+parser.setLanguage(Wlel);
+console.log(parser.parse(&#x27;fn main() -&gt; int { return 0; }&#x27;).rootNode.toString());</code></pre>
+<h2 id="build-from-source">Build from source</h2>
+<pre><code class="language-sh">cd editors/tree-sitter-wlel
+tree-sitter generate      # grammar.js -&gt; src/parser.c
+tree-sitter test          # corpus tests under test/corpus/
+tree-sitter parse ../../examples/kitchen.wlel</code></pre>
+<p><code>src/</code> is checked in, so consumers only need a C compiler.</p>
+<h2 id="layout">Layout</h2>
+<table>
+<thead><tr><th>Path</th><th>What</th></tr></thead>
+<tbody>
+<tr><td><code>grammar.js</code></td><td>The grammar (single source of truth)</td></tr>
+<tr><td><code>src/parser.c</code></td><td>Generated parser (committed)</td></tr>
+<tr><td><code>src/node-types.json</code></td><td>Generated node metadata (committed)</td></tr>
+<tr><td><code>queries/highlights.scm</code></td><td>Syntax highlighting captures</td></tr>
+<tr><td><code>queries/locals.scm</code></td><td>Scopes, definitions and references</td></tr>
+<tr><td><code>test/corpus/*.txt</code></td><td>Grammar tests run by <code>tree-sitter test</code></td></tr>
+</tbody></table>
+<h2 id="notes-on-the-grammar">Notes on the grammar</h2>
+<p>Two places need care, both documented at the top of <code>grammar.js</code>:</p>
+<ul><li><code>Name { field: value }</code> is a struct literal, so an expression at the end of a condition could swallow the <code>{</code> that opens the block. Conditions and operands use a rule that excludes struct literals; parenthesize a struct literal if it really is a condition.</li><li><code>a[i]</code> and <code>vec_new[int](...)</code> share the <code>name [</code> prefix. The bracket content is parsed once and only resolved into an index or type arguments after the closing <code>]</code>.</li></ul>
+<h2 id="license">License</h2>
+<p>Apache-2.0, same as the compiler. Generated C (<code>src/</code>) is part of the
+grammar and carries the same license.</p></article></div>
+</main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

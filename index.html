@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wlel — the arena-first systems language</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html" class="current">Home</a>
+    <a href="spec.html">Spec</a>
+    <a href="editors.html">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main><div class="landing">
+<div align="center">
+  <img src="assets/logo.png" alt="Wlel — The Arena-First Systems Programming Language" width="200">
+</div>
+<h1 id="wlel">Wlel</h1>
+<p><a href="https://github.com/WildanDeveloper/wlel/actions/workflows/ci.yml"><img src="https://github.com/WildanDeveloper/wlel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://github.com/WildanDeveloper/wlel/actions/workflows/fuzz.yml"><img src="https://github.com/WildanDeveloper/wlel/actions/workflows/fuzz.yml/badge.svg" alt="fuzz"></a></p>
+<p><strong>The Arena-First Systems Programming Language</strong></p>
+<p>Simple enough to learn in one afternoon. Fast as C. Zero leaks by construction.</p>
+<pre><code class="language-wlel">use std;
+
+struct Node { val: int, next: *Node }
+
+fn main() -&gt; int {
+    // 1 MiB bump arena: every allocation inside is an O(1) pointer bump
+    arena(1 &lt;&lt; 20) {
+        let head: *Node = 0 as *Node;
+        i := 0;
+        while i &lt; 100_000 {
+            n := new(Node);   // typed, arena-aware
+            n.val = i;
+            n.next = head;
+            head = n;
+            i += 1;
+        }
+        std::println_int(head.val);
+    } // &lt;- all 100k nodes freed together in O(1). Zero leak, zero GC pause.
+
+    return 0;
+}</code></pre>
+<p>Wlel transpiles to clean, human-readable C99 and compiles with <code>cc</code>/<code>gcc</code>/<code>clang</code>
+at <code>-O2</code>/<code>-O3</code>. There is no VM, no GC, and no runtime above C — benchmarks are at
+parity with hand-written C (<code>fib(35)</code>: 12 ms vs C's 11 ms). What you get on top
+is a modern type checker, first-class arenas as language syntax, deterministic
+<code>defer</code>, and tooling that ships in a single binary.</p>
+<hr>
+<h2 id="why-is-this-unique">Why is this unique?</h2>
+<p>Every language "has arenas". Wlel is the only one where <strong>the arena is the syntax</strong>:</p>
+<table>
+<thead><tr><th></th><th>How you get memory safety</th><th>The catch</th></tr></thead>
+<tbody>
+<tr><td><strong>C/C++</strong></td><td>Discipline + third-party arena libraries</td><td>Manual <code>free</code>, leaks, use-after-free</td></tr>
+<tr><td><strong>Rust / Zig</strong></td><td>Arena as a library pattern (<code>ArenaAllocator</code>)</td><td>You have to remember to use it</td></tr>
+<tr><td><strong>Go / Java</strong></td><td>Garbage collector</td><td>GC pauses, 2–3x memory overhead</td></tr>
+<tr><td><strong>Wlel</strong></td><td><code>arena(bytes) { ... }</code> + <code>new(T)</code> — <strong>in the language itself</strong></td><td>—</td></tr>
+</tbody></table>
+<p>Inside an <code>arena</code> block you never write <code>free</code>. Early <code>return</code>, <code>break</code>, and
+<code>defer</code> are safe by construction: return values are evaluated <em>before</em> the arena
+is freed (LIFO unwind — verified with AddressSanitizer). Strings you build with
+<code>+</code> live in a root arena that is released automatically at exit, so <strong>Wlel
+programs pass LeakSanitizer by default</strong> — something C and C++ cannot claim.</p>
+<h2 id="feature-status-10">Feature status (1.0)</h2>
+<h3 id="language">Language</h3>
+<ul><li><input type="checkbox" disabled checked> First-class arenas: <code>arena(size) { ... }</code>, <code>arena { ... }</code> (default 4 KiB), <code>wlel_arena()</code></li><li><input type="checkbox" disabled checked> Typed allocator: <code>new(T)</code>, <code>new(T, count)</code> — arena-aware, falls back to heap outside arenas</li><li><input type="checkbox" disabled checked> Root arena: temporaries and global allocations freed at exit via <code>atexit</code> — zero leaks end-to-end</li><li><input type="checkbox" disabled checked> Safe unwind: early return / <code>break</code> / <code>defer</code> inside arenas evaluate the return value first</li><li><input type="checkbox" disabled checked> <code>defer</code> — LIFO at scope exit, loop-aware, early-return-aware; multi-statement <code>defer { ... }</code> blocks with their own defer scope</li><li><input type="checkbox" disabled checked> Control flow: <code>if / else if / else</code>, <code>while</code>, <code>for i in a..b</code>, <code>break</code>, <code>continue</code></li><li><input type="checkbox" disabled checked> Structs (nominal, C layout), struct literals, field access with auto-deref; forward &amp; recursive definitions</li><li><input type="checkbox" disabled checked> Pointers (<code>*T</code>, <code>&amp;</code>, <code>*</code>), arrays <code>[T; N]</code> with C-style decay (implicit at call arguments, explicit <code>arr as *T</code> anywhere), <code>wlel_sizeof(T)</code></li><li><input type="checkbox" disabled checked> Casts: <code>expr as T</code> (numerics, pointers, int↔ptr)</li><li><input type="checkbox" disabled checked> Compound assignment <code>+= -= *= /= %=</code>, bitwise <code>&amp; | ^ ~ &lt;&lt; &gt;&gt;</code></li><li><input type="checkbox" disabled checked> Modules: recursive <code>use &quot;path.wlel&quot;;</code> with diamond-import deduplication, <code>use std;</code></li><li><input type="checkbox" disabled checked> FFI: <code>extern fn sqrt(x: f64) -&gt; f64;</code> binds straight to C symbols; structs are C structs (see <a href="#ffi">FFI</a>)</li><li><input type="checkbox" disabled checked> Reserved names rejected by the compiler: the <code>_wlel_</code> prefix, <code>__</code> (the monomorphization separator), builtin type names, C keywords and <code>main</code></li></ul>
+<h3 id="numbers">Numbers</h3>
+<ul><li><input type="checkbox" disabled checked> Width types: <code>u8 u16 u32 u64, i8 i16 i32 i64, usize, f32 f64</code> (<code>int</code> = i64, <code>float</code> = f64, <code>byte</code>/<code>char</code> = u8)</li><li><input type="checkbox" disabled checked> Literal suffixes: <code>10u8</code>, <code>2.5f32</code>, full u64 range (<code>18_446_744_073_709_551_615u64</code>)</li><li><input type="checkbox" disabled checked> Untyped literals adapt to context with range checks; narrowing requires an explicit cast; mixed int widths require a cast, while <code>f32</code> → <code>f64</code> widens implicitly and mixed float widths take the wider side</li><li><input type="checkbox" disabled checked> Overflow is never UB — see <a href="#overflow-semantics">Overflow semantics</a></li></ul>
+<h3 id="diagnostics-tooling">Diagnostics &amp; tooling</h3>
+<ul><li><input type="checkbox" disabled checked> Source spans everywhere: errors point at <code>file.wlel:12:5</code>; <code>#line</code> directives map cc errors back to <code>.wlel</code></li><li><input type="checkbox" disabled checked> Parser error recovery: one compile reports <em>all</em> syntax errors, not just the first</li><li><input type="checkbox" disabled checked> Warning system: unused variables/parameters/imports, unreachable code — non-fatal, <code>_</code>-prefix opt-out</li><li><input type="checkbox" disabled checked> Built-in tests: <code>test &quot;name&quot; { ... }</code> blocks + <code>wlel test</code> runner with <code>file:line</code> failures</li><li><input type="checkbox" disabled checked> Safe-debug mode: <code>wlel run</code>/<code>wlel test</code> compile with array bounds checks, integer div-zero checks and arena poison-fill; <code>wlel build</code> stays zero-overhead (see <a href="#safe-debug-vs-release">Safe-debug vs release</a>)</li><li><input type="checkbox" disabled checked> Arena stats: <code>arena_stats() -&gt; ArenaStats { bytes, chunks, peak }</code> for the innermost active arena (root when none)</li><li><input type="checkbox" disabled checked> <code>wlel build -sanitize</code> — ASan-instrumented release binary</li><li><input type="checkbox" disabled checked> CLI: <code>wlel run</code> (content-cached binaries), <code>wlel build -o out [-O0..-O3] [-sanitize] [--emit-c] [-l &lt;lib&gt;] [-L &lt;dir&gt;]</code> (content-cached too), <code>wlel check</code>, <code>wlel test</code>, <code>wlel --version</code></li><li><input type="checkbox" disabled checked> Lexer: hex/bin/oct/scientific/<code>_</code>-separated literals, strings with escapes + UTF-8</li><li><input type="checkbox" disabled checked> Type checker: inference, annotations, return-path analysis, loop/arena depth tracking</li><li><input type="checkbox" disabled checked> Generics: <code>fn id[T](x: T) -&gt; T</code> and <code>struct Box[T] { val: T }</code> via checker-level monomorphization — type inference at call sites, per-type instantiation (mangled C like <code>Box__int</code>), no boxing, no vtables (see <a href="#generics">Generics</a>)</li><li><input type="checkbox" disabled checked> Methods: <code>impl Pt { fn len(self) -&gt; float { ... } }</code> + <code>p.len()</code> — desugared to plain functions, generic impls monomorphize per receiver; std collections/Result/Option carry a method layer (see <a href="#methods">Methods</a>)</li><li><input type="checkbox" disabled checked> Stdlib: <code>std::print*</code>/<code>println*</code>, <code>strlen</code>, <code>streq</code>, <code>abs</code>, <code>min</code>, <code>max</code>, <code>len</code>, <code>checked_add/sub/mul</code>, <code>format</code>, <code>parse_float</code>, <code>float_to_str</code>; collections <code>Vec[T]</code>, <code>HashMap[K,V]</code> + <code>for x in coll</code>; string library <code>str_find/sub/trim/split/parse_int</code>, <code>int_to_str</code>, <code>str_cmp</code>; sort &amp; search <code>std::sort</code>, <code>std::binary_search</code>; file I/O <code>sys::read_file/write_file</code> + the Result layer <code>std::fs::open/read_all/write_all/read/write/close</code>; <code>sys::argc/arg/exit</code></li><li><input type="checkbox" disabled checked> Concurrency: <code>sys::thread/join</code> (name-resolved workers, per-thread arenas), <code>sys::mutex_new/lock/unlock/free</code>, <code>sys::chan_new[T]/send/recv/close/free</code>, <code>sys::sleep_ms</code> — data races are user discipline, like C (see <a href="#concurrency">Concurrency</a>)</li><li><input type="checkbox" disabled checked> Tagged enums + exhaustive <code>match</code>, <code>std::Result[T,E]</code> / <code>std::Option[T]</code>, the <code>?</code> try operator and the <code>result_*</code>/<code>option_*</code> helpers, <code>panic(msg)</code> (see <a href="#tagged-enums--match">Tagged enums</a> and <a href="#file-io">File I/O</a>)</li><li><input type="checkbox" disabled checked> Projects: <code>wlel new</code> / <code>init</code>, <code>wlel.toml</code> manifests, path + git dependencies (auto-cloned, revision-pinned by <code>wlel.lock</code>), nested deps, <code>wlel add/remove/update/tree/clean</code>, <code>wlel run/build/check/test</code> in project mode; the scaffold ships a README and a CI workflow that installs the matching release (see <a href="#projects">Projects</a>)</li><li><input type="checkbox" disabled checked> Package registry v0: <code>wlel add github:user/repo[@x.y.z]</code> — no central server, git tags are the registry; caret version requirements verified against each tag's own manifest, offline-friendly resolution (see <a href="#projects">Projects</a>)</li><li><input type="checkbox" disabled checked> Formatter: <code>wlel fmt</code> — canonical, idempotent, comment-preserving; <code>wlel fmt</code> in a project formats every <code>.wlel</code>; <code>-check</code> mode for CI (see <a href="#formatting">Formatting</a>)</li><li><input type="checkbox" disabled checked> Language server: <code>wlel lsp</code> — diagnostics, hover types/signatures, go-to-definition (locals, methods, fields, imports), completion; hand-rolled LSP 3.17 over stdio, zero dependencies (see <a href="#language-server">Language server</a>)</li><li><input type="checkbox" disabled checked> Documentation: <code>wlel doc</code> — markdown pages from <code>///</code> doc comments, one per module plus an index; the embedded stdlib documents itself (see <a href="#documentation">Documentation</a>)</li></ul>
+<h3 id="not-yet-planned-in-order">Not yet (planned, in order)</h3>
+<ul><li><input type="checkbox" disabled> Self-hosting</li></ul>
+<h3 id="experimental">Experimental</h3>
+<ul><li><input type="checkbox" disabled checked> QBE backend (<code>--backend qbe</code>): transpiles the arena-free core of the language straight to QBE IL — 75x faster builds on a 2k-function file (78 ms vs 5.9 s for gcc -O2 on generated C), runtime parity on straight-line/loop code, ~3x slower on gcc-transformed patterns like deep recursion (see <a href="#qbe-backend-experimental">QBE backend</a>)</li></ul>
+<h2 id="specification">Specification</h2>
+<p>The normative language definition lives in <a href="spec.html">docs/spec.md</a> —
+<strong>v1.0, frozen</strong>. It pins down the load-bearing contracts:
+lexical structure, the full precedence table, evaluation order (what is
+guaranteed, what is inherited from C), conversion/literal rules, <code>defer</code> and
+<code>?</code> semantics, the memory model (arena lifetime, aliasing discipline,
+poison-fill behavior), overflow semantics, safe-debug vs release, the FFI
+type mapping, and a reference grammar. <a href="https://github.com/WildanDeveloper/wlel/blob/main/docs/spec.md#17-resolved-for-the-10-freeze">§17</a>
+records the decisions that closed the last open questions — mixed float
+widths, explicit array decay, evaluation order, pointer arithmetic.</p>
+<h2 id="try-it">Try it</h2>
+<p>Requires a C compiler (<code>cc</code>, <code>gcc</code>, or <code>clang</code>) and Rust/Cargo to build <code>wlel</code> itself.</p>
+<p>Prebuilt binaries are attached to every <a href="https://github.com/WildanDeveloper/wlel/releases">release</a>
+(Linux x86_64/aarch64, macOS Intel/Apple Silicon, Windows x86_64) with
+<code>SHA256SUMS</code>. See <a href="cross-compile.html">docs/cross-compile.md</a> for building
+the compiler for another platform and for cross-compiling <em>Wlel programs</em>
+(set <code>$CC</code> to a cross compiler, or use <code>--emit-c</code> and link by hand).</p>
+<h3 id="install">Install</h3>
+<pre><code class="language-bash">curl -fsSL https://raw.githubusercontent.com/WildanDeveloper/wlel/main/install.sh | sh</code></pre>
+<p>The script picks the archive for your platform, verifies it against the
+release's <code>SHA256SUMS</code>, and installs to <code>/usr/local/bin</code> when that is writable
+and <code>~/.local/bin</code> otherwise — never <code>sudo</code>. Pin a release with
+<code>WLEL_VERSION=v1.2.0</code> and choose the directory with <code>WLEL_INSTALL_DIR</code>.</p>
+<p>Homebrew and Scoop manifests are generated from the release hashes:</p>
+<pre><code class="language-bash">./scripts/packaging.sh                       # writes dist/packaging/
+brew install WildanDeveloper/wlel/wlel       # once the tap is published
+scoop install wlel                           # once the bucket is published</code></pre>
+<p>Or try it without installing anything: the <a href="https://github.com/WildanDeveloper/wlel/blob/main/playground/index.html">playground</a>
+runs the real front-end (lexer, parser, type checker) compiled to WebAssembly,
+so a type error there is the same message <code>wlel check</code> prints.</p>
+<pre><code class="language-bash">cargo run --release -- run examples/arena.wlel             # scoped arena demo
+cargo run --release -- run examples/loops.wlel             # for-in range demo
+cargo run --release -- run examples/strings.wlel           # string concat/eq demo
+cargo run --release -- run examples/args.wlel -- greet you # CLI args demo
+cargo run --release -- run examples/fileio.wlel -- examples/fileio.wlel # cat demo (file I/O)
+cargo run --release -- run examples/generics.wlel          # generic fn/struct demo
+cargo run --release -- run examples/sort.wlel              # sort &amp; search demo + 1M int benchmark
+cargo run --release -- run examples/overflow.wlel          # wrap + checked ops demo
+cargo run --release -- run examples/concurrency.wlel       # worker pool demo (threads + mutex + channel)
+cargo run --release -- run examples/fib.wlel               # fibonacci benchmark
+cargo run --release -- test examples/strings.wlel          # run the test blocks in a file
+cargo run --release -- test examples/kitchen.wlel          # tests from imports run too
+cargo run --release -- check examples/kitchen.wlel         # type-check only
+cargo run --release -- build examples/arena.wlel -o arena -O3 --emit-c</code></pre>
+<p>Project mode (needs <code>wlel</code> on PATH):</p>
+<pre><code class="language-bash">wlel new myapp &amp;&amp; cd myapp   # scaffold: wlel.toml + src/main.wlel
+wlel run                     # run the project (dev checks)
+wlel test                    # project + dependency tests
+wlel build                   # binary named after the package
+wlel fmt                     # canonical formatting for every .wlel
+wlel doc                     # markdown docs for every .wlel + the stdlib
+wlel lsp                     # language server over stdio (VS Code, Neovim)
+wlel add github:user/repo    # add a git dependency (git tags = the registry)</code></pre>
+<h2 id="a-quick-tour">A quick tour</h2>
+<p>Declarations, functions, control flow:</p>
+<pre><code class="language-wlel">fn fib(n: int) -&gt; int {
+    if n &lt; 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() -&gt; int {
+    x := 41;              // inferred
+    let y: int = x + 1;   // annotated
+    for i in 0..3 { std::println_int(i); }
+    return fib(10);
+}</code></pre>
+<p><code>defer</code> runs at scope exit — LIFO, and it runs on early returns and loop jumps:</p>
+<pre><code class="language-wlel">fn process(path: string) -&gt; int {
+    defer std::println_str(&quot;done&quot;);
+    defer {
+        std::println_str(&quot;cleanup step 1&quot;);
+        std::println_str(&quot;cleanup step 2&quot;);
+    }
+    if path == &quot;&quot; { return 1; }   // defers still run
+    return 0;
+}</code></pre>
+<p>Width types make data layouts exact; narrowing is always explicit:</p>
+<pre><code class="language-wlel">let small: u8 = 250u8;      // suffix literal
+let wrapped: u8 = small + 10;   // wraps to 4 (mod 256), by design
+let big: u64 = 18_000_000_000_000_000_000u64;
+let risky: u8 = small as u8;    // explicit cast required for narrowing</code></pre>
+<h2 id="tagged-enums-match">Tagged enums &amp; match</h2>
+<p><code>enum</code> declares a closed tagged union; <code>match</code> destructures it — the checker
+rejects missing variants, duplicates, and arms after the wildcard:</p>
+<pre><code class="language-wlel">enum Shape {
+    Circle(float),
+    Rect(float, float),
+    Point,
+}
+
+fn area(s: Shape) -&gt; float {
+    return match s {
+        Circle(r) =&gt; 3.14159 * r * r,
+        Rect(w, h) =&gt; w * h,
+        Point =&gt; 0.0,
+    };
+}</code></pre>
+<p><code>std::Result[T, E]</code> and <code>std::Option[T]</code> are ordinary enums in the stdlib, so
+<code>match</code> works on them — and <code>expr?</code> is the terse form: propagate the error
+variant out of the enclosing function, otherwise yield the payload. It is
+allowed directly as the value of a <code>let</code>, an assignment, a <code>return</code>, or as a
+statement:</p>
+<pre><code class="language-wlel">fn parse_age(s: string) -&gt; Result[int, string] {
+    n := 0;
+    if !str_parse_int(s, &amp;n) { return Err(&quot;not a number&quot;); }
+    return Ok(n);
+}
+
+fn double(s: string) -&gt; Result[int, string] {
+    v := parse_age(s)?;          // on Err: return Err(e) out of double
+    return Ok(v * 2);
+}</code></pre>
+<p>Predicates, fallbacks and explicit unwraps live in the stdlib (written in Wlel
+itself): <code>result_is_ok/is_err/unwrap/unwrap_or/ok/err</code>,
+<code>option_is_some/is_none/unwrap/unwrap_or</code>. The unwraps <code>panic(msg)</code> — abort
+with the message and <code>.wlel</code> position; a test run fails that one test and keeps
+going. Everything else in a Wlel program errors at compile time or returns a
+Result — implicit panics do not exist.</p>
+<h2 id="generics">Generics</h2>
+<p>Functions and structs can be generic over types; each use is monomorphized to a
+concrete instance at compile time — zero runtime cost:</p>
+<pre><code class="language-wlel">struct Box[T] {
+    val: T,
+}
+
+fn box_get[T](b: Box[T]) -&gt; T {
+    return b.val;
+}
+
+fn main() -&gt; int {
+    let b: Box[float] = Box { val: 2.5 };
+    std::println_float(box_get(b));   // 2.5
+    return 0;
+}</code></pre>
+<p>Type arguments are usually inferred from the call (<code>first(1, 2)</code> needs no
+<code>[int]</code>); explicit ones work too. Every concrete instantiation is emitted under
+a mangled name (<code>Box__int</code>, <code>Box__Box__int</code>), so nested generics and generics
+inside arenas/safe-mode compose naturally. A generic that is never called is
+never monomorphized — its body is not even checked.</p>
+<h2 id="methods">Methods</h2>
+<p><code>impl</code> blocks attach methods to structs and enums. The checker lowers every
+method into a plain function (<code>Pt__len</code>) and <code>recv.method(args)</code> resolves into
+that call — no vtables, no dynamic dispatch, just sugar with compile-time
+resolution:</p>
+<pre><code class="language-wlel">struct Pt {
+    x: float,
+    y: float,
+}
+
+impl Pt {
+    // value receiver: reads a copy
+    fn len(self) -&gt; float {
+        return std::math::sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    // pointer receiver: mutates in place
+    fn scale(self: *Pt, k: float) {
+        self.x *= k;
+    }
+}
+
+fn main() -&gt; int {
+    p := Pt { x: 3.0, y: 4.0 };
+    std::println_float(p.len()); // 5
+    p.scale(10.0);               // auto-borrow: &amp;p for a pointer method
+    pp := &amp;p;
+    std::println_float(pp.len()); // auto-deref: (*pp).len()
+    return 0;
+}</code></pre>
+<p>Receiver rules, in one sentence: the receiver adapts to the declared <code>self</code>
+form — a pointer method on a value auto-borrows (the value must be an lvalue),
+a value method on a pointer auto-derefs. Generic impls repeat the type's own
+parameters (<code>impl Box[T] { ... }</code>) and methods monomorphize per receiver like
+generic functions. Enums take methods too, destructured with <code>match</code> inside.</p>
+<p>The stdlib carries a method layer over the free functions — same operations,
+attached to their types:</p>
+<pre><code class="language-wlel">v := vec_new[int]();
+v.push(2);
+v.push(3);
+std::println_int(v.len());        // 2
+
+m := map_new[string, int]();
+m.set(&quot;a&quot;, 1);
+std::println_int(m.get_or(&quot;a&quot;, 0)); // 1
+
+let r: Result[int, string] = Ok(17);
+if r.is_ok() {
+    std::println_int(r.unwrap()); // 17
+}</code></pre>
+<p>The free functions (<code>vec_push</code>, <code>map_get</code>, <code>result_unwrap</code>, ...) remain — std
+internals call them directly; methods are the idiomatic surface.</p>
+<h2 id="overflow-semantics">Overflow semantics</h2>
+<p>Integer arithmetic in Wlel <strong>never panics and is never undefined</strong> — results are
+fully defined in debug and release alike:</p>
+<table>
+<thead><tr><th>Case</th><th>Behavior</th></tr></thead>
+<tbody>
+<tr><td>Unsigned (<code>u8..u64</code>, <code>usize</code>)</td><td>wrap modulo 2^N (standard C)</td></tr>
+<tr><td>Signed (<code>i8..i64</code>)</td><td>two's-complement wrap — the backend compiles with <code>-fwrapv</code></td></tr>
+<tr><td>Widths below 32 bits</td><td>the compiler inserts explicit wrap casts, so wrapping happens at the original width, not in C's <code>int</code></td></tr>
+<tr><td><code>MIN / -1</code></td><td>wraps to <code>MIN</code>; <code>MIN % -1</code> is <code>0</code> (C calls this undefined and x86 traps)</td></tr>
+<tr><td>Shift count ≥ width or negative</td><td>masked to the width: <code>x &lt;&lt; 64</code> is <code>x</code>, <code>x &lt;&lt; -1</code> is <code>x &lt;&lt; 63</code></td></tr>
+<tr><td>Division by zero</td><td>release: C semantics; <code>wlel run</code>/<code>wlel test</code>: abort with <code>file:line</code></td></tr>
+</tbody></table>
+<p>When wrapping is <em>not</em> what you want, the stdlib detects overflow — no
+exceptions, no panics:</p>
+<pre><code class="language-wlel">use std;
+
+fn main() -&gt; int {
+    r := 0;
+    if std::checked_add(9_000_000_000, 9_000_000_000, &amp;r) {
+        std::println_int(r);          // safe: r is valid
+    } else {
+        std::println_str(&quot;overflow&quot;); // r holds the wrapped value — don&#x27;t use it
+    }
+    return 0;
+}</code></pre>
+<p><code>std::checked_add/sub/mul(a: int, b: int, out: *int) -&gt; bool</code> returns <code>false</code> on
+overflow. Note the builtins still store the wrapped result in <code>*out</code> even when
+they return <code>false</code> — treat <code>*out</code> as valid only when the call returned <code>true</code>.</p>
+<h2 id="file-io">File I/O</h2>
+<p>Two layers, both arena-aware. <strong>Whole-file helpers</strong> for the common case:</p>
+<pre><code class="language-wlel">use std;
+
+fn cat(path: string) -&gt; Result[int, string] {
+    content := std::fs::read_all(path)?;   // Err = strerror message
+    std::print_str(content);               // a cat in one fallible line
+    return Ok(0);
+}
+
+fn main() -&gt; int {
+    match cat(&quot;notes.txt&quot;) {
+        Ok(_) =&gt; { return 0; }
+        Err(e) =&gt; {
+            std::println_str(&quot;cannot read notes.txt: &quot; + e);
+            return 1;
+        }
+    }
+}</code></pre>
+<p><strong>Streaming handles</strong> for buffers and binary data — <code>close</code> is idempotent and
+defer-friendly, handles die with their arena, so LeakSanitizer stays clean:</p>
+<pre><code class="language-wlel">f := std::fs::open(&quot;data.bin&quot;, &quot;rb&quot;)?;      // in a fn returning Result
+defer std::fs::close(f);
+buf := new(u8, 4096);
+while true {
+    n := result_unwrap(std::fs::read(f, buf, 4096));  // bytes read; 0 = EOF
+    if n == 0 { break; }
+    // ... process buf[0..n) ...
+}</code></pre>
+<ul><li><code>sys::read_file(path, &amp;out) -&gt; bool</code> / <code>sys::write_file(path, contents) -&gt; bool</code> — the raw layer, no import required</li><li><code>std::fs::*</code> — the Result layer, <code>use std;</code> required: <code>open(path, mode) -&gt; Result[*File, string]</code>, <code>read_all(path) -&gt; Result[string, string]</code>, <code>write_all(path, contents) -&gt; Result[int, string]</code>, <code>read(f, buf: *u8, n) -&gt; Result[int, string]</code>, <code>write(f, buf: *u8, n) -&gt; Result[int, string]</code>, <code>close(f)</code> — every Err payload is a C <code>strerror</code> message or a short literal; file I/O never panics</li><li><code>expr?</code> propagates the error out of any function returning Result/Option (let, assignment, return, or as a statement); <code>match</code> destructures; the <code>result_*</code> / <code>option_*</code> helpers cover predicates, fallbacks and the explicit unwraps (which <code>panic</code> with a message when the value is absent)</li><li>Strings are NUL-terminated: after a partial read, set <code>buf[n] = 0</code> before treating the slice as a string; true binary data stays in <code>*u8</code> buffers</li></ul>
+<h2 id="sort-search">Sort &amp; search</h2>
+<p><code>std::sort</code> and <code>std::binary_search</code> take an ordinary Wlel function as the
+comparator — <code>cmp(a, b) -&gt; int</code>, negative / zero / positive like <code>strcmp</code>.
+No function pointers, no <code>qsort</code> <code>void*</code>: the compiler emits a specialized
+C sort per (element, comparator) pair, so the comparator call inlines at
+<code>-O2</code> (1M random ints sort in ~110 ms — about 1.8x faster than C <code>qsort</code> at
+~200 ms on the same machine, which pays for an indirect call per comparison).
+The partition is median-of-three + Hoare crossing with an insertion-sort
+cutoff below 24 elements, so already-sorted, reverse-sorted and all-equal
+inputs finish in ~15-30 ms instead of degrading quadratically:</p>
+<pre><code class="language-wlel">use std;
+
+fn asc(a: int, b: int) -&gt; int {
+    if a &lt; b { return -1; }
+    if a &gt; b { return 1; }
+    return 0;
+}
+
+fn main() -&gt; int {
+    a := [5, 3, 9, 1];
+    std::sort(a, asc);                          // fixed array [T; N]
+    v := vec_new[string]();
+    vec_push(&amp;v, &quot;pear&quot;);
+    vec_push(&amp;v, &quot;apple&quot;);
+    std::sort(v, str_cmp);                      // Vec[T], stdlib comparator
+    i := std::binary_search(a, 9, asc);         // index of a match, or -1
+    return 0;
+}</code></pre>
+<p>Three collection forms work for both functions: <code>(arr, cmp)</code>,
+<code>(ptr, n, cmp)</code> and <code>(vec, cmp)</code> — <code>binary_search</code> takes the needle before
+the comparator. Sorting is in-place, not stable (like C <code>qsort</code>); any
+element type works, structs included — write a comparator over a field.</p>
+<h2 id="concurrency">Concurrency</h2>
+<p>Threads, mutexes and channels, portable over pthreads / Win32 — and honest
+about the model: shared state is plain memory, data races are the user's
+responsibility, exactly like C. The language hands you the discipline
+tools and the sanitizer catches the fallout (<code>wlel build -sanitize</code> keeps
+the pool LeakSanitizer-clean; an OOB read inside any thread aborts with a
+<code>file:line</code> in dev mode).</p>
+<pre><code class="language-wlel">fn worker(p: *Pool) {
+    job := 0;
+    while sys::chan_recv(p.jobs, &amp;job) {   // blocks; false = closed + drained
+        sys::mutex_lock(p.mu);
+        *p.total = *p.total + job * job;
+        sys::mutex_unlock(p.mu);
+        sys::chan_send(p.done, job);
+    }
+}</code></pre>
+<ul><li><code>sys::thread(work, data) -&gt; *Thread</code> — spawns an OS thread running <code>work(data)</code>. Wlel has no function pointers: the worker is resolved by name, takes exactly one parameter (the data is type-checked against it) and must return <code>void</code>. Every thread gets a fresh root arena of its own and frees it when it exits.</li><li><code>sys::join(t)</code> — block until the thread finishes; joining releases the handle (join once, like <code>free</code>).</li><li><code>sys::mutex_new/lock/unlock/free</code> — dynamic mutexes; lock/unlock discipline is yours, <code>mutex_free</code> destroys and frees.</li><li><code>sys::chan_new[T]()</code> — an unbounded FIFO of any one type (int, string, pointers, structs). <code>sys::chan_send(ch, v) -&gt; bool</code> never blocks (false once the channel is closed); <code>sys::chan_recv(ch, &amp;out) -&gt; bool</code> blocks until a value arrives, and returns false when the channel is closed and drained (<code>*out</code> untouched — the same bool + out-param idiom as <code>sys::read_file</code>); <code>sys::chan_close(ch)</code>, <code>sys::chan_free(ch)</code> finish the lifecycle. <code>sys::sleep_ms(ms)</code> parks the current thread.</li><li>A failed <code>assert</code>/<code>panic</code> inside a spawned thread aborts the process with its <code>file:line</code> (it never jumps into a foreign test stack).</li></ul>
+<p>The full demo — a worker pool computing a mutex-guarded total over a job
+channel — is <code>examples/concurrency.wlel</code> (<code>wlel run examples/concurrency.wlel</code>).</p>
+<h2 id="testing">Testing</h2>
+<p>Tests live next to the code they verify, in plain <code>.wlel</code> files:</p>
+<pre><code class="language-wlel">fn add(a: int, b: int) -&gt; int {
+    return a + b;
+}
+
+test &quot;basic arithmetic&quot; {
+    assert_eq(add(1, 1), 2);
+    assert_eq(&quot;he&quot; + &quot;llo&quot;, &quot;hello&quot;);
+}
+
+test &quot;string&quot; {
+    assert(&quot;arena&quot; != &quot;borrow&quot;);
+}</code></pre>
+<pre><code class="language-bash">$ wlel test math.wlel
+pass: basic arithmetic
+pass: string
+2 passed, 0 failed</code></pre>
+<ul><li><strong><code>assert(cond)</code></strong> and <strong><code>assert_eq(a, b)</code></strong> are builtins usable in tests and ordinary code. <code>assert_eq</code> uses the same comparison semantics as <code>==</code> (literal width adaptation, explicit casts for narrowing).</li><li>A failed assert reports the <strong>source location</strong>: <code>FAIL: kaput (main.wlel:5)</code>.</li><li>One failing test does not stop the suite — the runner catches it and continues; the exit code is non-zero if anything failed.</li><li><code>wlel test file.wlel</code> also runs tests from <strong>imported files</strong> (<code>use &quot;lib/x.wlel&quot;</code>), so libraries ship their own tests. <code>wlel run</code>/<code>wlel build</code> ignore test blocks entirely — zero overhead in the shipped binary.</li></ul>
+<p>CI runs the full suite on Linux, macOS and Windows (the generated code is
+exercised under ASan/UBSan on Linux/macOS), then in a separate job
+type-checks, test-runs and builds the three flagship apps, smoke-tests the
+JSON parser's throughput, and enforces <code>wlel fmt -check</code> over both
+<code>examples/</code> and <code>flagship/</code> — the flagships are end-to-end programs, so a
+front-end regression that only breaks them (like the <code>Result</code> inference
+regression that had <code>flagship/json.wlel</code> failing to type-check) can no longer
+pass CI behind a green test suite.</p>
+<h2 id="ffi">FFI</h2>
+<p><code>extern fn</code> declares a C function; the call compiles to a direct C call and
+the linker resolves the symbol.</p>
+<pre><code class="language-wlel">use std;
+
+// double sqrt(double) — libm is linked by default
+extern fn sqrt(x: f64) -&gt; f64;
+
+// libc: int puts(const char*), int atoi(const char*)
+extern fn puts(s: string) -&gt; i32;
+extern fn atoi(s: string) -&gt; i32;
+
+fn main() -&gt; int {
+    puts(&quot;sqrt(2) is about&quot;);
+    std::println_int(atoi(&quot;3&quot;) + 1);   // 4
+    std::println_float(sqrt(2.0));     // 1.41421...
+    return 0;
+}</code></pre>
+<ul><li><strong>Declare the exact C types.</strong> Wlel <code>int</code> is i64 (C <code>long long</code>), so C <code>int</code> is <code>i32</code>, C <code>size_t</code> is <code>usize</code>, C <code>double</code> is <code>f64</code>. A mismatched declaration is caught by cc as a conflicting-types error.</li><li><strong>Wlel structs are C structs</strong> — same fields, same order, same layout (locked by <code>static_assert</code>/<code>offsetof</code> tests). Third-party bindings (raylib, SDL) name their structs exactly as C does; the C header is never included, so the Wlel declaration <em>is</em> the binding:</li></ul>
+<ul><li><strong>Linker flags</strong>: <code>-l &lt;lib&gt;</code> and <code>-L &lt;dir&gt;</code> are repeatable on <code>wlel build</code>, <code>wlel run</code>, and <code>wlel test</code>, and pass straight through to cc (<code>-l raylib -L raylib/lib</code>).</li><li><strong>Variadic C functions</strong> (<code>printf</code>) cannot be declared — wrap them or use <code>std::format</code>.</li><li>The generated prototype is non-<code>static</code>; a repeated <em>compatible</em> declaration is fine (the prelude already declares libc), but never redeclare a libc typedef — bind a name the headers do not define.</li></ul>
+<h2 id="projects">Projects</h2>
+<p>A project is a directory with a <code>wlel.toml</code>. Scaffold one and run it:</p>
+<pre><code class="language-bash">$ wlel new myapp
+created new project in ./myapp
+next: cd myapp &amp;&amp; wlel run
+$ cd myapp &amp;&amp; wlel run
+hello, wlel!</code></pre>
+<p>Layout:</p>
+<pre><code class="language-text">myapp/
+  wlel.toml      # manifest: name, version, deps
+  src/main.wlel    # binary entry (run/build)
+  src/lib.wlel     # library entry (optional; check/test work on library-only projects)
+  .wlel/deps/    # git-dependency clones (generated — gitignore it)
+  wlel.lock      # resolved git revisions (generated — commit it)</code></pre>
+<p>All verbs work in project mode when no <code>.wlel</code> file is given — <code>wlel run/build/
+check/test</code> look for <code>wlel.toml</code> in the current directory (or any parent).
+<code>wlel build</code> writes a binary named after the package; <code>-o</code> overrides it.
+Library-only projects (with <code>src/lib.wlel</code> but no <code>src/main.wlel</code>) can be checked
+and tested but not built/run.</p>
+<p>Start from an existing directory instead of an empty one — <code>wlel init</code> writes
+the manifest and the project metadata but never overwrites your sources:</p>
+<pre><code class="language-bash">$ wlel init          # adopt the current directory
+initialized wlel project in .</code></pre>
+<p><code>wlel new</code> and <code>wlel init</code> both write <code>wlel.toml</code>, <code>src/main.wlel</code> (only when
+there is no entry point yet), a README and a GitHub Actions workflow that
+installs the exact compiler release that scaffolded the project.</p>
+<p>Dependencies are declared in <code>[deps]</code> — either a path to another wlel project
+or a git URL (cloned automatically into <code>.wlel/deps/&lt;name&gt;</code>):</p>
+<pre><code class="language-toml">[package]
+name = &quot;myapp&quot;
+version = &quot;0.1.0&quot;
+
+[deps]
+pointlib = { path = &quot;../pointlib&quot; }
+json     = { git = &quot;https://github.com/user/wlel-json&quot;, version = &quot;1.2&quot; }</code></pre>
+<p><code>wlel add</code> edits the manifest for you — resolve first, write second, so a
+broken dependency never leaves a half-edited manifest behind:</p>
+<pre><code class="language-bash">$ wlel add github:user/wlel-json@1.2          # shorthand → https://github.com/...
+$ wlel add json https://example.com/repo.git  # explicit name, full URL
+$ wlel add pointlib --path ../pointlib        # path dependency
+added &#x27;json&#x27; (git = &quot;https://github.com/user/wlel-json&quot;) (satisfies 1.2 via tag v1.2.3)
+next: wlel run</code></pre>
+<p>Dependency functions, structs and tests merge into your program (like file
+imports, diamond-deduped), nested dependencies resolve recursively, and two
+dependencies sharing a name from different sources are rejected. Git
+revisions are pinned in <code>wlel.lock</code> after the first build — commit it, and
+every later build checks out exactly that revision, even on machines that
+have never seen the repo. Delete the lock to move to the remote's HEAD.</p>
+<p>The rest of the dependency lifecycle:</p>
+<pre><code class="language-bash">$ wlel tree                  # the resolved graph, with versions and pins
+myapp v0.1.0
+|-- pointlib v0.1.0 (path ../pointlib)
+`-- json v1.2.3 (git https://github.com/user/wlel-json @ 4f2a91c3d0)
+
+$ wlel update                # re-resolve git deps to the newest satisfying tag
+updated &#x27;json&#x27; 4f2a91c3d0 -&gt; 9c1e07ab42
+
+$ wlel update json           # or just one dependency
+up to date &#x27;json&#x27; (9c1e07ab42)
+
+$ wlel remove pointlib       # manifest line, lock pin and clone cache
+removed &#x27;pointlib&#x27; (path = &quot;../pointlib&quot;)
+
+$ wlel clean                 # drop the clones; wlel.lock is kept
+removed 1 cached clone(s) from myapp/.wlel
+$ wlel clean --cache         # ... and the compiler&#x27;s content cache too</code></pre>
+<p><code>wlel update</code> keeps the version requirement and moves the pin within it, so a
+<code>1.2</code> requirement never jumps to <code>2.0</code>. Path dependencies are not pinned and
+are left alone.</p>
+<p>Git dependencies can pin a <strong>version requirement</strong> (<code>version = &quot;1.2&quot;</code>):
+caret semantics like Cargo's <code>^</code> — <code>1.2</code> matches <code>&gt;=1.2.0 &lt;2.0.0</code>, <code>0.2.3</code>
+matches <code>&gt;=0.2.3 &lt;0.3.0</code>. There is no central server: <strong>git tags are the
+registry</strong> (<code>v1.2.3</code> and <code>1.2.3</code> both count). Resolution picks the highest
+tag satisfying the requirement and then verifies the tag's own <code>wlel.toml</code>
+declares a compatible version — tag and manifest must tell the same story.
+<code>wlel.lock</code> records the requirement together with the revision
+(<code>name = &quot;1.2@&lt;sha&gt;&quot;</code>), so builds stay reproducible and raising the
+requirement re-resolves automatically. Everything prefers the local clone:
+once locked, later builds never touch the network, and even re-resolution
+falls back to already-fetched tags when the remote is unreachable.</p>
+<h2 id="formatting">Formatting</h2>
+<p><code>wlel fmt</code> re-prints source from the parse tree, so its output is canonical
+and <strong>idempotent</strong> — formatting twice changes nothing:</p>
+<pre><code class="language-bash">$ wlel fmt src/main.wlel        # format in place
+formatted: src/main.wlel
+$ wlel fmt src/main.wlel -check # CI mode: exit 1 if not canonical
+all formatted
+$ wlel fmt                    # project mode: every .wlel under wlel.toml</code></pre>
+<p>The rules are deliberately few: 4-space indent, one statement per line,
+exactly one blank line between top-level declarations (adjacent <code>use</code> lines
+stay grouped; blank lines inside blocks collapse to one), <code>//</code> comments kept
+(above the construct they precede, or trailing where they were), and
+parenthesization rebuilt from precedence — <code>(a + b) * c</code> keeps its parens,
+<code>a + (b * c)</code> loses them. Width-suffixed literals stay attached (<code>10u8</code>,
+<code>2.5f32</code>), floats always print float-typed (<code>1e3</code> → <code>1000.0</code>), and radix
+literals normalize to decimal (<code>0xFF</code> → <code>255</code>). A file that does not parse
+is never touched.</p>
+<h2 id="warning-system">Warning system</h2>
+<p><code>wlel check</code>, <code>wlel build</code>, and <code>wlel run</code> report warnings without failing the build:</p>
+<pre><code>$ wlel check main.wlel
+main.wlel:7:5: warning: unused variable &#x27;unused&#x27;
+main.wlel:1:1: warning: import &#x27;geom.wlel&#x27; is never used
+ok: main.wlel type-checks</code></pre>
+<ul><li><strong>Unused variable / parameter</strong> — declared but never read (a plain write <code>x = 5;</code> does not count as a read).</li><li><strong>Unused import</strong> — <code>use std;</code> with no <code>std::</code> call, or <code>use &quot;file.wlel&quot;</code> contributing no referenced function or struct.</li><li><strong>Unreachable statement</strong> — code after <code>return</code>/<code>break</code>/<code>continue</code> in the same block.</li><li><strong>Opt-out</strong> — prefix a name with <code>_</code> (<code>_x</code>, <code>_i</code>, <code>_cb</code>) to mark intentional non-use.</li></ul>
+<h2 id="language-server">Language server</h2>
+<p><code>wlel lsp</code> speaks LSP 3.17 over stdio — hand-rolled, zero dependencies like
+the rest of the toolchain. It runs the real pipeline (parse with error
+recovery, import merge, <code>use std</code> splice, type checker) on every edit, so
+what the editor shows is what the compiler sees:</p>
+<ul><li><strong>Diagnostics</strong> — syntax errors (all of them, one compile), the first type error, and warnings (unused var/param/import, unreachable code), each with the exact range.</li><li><strong>Hover</strong> — variable/field types, function and method signatures, struct and enum shapes, variant payloads, pattern-binding types.</li><li><strong>Go-to-definition</strong> — locals (with shadowing), functions, methods (<code>v.push()</code> lands on the <code>impl</code> block), structs, enums, variants, struct fields, and <code>use &quot;file.wlel&quot;</code> imports (opens the file). Generic calls and desugared method calls resolve back to their template declarations.</li><li><strong>Completion</strong> — locals in scope, top-level symbols, spliced std symbols (<code>vec_new</code>, <code>push</code>, <code>Ok</code>, ...), keywords and primitive types.</li></ul>
+<h3 id="editor-setup">Editor setup</h3>
+<p><strong>Neovim</strong> (built-in LSP client, <code>init.lua</code>):</p>
+<pre><code class="language-lua">vim.api.nvim_create_autocmd(&#x27;filetype&#x27;, {
+  pattern = &#x27;wlel&#x27;,
+  callback = function()
+    vim.lsp.start({
+      name = &#x27;wlel&#x27;,
+      cmd = { &#x27;wlel&#x27;, &#x27;lsp&#x27; },
+      root_dir = vim.fs.root(0, { &#x27;wlel.toml&#x27; }),
+    })
+  end,
+})</code></pre>
+<p><strong>VS Code</strong> — install the bundled extension, which ships the syntax
+highlighting and the language client together:</p>
+<pre><code class="language-bash">git clone https://github.com/WildanDeveloper/wlel
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.3.0
+# reload the window, then open any .wlel file</code></pre>
+<p>It has no build step and no dependencies: the TextMate grammar is plain JSON
+and the client is a small JSON-RPC bridge over <code>wlel lsp</code>. Settings:
+<code>wlel.serverPath</code> (default <code>wlel</code>), <code>wlel.serverArgs</code> (default <code>[&quot;lsp&quot;]</code>),
+<code>wlel.trace.server</code> (<code>off</code>/<code>messages</code>/<code>verbose</code>).</p>
+<p><strong>Other editors</strong> — anything that speaks LSP works by pointing it at
+<code>wlel lsp</code>:</p>
+<pre><code class="language-bash">wlel lsp   # LSP 3.17 on stdin/stdout; diagnostics on open/change</code></pre>
+<p><strong>Syntax highlighting everywhere</strong> — <code>editors/tree-sitter-wlel</code> is a
+tree-sitter grammar (<code>source.wlel</code>) that parses every file in <code>examples/</code> and
+<code>flagship/</code> with zero errors, with <code>queries/highlights.scm</code> and
+<code>queries/locals.scm</code>. Use it from Neovim (<code>nvim-treesitter</code>), Helix, Emacs
+(<code>treesit</code>) or Node; the build is <code>tree-sitter generate</code> in that directory.
+GitHub's language bar is covered by the <code>.gitattributes</code> override, and the
+<a href="linguist.html">Linguist registration kit</a> is ready to submit
+upstream.</p>
+<p>Notes:</p>
+<ul><li>The stdlib is embedded in the compiler, so std symbols resolve even without a <code>std</code> source file on disk; go-to-definition on a std symbol reports a <code>wlel-std:</code> URI (the source is not a file you can open).</li><li>Unsaved buffers analyze fine, but <code>use &quot;file.wlel&quot;</code> imports need the document saved next to its imports.</li></ul>
+<h2 id="documentation">Documentation</h2>
+<p><code>wlel doc</code> generates markdown from <code>///</code> doc comments — one page per module
+(source file) plus an <code>index.md</code>. A doc comment attaches to the declaration
+directly below it (a blank line in between still attaches); an unattached
+block at the top of the file becomes the module description. Plain <code>//</code>
+comments are never docs:</p>
+<pre><code class="language-wlel">/// A point in the plane.
+struct Pt {
+    x: float,
+    y: float,
+}
+
+/// Distance from the origin.
+fn len(p: Pt) -&gt; float {
+    return sqrt(p.x * p.x + p.y * p.y);
+}</code></pre>
+<pre><code class="language-bash">$ wlel doc                    # project mode: every .wlel + the stdlib page
+doc: docs/std.md
+doc: docs/geom.md
+doc: docs/index.md
+$ wlel doc src/geom.wlel        # single file (adds std.md when it `use std`)
+$ wlel doc --std              # just the stdlib reference
+$ wlel doc -o site            # write somewhere other than docs/</code></pre>
+<p>Each page reprints the full API from the parse tree (structs and enums as
+definition blocks, functions as signatures, <code>impl</code> methods grouped under
+their type) with the doc text below each item — a file that fails to parse
+is never documented. The stdlib page (<code>std.md</code>) is generated from the
+embedded library itself, plus a hand-maintained table for the compiler
+builtins that have no Wlel source (<code>std::print*</code>, <code>std::math::*</code>,
+<code>sys::thread</code>, ...). The output is plain markdown — GitHub Pages, mkdocs or
+any viewer renders it as-is.</p>
+<h2 id="safe-debug-vs-release">Safe-debug vs release</h2>
+<p>Wlel compiles the same program two ways:</p>
+<ul><li><strong><code>wlel run</code> / <code>wlel test</code> (dev, safe)</strong> — instrumented C. Every <code>[T; N]</code> array access is bounds-checked, every integer <code>/</code> and <code>%</code> is div-zero checked, and freed arena memory is poisoned with <code>0xDE</code> so use-after-free reads deterministic garbage. Failures abort with the exact <code>.wlel</code> position:</li></ul>
+<ul><li><strong><code>wlel build</code> (release)</strong> — none of that exists in the generated C (verify with <code>--emit-c</code>: zero check helpers, zero poison). Same binary speed as before, same IEEE float semantics (<code>1.0/0.0</code> is <code>inf</code> in both modes — only integer division is guarded).</li></ul>
+<p>Notes:</p>
+<ul><li>Pointers from <code>new(T, n)</code> have no tracked length, so they are not bounds checked — only static <code>[T; N]</code> arrays are.</li><li>The checks are lazy (part of the access expression), so short-circuit semantics are preserved.</li><li>When the optimizer can prove an index in range, even the dev build's check is folded away. On a check-heavy microbenchmark (data-dependent indices, divisions in the hot loop) dev costs ~30%; typical code is at or near parity (fib(35): release ≈ C).</li></ul>
+<h2 id="arena-stats">Arena stats</h2>
+<p><code>arena_stats()</code> reports the innermost active arena (the root arena when no
+block is open). <code>ArenaStats</code> is a built-in struct — the name is reserved:</p>
+<pre><code class="language-wlel">arena(4096) {
+    xs := new(int, 100);
+    let s: ArenaStats = arena_stats();
+    std::println_int(s.bytes);   // 800 — int is 8 bytes
+    std::println_int(s.chunks);  // 1
+    std::println_int(s.peak);    // 800 — high-water mark
+}</code></pre>
+<p>For memory debugging beyond the built-in checks, <code>wlel build -sanitize</code>
+produces an AddressSanitizer-instrumented binary (the same binary still
+passes LeakSanitizer at exit thanks to the root arena):</p>
+<pre><code class="language-bash">wlel build app.wlel -o app -sanitize &amp;&amp; ./app</code></pre>
+<h2 id="qbe-backend-experimental">QBE backend (experimental)</h2>
+<p><code>wlel build --backend qbe</code> skips C entirely for your program: the compiler
+emits <a href="https://c9x.me/compile/">QBE IL</a> directly, <code>qbe</code> lowers it to assembly,
+and <code>cc</code> only assembles and links. Requires <code>qbe</code> in <code>PATH</code> (<code>apt install qbe</code>).</p>
+<p>This is an <em>experiment</em> (roadmap Fase 3), deliberately scoped to the
+arena-free core of the language:</p>
+<ul><li><strong>Supported:</strong> all integer widths + wrap semantics, <code>f32</code>/<code>f64</code>, bools, pointers, stack arrays with indexing and decay, strings (literals, <code>==</code>, indexing), <code>if</code>/<code>while</code>/<code>for</code>/<code>break</code>/<code>continue</code>, functions, monomorphized generics, <code>extern fn</code> (<code>-l</code>/<code>-L</code> pass through), <code>wlel_print_*</code>, <code>sys::argc/arg/exit/mono_ms/unix_ms</code>, <code>wlel_sizeof</code>.</li><li><strong>Refused with <code>file:line:col</code>:</strong> <code>use std</code> and file imports, structs, enums, <code>impl</code> methods, <code>defer</code>, <code>arena{}</code>, <code>new()</code>, <code>test</code> blocks, <code>match</code>, for-in — anything needing the C runtime. Use the C backend there.</li><li><code>--emit-c</code> emits the IL (<code>.ssa</code>) instead.</li></ul>
+<p>Measured on one machine (Debian, gcc 12, qbe 1.2), honest both ways:</p>
+<table>
+<thead><tr><th></th><th>C backend</th><th>QBE backend</th></tr></thead>
+<tbody>
+<tr><td>cold build, 2000-function / 30k-line file</td><td>5883 ms</td><td><strong>78 ms</strong> (75x)</td></tr>
+<tr><td>runtime, loop-heavy straight-line program</td><td>0.57 ms</td><td>0.58 ms (parity)</td></tr>
+<tr><td>runtime, <code>fib(35)</code> (gcc rewrites recursion into loops)</td><td>12 ms</td><td>36 ms (~3x)</td></tr>
+<tr><td>binary size (fib)</td><td>16.3 KB</td><td>16.8 KB</td></tr>
+</tbody></table>
+<p>Outputs are byte-identical with the C backend across the parity test corpus.</p>
+<p><strong>Decision recorded in the roadmap:</strong> the C backend stays the default. QBE is
+worth keeping as an opt-in fast-iteration path — its whole-pipeline build
+speedup is real and the code it emits for straight-line programs is already at
+parity — but it does not replace gcc-class optimization for
+transform-heavy code, and the language is moving faster than a second
+production backend could track. Revisit when the language is closer to 1.0.</p>
+<h2 id="toolchain-notes">Toolchain notes</h2>
+<ul><li>Source files use the <code>.wlel</code> extension, which no other language claims. The extension Wlel shipped before 1.0 belongs to Wolfram Language in GitHub Linguist and in most editors, so it was dropped; the compiler rejects it with a rename hint instead of failing obscurely.</li><li>Generated C is meant to be read: <code>wlel build --emit-c</code> writes the C99 source next to your binary, with <code>#line</code> directives so compiler diagnostics point back into your <code>.wlel</code> files. Naming the target <code>-o out.c</code> writes the source <em>at that path</em> and stops before linking, so <code>wlel build app.wlel -O2 --emit-c -o app.c</code> is the way to read the C and the way to time the front end alone.</li><li><code>wlel build</code> is content-cached: an unchanged rebuild reuses the object cc already produced instead of re-running it.</li><li><code>wlel run</code> caches compiled binaries by content hash — rebuilds only happen when the source actually changes.</li><li>The compiler never rejects a program on warnings, and one syntax error never hides the next: the parser recovers and reports everything it finds.</li></ul>
+<h2 id="roadmap">Roadmap</h2>
+<p>Shipped:</p>
+<ol><li><strong>Stdlib &amp; tooling</strong> — generics via monomorphization, <code>Vec[T]</code>/<code>HashMap[K,V]</code>, string library, file I/O, <code>wlel fmt</code>, FFI.</li><li><strong>Expressiveness</strong> — tagged enums + exhaustive <code>match</code>, <code>Result[T,E]</code>, method sugar, concurrency, LSP, <code>wlel doc</code>.</li><li><strong>1.0 scope</strong> — git-tag package registry, QBE backend, three flagship apps, fuzz soak, spec v1.0.</li><li><strong>CI integrity</strong> — flagship check/test/build/bench jobs and <code>fmt -check</code> over <code>flagship/</code>.</li><li><strong>1.0 freeze</strong> — the spec's open questions are resolved and documented in <a href="https://github.com/WildanDeveloper/wlel/blob/main/docs/spec.md#17-resolved-for-the-10-freeze">§17</a> (mixed float widths take the wider side, f32→f64 widens implicitly, explicit array decay, evaluation order stays C-inherited, no pointer arithmetic); source extension is <code>.wlel</code> (the pre-1.0 one is claimed by Wolfram Language in Linguist/editors); <code>wlel --version</code>; <code>scripts/release.sh</code> + <code>docs/cross-compile.md</code> for release binaries.</li></ol>
+<ol><li><strong>Ecosystem</strong> — shipped in 1.1.0–1.3.0: Apache-2.0 license and package metadata, the dependency lifecycle (<code>init/remove/update/tree/clean</code>), scaffolds with a README and a CI workflow, editor support (VS Code extension, tree-sitter grammar, GitHub Linguist registration kit), a checksum-verifying <code>install.sh</code>, generated Homebrew/Scoop manifests, a documentation site, and a WebAssembly playground that runs the real lexer/parser/type checker in the browser.</li><li><strong>Module namespaces</strong> — imports currently merge into one flat global scope (two files defining <code>helper</code> is a duplicate-symbol error); this is also the main blocker for self-hosting.</li><li><strong>Self-hosting</strong> — the only unchecked milestone left.</li><li><strong>Runtime/compile performance</strong> — incremental per-file compilation for the LSP, arena memory reclamation for parse-heavy programs, collection and sort hot paths.</li></ol>
+<p>Deliberately <strong>not</strong> on the roadmap: borrow checker, macros, GC, OOP class
+hierarchies, exceptions. Simplicity is a feature, not a phase.</p>
+<h2 id="license">License</h2>
+<p><a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">Apache-2.0</a>. Generated C and the binaries you compile are yours —
+the license covers the compiler, not your programs. See <a href="https://github.com/WildanDeveloper/wlel/blob/main/NOTICE">NOTICE</a>.</p>
+<p>Contributions are accepted under the same terms; see
+<a href="contributing.html">CONTRIBUTING.md</a>. Security reports: <a href="security.html">SECURITY.md</a>.</p>
+</div></main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

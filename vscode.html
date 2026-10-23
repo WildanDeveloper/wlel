@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VS Code — Wlel</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="spec.html">Spec</a>
+    <a href="editors.html">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main>
+<div class="docs-layout"><nav class="docs-nav"><ol><li class="lvl-2"><a href="#what-you-get">What you get</a></li><li class="lvl-2"><a href="#requirements">Requirements</a></li><li class="lvl-2"><a href="#settings">Settings</a></li><li class="lvl-2"><a href="#installing-from-source">Installing from source</a></li><li class="lvl-2"><a href="#notes">Notes</a></li></ol></nav><article class="docs-body"><h1 id="wlel-for-vs-code">Wlel for VS Code</h1>
+<p>Syntax highlighting and language-server support for the
+<a href="https://github.com/WildanDeveloper/wlel">Wlel</a> language (<code>.wlel</code> files).</p>
+<p>Zero dependencies: the TextMate grammar is plain JSON and the language
+client is a small JSON-RPC bridge over the <code>wlel lsp</code> process, so there is
+no build step and no <code>node_modules</code> tree.</p>
+<h2 id="what-you-get">What you get</h2>
+<ul><li>Syntax highlighting for declarations, types, builtins, <code>std::</code>/<code>sys::</code> paths, doc comments, all literal forms (decimal, hex, binary, octal, with width suffixes) and operators.</li><li>Bracket matching, auto-closing pairs and brace-based indentation.</li><li><strong>Diagnostics</strong> — every syntax error in one pass, the first type error, and warnings (unused variable/parameter/import, unreachable code), published on open and on every edit.</li><li><strong>Hover</strong> — variable and field types, function and method signatures, struct/enum shapes, variant payloads.</li><li><strong>Go to definition</strong> — locals, functions, methods, structs, enums, variants, fields, and <code>use &quot;file.wlel&quot;</code> imports.</li><li><strong>Completion</strong> — locals in scope, top-level symbols, the spliced stdlib (<code>vec_new</code>, <code>push</code>, <code>Ok</code>, …), keywords and primitive types.</li></ul>
+<h2 id="requirements">Requirements</h2>
+<p>The <code>wlel</code> compiler on <code>PATH</code> (it provides <code>wlel lsp</code>). Prebuilt binaries are
+on the <a href="https://github.com/WildanDeveloper/wlel/releases">releases page</a>.</p>
+<h2 id="settings">Settings</h2>
+<table>
+<thead><tr><th>Setting</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>wlel.serverPath</code></td><td><code>wlel</code></td><td>Path to the compiler binary</td></tr>
+<tr><td><code>wlel.serverArgs</code></td><td><code>[&quot;lsp&quot;]</code></td><td>Arguments for the server</td></tr>
+<tr><td><code>wlel.trace.server</code></td><td><code>off</code></td><td><code>messages</code>/<code>verbose</code> log the JSON-RPC traffic to the <strong>Wlel</strong> output channel</td></tr>
+</tbody></table>
+<h2 id="installing-from-source">Installing from source</h2>
+<pre><code class="language-bash">git clone https://github.com/WildanDeveloper/wlel
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.1.0
+# reload the window; open any .wlel file</code></pre>
+<h2 id="notes">Notes</h2>
+<ul><li>The stdlib is embedded in the compiler, so std symbols resolve without a <code>std</code> source file on disk; go-to-definition on a std symbol reports a <code>wlel-std:</code> URI that has no file behind it.</li><li>Unsaved buffers analyze fine, but <code>use &quot;file.wlel&quot;</code> imports resolve from disk, so save before relying on cross-file go-to-definition.</li><li>If the server cannot start, the <strong>Wlel</strong> output channel says why and the extension retries after the next edit.</li></ul></article></div>
+</main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

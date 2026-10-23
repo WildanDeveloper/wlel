@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security — Wlel</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="spec.html">Spec</a>
+    <a href="editors.html">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main>
+<div class="docs-layout"><nav class="docs-nav"><ol><li class="lvl-2"><a href="#supported-versions">Supported versions</a></li><li class="lvl-2"><a href="#reporting-a-vulnerability">Reporting a vulnerability</a></li><li class="lvl-2"><a href="#what-counts-as-a-security-issue">What counts as a security issue</a></li></ol></nav><article class="docs-body"><h1 id="security-policy">Security policy</h1>
+<h2 id="supported-versions">Supported versions</h2>
+<p>Security fixes are shipped for the latest release line. As of 1.0, that is
+<strong>1.0.x</strong>.</p>
+<table>
+<thead><tr><th>Version</th><th>Supported</th></tr></thead>
+<tbody>
+<tr><td>1.0.x</td><td>yes</td></tr>
+<tr><td>&lt; 1.0</td><td>no</td></tr>
+</tbody></table>
+<h2 id="reporting-a-vulnerability">Reporting a vulnerability</h2>
+<p>Please <strong>do not open a public issue</strong> for a security problem. Report it
+privately through GitHub:</p>
+<ol><li>Go to &lt;https://github.com/WildanDeveloper/wlel/security/advisories/new&gt;.</li><li>Describe the impact, the affected component, and a minimal reproduction.</li><li>If the report involves generated code, include the Wlel source and the output of <code>wlel build app.wlel -o app -O2 --emit-c</code>.</li></ol>
+<p>You will get an acknowledgement within a few days. Once a fix is ready, a
+release is cut and the advisory is published with credit (unless you prefer
+to stay anonymous).</p>
+<h2 id="what-counts-as-a-security-issue">What counts as a security issue</h2>
+<p>Wlel compiles untrusted source, so the compiler is treated as a parser of
+hostile input:</p>
+<ul><li><strong>Compiler crash on input</strong> — a panic, abort, stack overflow, unbounded memory use, or a hang triggered by a source file, manifest, or LSP message. The compiler must always fail with a diagnostic.</li><li><strong>Code generation escape</strong> — Wlel source that injects C beyond the program's own semantics (for example through an identifier, string literal, <code>#line</code> path, or manifest field).</li><li><strong>Cache or temp-file attacks</strong> — writing outside the user's cache directory, executing a binary planted by another local user, or predictable scratch paths.</li><li><strong>Dependency resolution</strong> — a manifest that reads, writes, or executes outside its project directory, or a git URL that turns into a git option.</li><li><strong>LSP/server</strong> — a request that crashes the server or escapes the workspace.</li></ul>
+<p>Bugs in <em>programs written in Wlel</em> (for example, an unsafe <code>extern fn</code>
+declaration or an arena escape) are the program author's responsibility,
+as documented in the specification; they are not compiler vulnerabilities.</p></article></div>
+</main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

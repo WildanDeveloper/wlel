@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitHub Linguist — Wlel</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="spec.html">Spec</a>
+    <a href="editors.html">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main>
+<div class="docs-layout"><nav class="docs-nav"><ol><li class="lvl-2"><a href="#what-is-here">What is here</a></li><li class="lvl-2"><a href="#the-pull-request">The pull request</a></li><li class="lvl-2"><a href="#checklist-before-submitting">Checklist before submitting</a></li></ol></nav><article class="docs-body"><h1 id="github-linguist-registration-for-wlel">GitHub Linguist registration for Wlel</h1>
+<p>GitHub only knows a language after [github/linguist] ships an entry for it.
+This directory is the registration kit: everything the Linguist pull request
+needs, already reviewed.</p>
+<p>Until that PR merges, <code>.gitattributes</code> in the repository root overrides the
+language for this repo (<code>*.wlel linguist-language=Wlel</code>), which is enough for
+the language bar and for <code>linguist-detectable</code>.</p>
+<p>[github/linguist]: https://github.com/github/linguist</p>
+<h2 id="what-is-here">What is here</h2>
+<table>
+<thead><tr><th>File</th><th>Destination in the Linguist PR</th></tr></thead>
+<tbody>
+<tr><td><code>languages.yml</code></td><td>append to <code>lib/linguist/languages.yml</code></td></tr>
+<tr><td><code>grammars.yml</code></td><td>append under <code>grammars:</code> in <code>grammars.yml</code></td></tr>
+<tr><td><code>prepare.sh</code></td><td>stages the samples and the two YAML fragments</td></tr>
+</tbody></table>
+<p>Linguist highlights code samples with a <strong>TextMate</strong> grammar, not a
+tree-sitter one, so the vendored grammar is <code>editors/vscode-wlel</code>
+(<code>syntaxes/wlel.tmLanguage.json</code>, scope <code>source.wlel</code>). The tree-sitter
+grammar in <code>editors/tree-sitter-wlel</code> is used by editors, not by Linguist.</p>
+<h2 id="the-pull-request">The pull request</h2>
+<ol><li><strong>Fork</strong> <code>github/linguist</code> and branch from <code>master</code>.</li></ol>
+<ol><li><strong>Add the grammar as a submodule</strong> (this is the VS Code extension, which contains the TextMate grammar):</li></ol>
+<ol><li><strong>Register the grammar</strong> in <code>grammars.yml</code> — append <code>grammars.yml</code> from this directory (it maps the submodule path to <code>source.wlel</code>).</li></ol>
+<ol><li><strong>Add the language</strong> to <code>lib/linguist/languages.yml</code> — append <code>languages.yml</code> from this directory. It deliberately leaves out <code>language_id</code>: Linguist assigns a fresh one (a random 9–10 digit number) when the PR is accepted, and many registered languages have no id yet.</li></ol>
+<ol><li><strong>Add samples.</strong> Run the staging script and copy the result:</li></ol>
+<ol><li><strong>Run the checks:</strong></li></ol>
+<ol><li><strong>Open the PR</strong> titled <code>Add Wlel</code>, link &lt;https://github.com/WildanDeveloper/wlel&gt;, and say what the language is in two or three sentences. Registration usually takes a few weeks and one or two review rounds.</li></ol>
+<h2 id="checklist-before-submitting">Checklist before submitting</h2>
+<ul><li><input type="checkbox" disabled> The language has a public home page or repository.</li><li><input type="checkbox" disabled> A handful of public repositories use <code>.wlel</code> files.</li><li><input type="checkbox" disabled> The extension <code>.wlel</code> is not claimed by another language.</li><li><input type="checkbox" disabled> <code>wl</code> is deliberately absent: it belongs to Wolfram Language, and Wlel moved off it before 1.0.</li><li><input type="checkbox" disabled> A TextMate grammar with scope <code>source.wlel</code> exists (<code>editors/vscode-wlel</code>).</li><li><input type="checkbox" disabled> Samples compile with the released compiler.</li></ul></article></div>
+</main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

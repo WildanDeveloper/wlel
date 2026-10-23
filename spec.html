@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Language specification — Wlel</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="spec.html" class="current">Spec</a>
+    <a href="editors.html">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main>
+<div class="docs-layout"><nav class="docs-nav"><ol><li class="lvl-2"><a href="#table-of-contents">Table of contents</a></li><li class="lvl-2"><a href="#1-scope">1. Scope</a></li><li class="lvl-2"><a href="#2-lexical-structure">2. Lexical structure</a></li><li class="lvl-3"><a href="#21-source-encoding">2.1 Source encoding</a></li><li class="lvl-3"><a href="#22-comments">2.2 Comments</a></li><li class="lvl-3"><a href="#23-keywords">2.3 Keywords</a></li><li class="lvl-3"><a href="#24-integer-literals">2.4 Integer literals</a></li><li class="lvl-3"><a href="#25-floating-point-literals">2.5 Floating-point literals</a></li><li class="lvl-3"><a href="#26-string-literals">2.6 String literals</a></li><li class="lvl-3"><a href="#27-operators-and-punctuation">2.7 Operators and punctuation</a></li><li class="lvl-2"><a href="#3-types">3. Types</a></li><li class="lvl-3"><a href="#31-primitive-types">3.1 Primitive types</a></li><li class="lvl-3"><a href="#32-compound-types">3.2 Compound types</a></li><li class="lvl-3"><a href="#33-type-parameters">3.3 Type parameters</a></li><li class="lvl-3"><a href="#34-reserved-names">3.4 Reserved names</a></li><li class="lvl-3"><a href="#35-string">3.5 string</a></li><li class="lvl-3"><a href="#36-void">3.6 void</a></li><li class="lvl-2"><a href="#4-conversions-and-literals">4. Conversions and literals</a></li><li class="lvl-3"><a href="#41-assignability">4.1 Assignability</a></li><li class="lvl-3"><a href="#42-literal-adaptation">4.2 Literal adaptation</a></li><li class="lvl-3"><a href="#43-mixed-width-arithmetic">4.3 Mixed-width arithmetic</a></li><li class="lvl-3"><a href="#44-casts">4.4 Casts</a></li><li class="lvl-3"><a href="#45-wrap-cast-canonicalization-32-bit">4.5 Wrap-cast canonicalization (&lt; 32-bit)</a></li><li class="lvl-2"><a href="#5-expressions-and-evaluation-order">5. Expressions and evaluation order</a></li><li class="lvl-3"><a href="#51-precedence-and-associativity">5.1 Precedence and associativity</a></li><li class="lvl-3"><a href="#52-evaluation-order-normative-summary">5.2 Evaluation order (normative summary)</a></li><li class="lvl-3"><a href="#53-operands">5.3 Operands</a></li><li class="lvl-3"><a href="#54-function-calls">5.4 Function calls</a></li><li class="lvl-3"><a href="#55-string-operators">5.5 String operators</a></li><li class="lvl-3"><a href="#56-compound-assignment">5.6 Compound assignment</a></li><li class="lvl-3"><a href="#57-assignment-and-lvalues">5.7 Assignment and lvalues</a></li><li class="lvl-3"><a href="#58-the-try-postfix-expr">5.8 The try postfix expr?</a></li><li class="lvl-3"><a href="#59-allocator-builtin-forms">5.9 Allocator builtin forms</a></li><li class="lvl-2"><a href="#6-statements-and-control-flow">6. Statements and control flow</a></li><li class="lvl-3"><a href="#61-declarations">6.1 Declarations</a></li><li class="lvl-3"><a href="#62-blocks-and-scope">6.2 Blocks and scope</a></li><li class="lvl-3"><a href="#63-if-while">6.3 if / while</a></li><li class="lvl-3"><a href="#64-range-for">6.4 Range for</a></li><li class="lvl-3"><a href="#65-for-in">6.5 for-in</a></li><li class="lvl-3"><a href="#66-break-continue">6.6 break / continue</a></li><li class="lvl-3"><a href="#67-defer">6.7 defer</a></li><li class="lvl-3"><a href="#68-return">6.8 return</a></li><li class="lvl-3"><a href="#69-arena-block">6.9 arena block</a></li><li class="lvl-3"><a href="#610-test-blocks">6.10 test blocks</a></li><li class="lvl-2"><a href="#7-functions-generics-and-methods">7. Functions, generics and methods</a></li><li class="lvl-3"><a href="#71-declaration">7.1 Declaration</a></li><li class="lvl-3"><a href="#72-extern-functions">7.2 extern functions</a></li><li class="lvl-3"><a href="#73-calls-and-argument-passing">7.3 Calls and argument passing</a></li><li class="lvl-3"><a href="#74-method-sugar-impl">7.4 Method sugar (impl)</a></li><li class="lvl-3"><a href="#75-generics-monomorphization">7.5 Generics (monomorphization)</a></li><li class="lvl-3"><a href="#76-name-resolution-for-calls">7.6 Name resolution for calls</a></li><li class="lvl-2"><a href="#8-enums-and-match">8. Enums and match</a></li><li class="lvl-3"><a href="#81-construction">8.1 Construction</a></li><li class="lvl-3"><a href="#82-match">8.2 match</a></li><li class="lvl-3"><a href="#83-result-option">8.3 Result, Option, ?</a></li><li class="lvl-2"><a href="#9-programs-and-modules">9. Programs and modules</a></li><li class="lvl-3"><a href="#91-files">9.1 Files</a></li><li class="lvl-3"><a href="#92-entry-point">9.2 Entry point</a></li><li class="lvl-3"><a href="#93-imports">9.3 Imports</a></li><li class="lvl-3"><a href="#94-toolchain-contract">9.4 Toolchain contract</a></li><li class="lvl-3"><a href="#95-diagnostics">9.5 Diagnostics</a></li><li class="lvl-3"><a href="#96-warnings-non-fatal-sorted-by-position">9.6 Warnings (non-fatal, sorted by position)</a></li><li class="lvl-2"><a href="#10-memory-model">10. Memory model</a></li><li class="lvl-3"><a href="#101-arenas">10.1 Arenas</a></li><li class="lvl-3"><a href="#102-what-allocates-where">10.2 What allocates where</a></li><li class="lvl-3"><a href="#103-aliasing">10.3 Aliasing</a></li><li class="lvl-3"><a href="#104-lifetime-and-escape">10.4 Lifetime and escape</a></li><li class="lvl-2"><a href="#11-arithmetic-integrity">11. Arithmetic integrity</a></li><li class="lvl-2"><a href="#12-safe-debug-vs-release">12. Safe-debug vs release</a></li><li class="lvl-3"><a href="#121-assert-assert-eq-panic">12.1 assert / assert_eq / panic</a></li><li class="lvl-2"><a href="#13-concurrency">13. Concurrency</a></li><li class="lvl-2"><a href="#14-foreign-function-interface">14. Foreign function interface</a></li><li class="lvl-2"><a href="#15-standard-library-summary">15. Standard library summary</a></li><li class="lvl-2"><a href="#16-grammar">16. Grammar</a></li><li class="lvl-2"><a href="#17-resolved-for-the-10-freeze">17. Resolved for the 1.0 freeze</a></li></ol></nav><article class="docs-body"><h1 id="the-wlel-language-specification">The Wlel Language Specification</h1>
+<p><strong>Version 1.0 — frozen</strong></p>
+<blockquote><p>This document is the normative definition of the Wlel programming language.
+It describes the language as implemented by the reference compiler (<code>wlel</code>,
+C99 backend). Where this document and the compiler disagree, that is a bug
+in one of them — please open an issue and cite the section number.</p>
+<p><strong>1.0 syntax freeze.</strong> The syntax and semantics described here are frozen
+for 1.0. §17 records the decisions that closed the last open questions;
+new syntax is out of scope until after 1.0.</p>
+<p>The keywords <strong>MUST</strong>, <strong>MUST NOT</strong>, <strong>SHALL</strong>, <strong>SHOULD</strong> and <strong>MAY</strong> are
+to be read as described in RFC 2119. Behavior labeled <em>unspecified</em> or
+<em>undefined</em> places no requirement on any implementation.</p></blockquote>
+<hr>
+<h2 id="table-of-contents">Table of contents</h2>
+<ol><li><a href="#1-scope">Scope</a></li><li><a href="#2-lexical-structure">Lexical structure</a></li><li><a href="#3-types">Types</a></li><li><a href="#4-conversions-and-literals">Conversions and literals</a></li><li><a href="#5-expressions-and-evaluation-order">Expressions and evaluation order</a></li><li><a href="#6-statements-and-control-flow">Statements and control flow</a></li><li><a href="#7-functions-generics-and-methods">Functions, generics and methods</a></li><li><a href="#8-enums-and-match">Enums and match</a></li><li><a href="#9-programs-and-modules">Programs and modules</a></li><li><a href="#10-memory-model">Memory model: arenas, aliasing, lifetime</a></li><li><a href="#11-arithmetic-integrity">Arithmetic integrity: overflow and division</a></li><li><a href="#12-safe-debug-vs-release">Safe-debug vs release</a></li><li><a href="#13-concurrency">Concurrency</a></li><li><a href="#14-foreign-function-interface">Foreign function interface</a></li><li><a href="#15-standard-library-summary">Standard library summary</a></li><li><a href="#16-grammar">Grammar</a></li><li><a href="#17-resolved-for-the-10-freeze">Resolved for the 1.0 freeze</a></li></ol>
+<hr>
+<h2 id="1-scope">1. Scope</h2>
+<p>Wlel is an arena-first systems programming language. A Wlel source file
+(extension <code>.wlel</code>, UTF-8 text) is compiled to C99 and then by a C compiler
+(<code>cc</code>/<code>gcc</code>/<code>clang</code>). The C99 backend is the normative semantics; any
+alternative backend (e.g. the experimental QBE backend) MUST either agree
+with it on the subset it accepts or reject the program.</p>
+<p>The language has no garbage collector, no VM, no macros, no exceptions, no
+borrow checker, and no operator overloading. Memory is managed by *arenas as
+language syntax* (§10); recoverable errors are values (<code>Result</code>/<code>Option</code>,
+§8); unrecoverable states abort via <code>panic</code> (§12.3).</p>
+<h2 id="2-lexical-structure">2. Lexical structure</h2>
+<h3 id="21-source-encoding">2.1 Source encoding</h3>
+<p>Source files are UTF-8 text and use the extension <code>.wlel</code>. Only ASCII
+characters are significant to the lexer outside string literals. Lines are
+terminated by <code>\n</code>; <code>\r\n</code> is accepted. There are no block comments.</p>
+<h3 id="22-comments">2.2 Comments</h3>
+<ul><li><code>// text</code> — a line comment, ignored except as noted below.</li><li><code>/// text</code> — a <em>doc comment</em> (a <code>//</code> comment whose text begins with exactly one additional <code>/</code>). Doc comments are consumed by <code>wlel doc</code>; they have no effect on semantics. <code>////</code> is a plain comment.</li></ul>
+<h3 id="23-keywords">2.3 Keywords</h3>
+<p>The following 22 words are reserved and MUST NOT be used as identifiers:</p>
+<pre><code>fn extern struct enum impl match use test as defer arena let return
+if else while for in break continue true false</code></pre>
+<p><code>new</code>, <code>wlel_sizeof</code>, and <code>wlel_arena</code> are not keywords but parser-level
+builtin forms (§5.9). Identifiers match <code>[A-Za-z_][A-Za-z0-9_]*</code>.</p>
+<p>The identifier prefix <code>_wlel_</code> is reserved: a user declaration of a variable,
+parameter or function with this prefix is a compile-time error. Identifiers
+beginning with a single <code>_</code> (but not <code>_wlel_</code>) are ordinary names that opt
+out of unused warnings (§9.6).</p>
+<p>A <em>declaration name</em> MUST NOT contain <code>__</code> (two consecutive underscores):
+that sequence is the monomorphization separator (<code>Vec[int]</code> is emitted as
+<code>Vec__int</code>), so allowing it in source would let a user type or function
+shadow a generated instance. A struct or enum name MUST also not be a
+builtin type name (<code>string</code>, <code>u8</code>, <code>float</code>, …), a C keyword/runtime symbol,
+or <code>main</code> — the first would be unreachable behind the builtin, the last
+would collide with the C entry point.</p>
+<p>Because Wlel compiles to C, names that are C keywords or built-in type names
+(<code>int</code>, <code>long</code>, <code>double</code>, <code>char</code>, <code>void</code>, <code>size_t</code>, ...) and names defined by
+the generated prelude (<code>printf</code>, <code>malloc</code>, <code>strlen</code>, <code>wlel_alloc</code>, <code>std__*</code>,
+<code>sys__*</code>, ...) are rejected by the checker for locals, parameters, fields,
+functions, struct/enum names and enum variants — they would collide in the
+emitted C.</p>
+<h3 id="24-integer-literals">2.4 Integer literals</h3>
+<ul><li>Radices: decimal, <code>0x</code>/<code>0X</code> (hexadecimal), <code>0b</code>/<code>0B</code> (binary), <code>0o</code>/<code>0O</code> (octal). Digit groups MAY contain <code>_</code> separators, which are ignored: <code>1_000_000</code>, <code>0xFF</code>, <code>0b1010_1010</code>.</li><li>An unsuffixed integer literal SHALL denote a value representable in <code>i64</code> (<code>int</code>). Out of range: compile-time error.</li><li>An unsuffixed integer literal is <em>untyped</em>: it adapts to the context's integer width with a range check (§4.2). Standing alone it has type <code>int</code>.</li><li>A <em>suffix</em> fixes the type by desugaring to a cast: <code>10u8</code> is exactly <code>10 as u8</code>. Suffixes: <code>i8 i16 i32 i64 u8 u16 u32 u64 usize byte char</code> (and <code>f32 f64</code>, which make the literal a float literal). Because the suffix is a cast, <strong>no range check is applied</strong>: <code>300i8</code> is accepted and wraps to <code>44</code>, identically to <code>300 as i8</code>.</li><li>Radix literals accept the width suffixes listed above (e.g. <code>0xFFi32</code>); <code>byte</code>/<code>char</code>/<code>f32</code>/<code>f64</code> are not accepted after a radix literal, since their letters are valid radix digits.</li></ul>
+<h3 id="25-floating-point-literals">2.5 Floating-point literals</h3>
+<p>A number token is a float literal if and only if it contains a <code>.</code> followed
+by a digit (<code>3.14</code>, <code>2.0</code>), or an exponent part (<code>1e3</code>, <code>1.5e-3</code>, <code>2E+8</code>).
+Consequently:</p>
+<ul><li><code>1e3</code> is a float literal (value <code>1000.0</code>, type <code>float</code>).</li><li><code>1.</code> is not a float literal (<code>1</code> followed by the <code>.</code> token).</li><li><code>.5</code> is not a number token.</li></ul>
+<p>Unsuffixed float literals parse as <code>f64</code> and are untyped; they adapt to any
+float width in context (§4.2). Suffixes <code>f32</code>/<code>f64</code> fix the width. A float
+literal that cannot be parsed as <code>f64</code> is a compile-time error.</p>
+<h3 id="26-string-literals">2.6 String literals</h3>
+<p>A string literal is delimited by <code>&quot;</code>. Recognized escapes: <code>\n \t \r \&quot; \\ \0</code>.
+Any other escape is a compile-time error, as is an unterminated literal.
+Multi-byte UTF-8 code points are collected verbatim and validated. A string
+literal has type <code>string</code> (§3).</p>
+<p>There are no character literals (<code>&#x27;c&#x27;</code> does not exist), no raw strings, and
+no hex/unicode escapes. A single character is written as a string of length
+one, or as a <code>u8</code> integer.</p>
+<h3 id="27-operators-and-punctuation">2.7 Operators and punctuation</h3>
+<pre><code>( ) { } [ ] , . .. : :: ;
+=  :=  += -= *= /= %=
++ - * / %  !  ~  &amp; | ^ &lt;&lt; &gt;&gt;  &amp;&amp; ||
+== != &lt; &gt; &lt;= &gt;=  -&gt;  =&gt;  ?</code></pre>
+<p>There is no <code>++</code>, no <code>--</code>, no compound bitwise assignment (<code>&amp;=</code> etc.), no
+ternary operator, and no comma operator.</p>
+<h2 id="3-types">3. Types</h2>
+<h3 id="31-primitive-types">3.1 Primitive types</h3>
+<table>
+<thead><tr><th>Spelling</th><th>Alias for</th><th>C type</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>i8</code></td><td>—</td><td><code>int8_t</code></td><td></td></tr>
+<tr><td><code>i16</code></td><td>—</td><td><code>int16_t</code></td><td></td></tr>
+<tr><td><code>i32</code></td><td>—</td><td><code>int32_t</code></td><td></td></tr>
+<tr><td><code>i64</code> / <code>int</code></td><td>—</td><td><code>long long</code></td><td><code>int</code> is a first-class alias, not sugar to be removed</td></tr>
+<tr><td><code>u8</code> / <code>byte</code> / <code>char</code></td><td>—</td><td><code>uint8_t</code></td><td><code>byte</code> and <code>char</code> are aliases of <code>u8</code></td></tr>
+<tr><td><code>u16</code></td><td>—</td><td><code>uint16_t</code></td><td></td></tr>
+<tr><td><code>u32</code></td><td>—</td><td><code>uint32_t</code></td><td></td></tr>
+<tr><td><code>u64</code></td><td>—</td><td><code>uint64_t</code></td><td></td></tr>
+<tr><td><code>usize</code></td><td>—</td><td><code>size_t</code></td><td></td></tr>
+<tr><td><code>f32</code></td><td>—</td><td><code>float</code></td><td></td></tr>
+<tr><td><code>f64</code> / <code>float</code></td><td>—</td><td><code>double</code></td><td></td></tr>
+<tr><td><code>bool</code></td><td>—</td><td><code>_Bool</code></td><td></td></tr>
+<tr><td><code>string</code></td><td>—</td><td><code>const char *</code></td><td>immutable, NUL-terminated (§3.5)</td></tr>
+<tr><td><code>void</code></td><td>—</td><td><code>void</code></td><td>only as a return type (§3.6)</td></tr>
+</tbody></table>
+<h3 id="32-compound-types">3.2 Compound types</h3>
+<ul><li><strong>Struct</strong>: nominal, declared <code>struct Name { field: T, ... }</code>. Layout is the C layout of an equivalent C struct (fields in declaration order, standard C alignment/padding) — this is normative for FFI (§14). Struct literals MUST list every field, by name, in declaration order. Recursive and mutually-referential structs are legal via pointers.</li><li><strong>Enum</strong>: a closed tagged union, declared <code>enum Name { Variant(T1, T2), Other }</code>. C layout: <code>struct { int _tag; union { struct { T1 f0; T2 f1; } Variant; ... } v; }</code>. Payload-less variants occupy no union slot. Enum values compare only by destruction via <code>match</code> (§8); relational and equality operators on enums are compile-time errors. Array-typed payloads are forbidden.</li><li><strong>Pointer</strong> <code>*T</code>: an unrestricted C pointer. <code>&amp;expr</code> requires <code>expr</code> to be an <em>lvalue</em> (variable, field, dereference, or index). <code>*p</code> dereferences. Field access auto-dereferences exactly one pointer level: <code>p.f</code> where <code>p: *S</code> behaves as <code>(*p).f</code>. Pointer indexing <code>p[i]</code> is allowed and never bounds-checked (§12.1). <code>*void</code> exists for opaque handles.</li><li><strong>Array</strong> <code>[T; N]</code>: a fixed-size C array, <code>N ≥ 1</code>. Arrays are **not first-class values**: they cannot be assigned as a whole, returned from functions, passed by value, stored as enum payloads, or elements of collections. An array used as a function argument decays to <code>*T</code> (§7.4). A <code>let</code> with an array annotation MAY supply fewer elements than <code>N</code>; C zero-fills the remainder. <code>std::len(arr)</code> yields the element count.</li></ul>
+<h3 id="33-type-parameters">3.3 Type parameters</h3>
+<p><code>fn</code>, <code>struct</code>, <code>enum</code> and <code>impl</code> MAY declare type parameters <code>[T, E, ...]</code>.
+A type parameter MUST NOT shadow a primitive type name or a reserved builtin
+struct (<code>ArenaStats</code>, <code>File</code>, <code>Thread</code>, <code>Mutex</code>, <code>Chan</code>). Every parameter of
+a generic function MUST be explicitly typed. Monomorphization is lazy and
+per-concrete-argument (§7.5); the mangled C name is <code>Name__arg1__arg2</code>.</p>
+<h3 id="34-reserved-names">3.4 Reserved names</h3>
+<p><code>ArenaStats</code>, <code>File</code>, <code>Thread</code>, <code>Mutex</code>, <code>Chan</code> are builtin types and cannot
+be redeclared. Enum variant names share one global namespace with each other
+and with struct and function names.</p>
+<h3 id="35-string">3.5 <code>string</code></h3>
+<p><code>string</code> is an immutable, NUL-terminated byte string (<code>const char *</code>).</p>
+<ul><li><code>s[i]</code> reads byte <code>i</code> as <code>u8</code>; reading <code>s[len]</code> (the NUL terminator) is legal, which makes <code>while s[i] != 0 { ... }</code> a valid iteration idiom.</li><li>Writing through <code>s[i] = x</code> is a compile-time error ("strings are immutable").</li><li>Relational operators <code>&lt; &gt; &lt;= &gt;=</code> on strings are compile-time errors; use <code>std::str_cmp</code>. <code>==</code> and <code>!=</code> compare <strong>by content</strong> (§5.5).</li><li><code>+</code> concatenates and allocates the result in the active arena (§5.5, §10.2).</li></ul>
+<h3 id="36-void">3.6 <code>void</code></h3>
+<p><code>void</code> is legal only as a function return type (and, implicitly, as the type
+of calls to such functions). A <code>void</code> value cannot be stored, passed,
+returned as data, or used as an element/payload. A <code>void</code> function MAY use a
+bare <code>return;</code> and MUST NOT <code>return expr;</code>.</p>
+<h2 id="4-conversions-and-literals">4. Conversions and literals</h2>
+<h3 id="41-assignability">4.1 Assignability</h3>
+<p>A value of type <code>V</code> is assignable to a target of type <code>T</code> if and only if:</p>
+<ol><li><code>T</code> and <code>V</code> are the same type, <strong>or</strong></li><li><code>T</code> is any float width and <code>V</code> is any integer width (implicit int→float widening — variables included), <strong>or</strong></li><li><code>V</code> is <code>f32</code> and <code>T</code> is <code>f64</code> — <strong>float widening</strong>: lossless, therefore implicit, and the mirror image of rule 2. <code>f64</code> → <code>f32</code> narrows and requires an explicit cast (§4.4), <strong>or</strong></li><li><code>V</code> is an untyped literal that fits <code>T</code> (§4.2), <strong>or</strong></li><li><code>V</code> is <code>[T&#x27;; N]</code> and <code>T</code> is <code>*T&#x27;</code> — <strong>argument decay only</strong>: this rule applies exclusively when the array is a function-call argument, never to <code>let</code> initialization, assignment, struct literals, or returns. An explicit <code>arr as *T&#x27;</code> is the general form and works anywhere (§4.4).</li></ol>
+<p>Everything else requires an explicit cast (§4.4).</p>
+<h3 id="42-literal-adaptation">4.2 Literal adaptation</h3>
+<p>An unsuffixed integer literal adapts to the context's expected integer
+width after a range check:</p>
+<table>
+<thead><tr><th>Target width</th><th>Accepted range</th></tr></thead>
+<tbody>
+<tr><td><code>i8</code></td><td>−128 .. 127</td></tr>
+<tr><td><code>i16</code></td><td>−32768 .. 32767</td></tr>
+<tr><td><code>i32</code></td><td>−2147483648 .. 2147483647</td></tr>
+<tr><td><code>i64</code> (<code>int</code>)</td><td>−2^63 .. 2^63−1</td></tr>
+<tr><td><code>u8</code>, <code>u16</code>, <code>u32</code>, <code>u64</code>, <code>usize</code></td><td>0 .. 2^N−1 (negatives rejected)</td></tr>
+</tbody></table>
+<p>Out of range: compile-time error ("literal N does not fit in type T").
+Unsuffixed float literals adapt to any float width without a range check.</p>
+<h3 id="43-mixed-width-arithmetic">4.3 Mixed-width arithmetic</h3>
+<p>For a binary arithmetic or comparison operator with integer operands:</p>
+<ul><li>Both operands untyped literals → computed at <code>i64</code>.</li><li>One literal + one typed → the literal MUST fit the typed operand's width; the result has the typed operand's width.</li><li>Both typed, same width → result that width.</li><li><strong>Both typed, different widths → compile-time error</strong> ("mixed int widths: A and B — cast explicitly").</li><li><strong>Exception — shifts</strong>: the shift amount converts freely to any integer width and is reduced modulo the left operand's width (§11.6); the result takes the <strong>left</strong> operand's width.</li></ul>
+<p>For float operands: int op float widens implicitly. When both operands are
+float typed, the <strong>wider width wins</strong> (<code>f32 + f64</code> is <code>f64</code>; <code>f32 + f32</code> is
+<code>f32</code>), which is lossless and symmetric — narrowing back to <code>f32</code> is an
+explicit cast (§4.4). An unsuffixed float literal never forces a width: it
+adapts to the other operand, exactly like an untyped integer literal
+(<code>f32v + 1.5</code> is <code>f32</code>). Comparisons follow the same rules: <code>f32</code> values
+compare against <code>f64</code> values after widening, and against float literals at
+the variable's width. <code>%</code> on floats is a compile-time error.</p>
+<h3 id="44-casts">4.4 Casts</h3>
+<p><code>expr as T</code> is legal exactly when it is on this matrix; every other cast is
+a compile-time error:</p>
+<table>
+<thead><tr><th>from</th><th>to</th></tr></thead>
+<tbody>
+<tr><td>any numeric (int/float, any width)</td><td>any numeric</td></tr>
+<tr><td>any pointer <code>*A</code></td><td>any pointer <code>*B</code></td></tr>
+<tr><td>any pointer</td><td>any integer</td></tr>
+<tr><td>any integer</td><td>any pointer</td></tr>
+<tr><td><code>string</code></td><td>any pointer</td></tr>
+<tr><td>an array <code>[T; N]</code></td><td><code>*T</code> (explicit decay)</td></tr>
+</tbody></table>
+<p>Casts never range-check: <code>300 as i8</code> wraps (§11). Pointer↔integer and
+<code>string</code>↔pointer casts are the FFI escape hatches; dereferencing a pointer
+produced by an invalid cast is undefined behavior.</p>
+<p>Explicit array decay <code>arr as *T</code> yields a pointer to the first element and
+is legal wherever an expression is (§4.1 rule 5 covers only the implicit
+argument case). The element types must match exactly — <code>[[int; 2]; 3]</code> does
+not cast to <code>*int</code>.</p>
+<h3 id="45-wrap-cast-canonicalization-32-bit">4.5 Wrap-cast canonicalization (&lt; 32-bit)</h3>
+<p>For arithmetic on widths <strong>narrower than 32 bits</strong> (<code>i8 u8 i16 u16</code>), the
+checker wraps the result of <code>+ - * / %</code>, <code>&amp; | ^</code>, <code>&lt;&lt; &gt;&gt;</code>, unary <code>-</code> and
+unary <code>~</code> in an explicit cast to the original width. Normative effect:
+<strong>narrow-width arithmetic wraps at its own width</strong>, never at C's <code>int</code>
+promotion width. Widths ≥ 32 wrap per §11 directly.</p>
+<h2 id="5-expressions-and-evaluation-order">5. Expressions and evaluation order</h2>
+<h3 id="51-precedence-and-associativity">5.1 Precedence and associativity</h3>
+<p>From tightest to loosest. <strong>Every binary level is left-associative.</strong> Unary
+prefix operators (<code>- ! ~ &amp; *</code>) bind tighter than every binary operator and
+nest rightward (<code>- -x</code>).</p>
+<table>
+<thead><tr><th>Level</th><th>Forms</th></tr></thead>
+<tbody>
+<tr><td>postfix</td><td><code>.field</code>, <code>.method(args)</code>, <code>[index]</code>, <code>?</code> (try) — chain leftward</td></tr>
+<tr><td>unary prefix</td><td><code>- ! ~ &amp; *</code></td></tr>
+<tr><td>cast</td><td><code>as T</code> (chains: <code>a as u8 as u16</code>)</td></tr>
+<tr><td>multiplicative</td><td><code>* / %</code></td></tr>
+<tr><td>additive</td><td><code>+ -</code></td></tr>
+<tr><td>shift</td><td><code>&lt;&lt; &gt;&gt;</code></td></tr>
+<tr><td>relational</td><td><code>== != &lt; &gt; &lt;= &gt;=</code></td></tr>
+<tr><td>bitwise AND</td><td><code>&amp;</code></td></tr>
+<tr><td>bitwise XOR</td><td><code>^</code></td></tr>
+<tr><td>bitwise OR</td><td><code>|</code></td></tr>
+<tr><td>logical AND</td><td><code>&amp;&amp;</code></td></tr>
+<tr><td>logical OR</td><td><code>||</code></td></tr>
+</tbody></table>
+<p>Examples: <code>-a * b</code> parses as <code>(-a) * b</code>; <code>-x as u8</code> as <code>(-x) as u8</code>;
+<code>a || b &amp;&amp; c</code> as <code>a || (b &amp;&amp; c)</code>.</p>
+<h3 id="52-evaluation-order-normative-summary">5.2 Evaluation order (normative summary)</h3>
+<ol><li><strong>Binary operators and function arguments: order unspecified.</strong> Wlel inherits C's sequencing; a program whose behavior depends on the order of side effects in <code>f(a(), b())</code> or <code>g() + h()</code> is non-portable.</li><li><strong><code>&amp;&amp;</code> and <code>||</code> short-circuit</strong>: the right operand is evaluated only if the left did not already decide the result. Safe-mode checks inside a short-circuited operand do not run (§12).</li><li><strong>Single evaluation guarantees</strong>: the collection of a <code>for-in</code>, the scrutinee of a <code>match</code>, the inner expression of <code>expr?</code>, and the bounds of a range <code>for i in a..b</code> are each evaluated <strong>exactly once</strong>, into a compiler temporary, before the consuming construct proceeds.</li><li><strong><code>return</code> ordering</strong>: the returned value is fully evaluated <strong>before</strong> any <code>defer</code> body runs and <strong>before</strong> an enclosing <code>arena</code> block frees its memory (§10.4). The value may safely be a scalar or a pointer to memory that outlives the arena.</li><li>**Deferred expressions are evaluated when the defer runs, not when registered** (§6.7).</li><li>Assignment <code>x = rhs</code>: for <code>rhs</code> of the form <code>expr?</code> the RHS is evaluated into a temporary first; otherwise the statement emits C <code>lhs op rhs</code> with C's sequencing.</li></ol>
+<h3 id="53-operands">5.3 Operands</h3>
+<ul><li><code>-</code> requires a number; <code>!</code> requires <code>bool</code>; <code>~</code> requires an integer.</li><li><code>&amp;&amp;</code>/<code>||</code> require <code>bool</code> operands and yield <code>bool</code>.</li><li>Comparisons yield <code>bool</code>. Enums, structs and arrays cannot be compared.</li><li>Indexing: arrays and pointers accept an <code>int</code> index (<code>s[i]</code> for strings reads <code>u8</code>).</li></ul>
+<h3 id="54-function-calls">5.4 Function calls</h3>
+<p><code>name(args)</code> or <code>name[T1, T2](args)</code> (turbofish, generic functions only).
+Resolution order is §7.6. All arguments are passed <strong>by value</strong> (§7.4).</p>
+<h3 id="55-string-operators">5.5 String operators</h3>
+<ul><li><code>s1 + s2</code> → new <code>string</code> of length <code>len(s1)+len(s2)</code>, allocated in the active arena (§10.2). Neither operand is modified.</li><li><code>s1 == s2</code> / <code>s1 != s2</code> → content comparison (byte-wise, NUL-terminated), result <code>bool</code>.</li></ul>
+<h3 id="56-compound-assignment">5.6 Compound assignment</h3>
+<p><code>+= -= *= /= %=</code> are <strong>statements</strong>, not expressions. The target MUST be a
+numeric lvalue for all of them; <code>%=</code> additionally requires an integer
+target. <code>s[i] op= x</code> is rejected (strings are immutable). Semantics of
+<code>x op= v</code> are exactly <code>x = x op v</code> (including §4.3 and §4.5 rules), with
+the target evaluated once.</p>
+<h3 id="57-assignment-and-lvalues">5.7 Assignment and lvalues</h3>
+<p>The target of <code>=</code>/compound assignment MUST be an lvalue: a variable, a
+field, a dereference, or an index of an array/pointer. Array-type targets
+and string-index targets are rejected by the checker, as is any other
+non-lvalue target (<code>1 = 2</code>, <code>f().x = 1</code>, <code>(x + 1) = 2</code>) — this is a
+compile-time error with a clear message, not a delegation to the C
+compiler.</p>
+<p>A plain write (<code>x = 5;</code>) does <strong>not</strong> count as a <em>read</em> for the
+unused-variable warning (§9.6).</p>
+<h3 id="58-the-try-postfix-expr">5.8 The try postfix <code>expr?</code></h3>
+<p>Legal <strong>only</strong> in statement positions: <code>let x := expr?;</code>, <code>x = expr?;</code>,
+<code>return expr?;</code>, or as a bare expression statement. Elsewhere it is a
+compile-time error. Semantics (§8.3, §12.3):</p>
+<ul><li><code>expr</code> MUST be a std <code>Result[T, E]</code> or <code>Option[T]</code>.</li><li>On the success variant, the payload is the value of <code>expr?</code>.</li><li>On the error variant, the enclosing function returns that error variant <strong>immediately, running deferred code first</strong>; therefore the enclosing function MUST itself return the same std enum with the <strong>same error type <code>E</code></strong> (exact match).</li><li><code>expr?</code> inside a <code>defer</code> block is rejected, as are <code>return</code>/<code>break</code>/ <code>continue</code> there (§6.7).</li><li>The inner expression is evaluated exactly once.</li></ul>
+<h3 id="59-allocator-builtin-forms">5.9 Allocator builtin forms</h3>
+<ul><li><code>new(T)</code> → <code>*T</code>; <code>new(T, count)</code> → <code>*T</code> for <code>count</code> elements. <code>T</code> MUST not be <code>void</code> or an array. <code>count</code> MUST be an <code>int</code>. Arena-aware (§10.2).</li><li><code>wlel_sizeof(T)</code> → <code>int</code>, the <code>sizeof</code> of <code>T</code> in the C backend.</li><li><code>wlel_arena()</code> → <code>*void</code>, a handle to the innermost active arena; legal only lexically inside an <code>arena</code> block (§10.1).</li></ul>
+<h2 id="6-statements-and-control-flow">6. Statements and control flow</h2>
+<h3 id="61-declarations">6.1 Declarations</h3>
+<ul><li><code>x := expr;</code> — declare with inferred type (the type of <code>expr</code>; inferring from <code>void</code> is an error). The optional <code>let</code> prefix is equivalent: <code>let x := expr;</code>.</li><li><code>let x: T = expr;</code> — declare with annotation; <code>expr</code> MUST be assignable to <code>T</code>. For arrays, fewer elements than <code>N</code> are permitted (zero-filled).</li><li>Redeclaration of a name in the <strong>same scope</strong> is an error; shadowing in a nested scope is legal and the innermost binding wins.</li><li>A declaration initializer MAY be a value-form <code>match</code> or <code>expr?</code> (§8.3).</li></ul>
+<h3 id="62-blocks-and-scope">6.2 Blocks and scope</h3>
+<p><code>{ ... }</code> introduces a scope. Loop bodies, <code>if</code>/<code>else</code> bodies, <code>match</code> arms,
+<code>defer</code> blocks and <code>arena</code> bodies each push a scope. Statements after a
+terminator (<code>return</code>, <code>break</code>, <code>continue</code>) in the same block produce the
+<code>unreachable statement</code> warning.</p>
+<h3 id="63-if-while">6.3 if / while</h3>
+<p><code>if cond { } else if cond { } else { }</code> — braces required; <code>cond</code> MUST be
+<code>bool</code>. <code>while cond { }</code> — same condition rule.</p>
+<h3 id="64-range-for">6.4 Range for</h3>
+<p><code>for i in a..b { }</code> — the range is <strong>half-open</strong>: <code>i</code> takes
+<code>a, a+1, ...</code> while <code>i &lt; b</code>. Both bounds MUST be integers and are evaluated
+once before the loop. The loop variable is always typed <code>int</code> (i64),
+regardless of the bounds' widths, and is scoped to the body.</p>
+<h3 id="65-for-in">6.5 for-in</h3>
+<p><code>for x in coll { }</code> accepts:</p>
+<ul><li>an array <code>[T; N]</code> — element type <code>T</code> (element types must not themselves be arrays: the loop variable is a value, and arrays are not first-class);</li><li>any struct with a field <code>data: *T</code> <strong>and</strong> an integer <code>len</code> field (a "Vec-shaped" struct; <code>std::Vec[T]</code> is one) — element type <code>T</code>.</li></ul>
+<p>Anything else is a compile-time error. Semantics:</p>
+<ul><li>The collection header/expression is evaluated <strong>once</strong> (snapshot). Pushing to a Vec during iteration does not extend the loop; the buffer the snapshot points at stays alive in the arena, so element reads remain valid.</li><li>The loop variable is a <strong>copy</strong> of each element and is scoped to the body.</li><li>In safe mode each element read is bounds-checked (§12.1).</li></ul>
+<h3 id="66-break-continue">6.6 break / continue</h3>
+<p>Legal only lexically inside a loop. Executing them runs the defers
+registered since loop entry, innermost first (§6.7).</p>
+<h3 id="67-defer">6.7 defer</h3>
+<p>Two forms:</p>
+<ul><li><code>defer expr;</code> — <code>expr</code> MUST have type <code>void</code> (e.g. a call). Being an expression, it syntactically cannot contain <code>return</code>/<code>break</code>/<code>continue</code>.</li><li><code>defer { stmts }</code> — a block. It has <strong>its own defer scope</strong>: a <code>defer</code> registered inside it runs at the end of that block. <code>return</code>, <code>break</code>, <code>continue</code> and <code>expr?</code> inside a defer block are compile-time errors. Nested defers are legal.</li></ul>
+<p><strong>LIFO at scope exit.</strong> Registered defers run innermost-first when the
+enclosing block exits, whether by fall-through, <code>return</code> (after the return
+value is evaluated — §5.2), <code>break</code>/<code>continue</code> (defers since loop entry), or
+the error path of <code>expr?</code>. A deferred expression is evaluated at the moment
+it runs, not when registered.</p>
+<h3 id="68-return">6.8 return</h3>
+<p><code>return;</code> for void functions; <code>return expr;</code> otherwise. Every non-void
+function MUST provably return on every path. The proof accepts:</p>
+<ul><li>a trailing <code>return</code>;</li><li>an <code>if</code>/<code>else</code> where <strong>both</strong> branches terminate;</li><li>a trailing nested block, <code>arena</code> block, or statement-form <code>match</code> whose arms all terminate;</li><li>a trailing <code>panic(...)</code> call (§12.3), which terminates.</li></ul>
+<p>Otherwise: compile-time error. <code>main</code> may be declared without a return type;
+it becomes C <code>int main</code> and bare <code>return;</code> in it returns 0 (§9.2).</p>
+<h3 id="69-arena-block">6.9 arena block</h3>
+<p><code>arena { ... }</code> (default capacity 4096 bytes) or <code>arena(expr) { ... }</code>
+(<code>expr</code> MUST be <code>int</code>). Semantics are §10.1. Nested arena blocks are legal;
+each inner block is an independent arena. <code>wlel_arena()</code> inside the block
+yields the arena handle.</p>
+<h3 id="610-test-blocks">6.10 test blocks</h3>
+<p><code>test &quot;name&quot; { ... }</code> at top level. The body is checked as a void,
+parameter-less function. Test blocks are <strong>ignored</strong> by <code>wlel run</code> and
+<code>wlel build</code> (zero overhead) and executed by <code>wlel test</code> (§9.4). <code>assert</code>/
+<code>assert_eq</code>/<code>panic</code> inside a test fail that test only (the suite continues);
+anywhere else they abort the process.</p>
+<h2 id="7-functions-generics-and-methods">7. Functions, generics and methods</h2>
+<h3 id="71-declaration">7.1 Declaration</h3>
+<pre><code>fn name(p1: T, p2) -&gt; Ret { ... }</code></pre>
+<p>An untyped parameter defaults to <code>int</code>; a missing return type defaults to
+<code>void</code>. There is no overloading: duplicate function names are errors.
+Parameters and returns follow §3 (arrays may not be parameters or returns).</p>
+<h3 id="72-extern-functions">7.2 extern functions</h3>
+<p><code>extern fn name(p: T, ...) -&gt; R;</code> declares a C symbol: prototype only,
+terminated by <code>;</code>, no body, not generic, not named <code>main</code>. The emitted
+prototype is non-<code>static</code>, so the linker resolves it. Type checking of
+calls is exactly as for Wlel functions (widths are strict: C <code>int</code> is
+Wlel <code>i32</code>, not <code>int</code>).</p>
+<h3 id="73-calls-and-argument-passing">7.3 Calls and argument passing</h3>
+<p>All arguments pass <strong>by value</strong> (C values). Arrays cannot be passed by
+value; they decay to <code>*T</code> at the call site (§4.1). Structs are copied
+bit-wise per C semantics. Argument count and per-argument types are checked
+at compile time.</p>
+<h3 id="74-method-sugar-impl">7.4 Method sugar (<code>impl</code>)</h3>
+<pre><code>impl Name { fn m(self, ...) -&gt; R { ... } }
+impl Box[T] { fn get(self) -&gt; T { ... } }   // generic impl repeats the params</code></pre>
+<p>Every method is desugared to a plain function <code>Name__m</code> that flows through
+the whole pipeline (signature check, codegen, cache) — method calls are
+direct C calls, never dynamic dispatch. Rules:</p>
+<ul><li>The first parameter MUST be named <code>self</code>. An unannotated <code>self</code> defaults to the impl type <strong>by value</strong>; <code>self: *Name</code> is a pointer method.</li><li><strong>Receiver adaptation</strong>: a pointer method called on a value receiver auto-borrows (<code>&amp;recv</code>; receiver must be an lvalue, else compile-time error); a value method called on a pointer receiver auto-dereferences.</li><li>A generic impl MUST repeat the type's own type parameters verbatim. Methods cannot declare their own type parameters; they monomorphize per receiver like generic functions (<code>Box__get__int</code>).</li><li>Methods on enums are legal; the body destructures with <code>match</code>.</li><li>Duplicate method names on one type are errors. <code>impl</code> on an unknown type is an error. A free function named <code>Name__m</code> colliding with a desugared method is an error.</li></ul>
+<p>Resolution of <code>recv.m(args)</code>: locals first (innermost scope), then the
+method table of the receiver's type.</p>
+<h3 id="75-generics-monomorphization">7.5 Generics (monomorphization)</h3>
+<p>Templates are never checked or emitted unless instantiated. Instantiation
+happens at call sites / struct literals / enum constructions with concrete
+types, driven by (in priority order): explicit type arguments (<code>id[int](5)</code>),
+inference from argument types, inference from struct-literal field types,
+and expected-type hints from annotated <code>let</code> and <code>return</code>. An parameter that
+cannot be inferred is a compile-time error naming the parameter. Generic
+functions and impls mangle as <code>Name__T1__T2</code> (§3.3).</p>
+<h3 id="76-name-resolution-for-calls">7.6 Name resolution for calls</h3>
+<p>A call <code>foo(...)</code> resolves in this order; the first match wins:</p>
+<ol><li>enum variant constructor (if <code>foo</code> is a known variant name);</li><li><code>sys::*</code> builtins (always available, no import);</li><li><code>std::*</code> (requires <code>use std;</code> — §9.3);</li><li>checker-level builtins: <code>assert</code>, <code>assert_eq</code>, <code>panic</code>, <code>arena_stats</code>;</li><li>generic function (explicit type args, then inference);</li><li>concrete function signature;</li><li>raw allocator builtins (<code>wlel_alloc</code>, <code>wlel_free</code>, <code>wlel_arena_new</code>, <code>wlel_arena_alloc</code>, <code>wlel_arena_free</code>, <code>wlel_print_*</code>);</li><li>else: "call to undefined function".</li></ol>
+<p>Bare identifiers (values, not calls): locals shadow enum variant names.</p>
+<h2 id="8-enums-and-match">8. Enums and match</h2>
+<h3 id="81-construction">8.1 Construction</h3>
+<p>A payload-less variant name is a value (<code>None</code>). A payload-ful variant used
+as a value is a constructor call requiring exactly the declared payload
+arity and types (<code>Some(5)</code>, <code>Circle(1.0, 2.0)</code>). Generics are inferred from
+payloads or from expected-type hints (§7.5).</p>
+<h3 id="82-match">8.2 match</h3>
+<pre><code>match scrutinee {
+    Variant(a, b) =&gt; expr_or_block,
+    Other         =&gt; expr_or_block,
+    _             =&gt; expr_or_block,
+}</code></pre>
+<ul><li>The scrutinee MUST be an enum type and is evaluated exactly once.</li><li>A pattern binds each payload to a name (scope: the arm). A binding named <code>_</code> discards. The number of bindings MUST equal the variant's arity.</li><li><strong>Exhaustiveness is enforced</strong>: every variant MUST be covered exactly once by a named pattern or by <code>_</code>. <code>_</code> MUST be the last arm; an arm after <code>_</code> is an error; duplicate arms are errors; unknown variant names are errors.</li><li><strong>Statement form</strong>: arms may be blocks; if every arm terminates (<code>return</code>, <code>break</code>, <code>continue</code>, <code>panic</code>), the match terminates.</li><li><strong>Value form</strong>: legal only directly as a <code>let</code> initializer or a <code>return</code> value. All arm expressions MUST share one type; <code>void</code> and array results are rejected.</li></ul>
+<h3 id="83-result-option">8.3 <code>Result</code>, <code>Option</code>, <code>?</code></h3>
+<p>The std library defines <code>enum Result[T, E] { Ok(T), Err(E) }</code> and
+<code>enum Option[T] { Some(T), None }</code>. The <code>?</code> operator (§5.8) propagates the
+error variant: <code>Ok/Some</code> yields the payload; <code>Err(e)</code>/<code>None</code> makes the
+enclosing function return <code>Err(e)</code>/<code>None</code> after running defers. The
+enclosing function MUST return the same std enum with the same <code>E</code>.</p>
+<h2 id="9-programs-and-modules">9. Programs and modules</h2>
+<h3 id="91-files">9.1 Files</h3>
+<p>A <code>.wlel</code> file contains top-level items in any order: <code>fn</code>, <code>extern fn</code>,
+<code>struct</code>, <code>enum</code>, <code>impl</code>, <code>test</code>, <code>use</code>. Names live in one flat namespace
+after import merging; there are no module qualifiers except the hardcoded
+<code>std::</code> and <code>sys::</code> roots.</p>
+<h3 id="92-entry-point">9.2 Entry point</h3>
+<p><code>fn main()</code> or <code>fn main() -&gt; int</code> is the entry point: <code>main</code> takes no
+parameters (the C entry point's <code>argc</code>/<code>argv</code> are exposed through
+<code>sys::argc()</code>/<code>sys::arg(i)</code>) and must return an integer type or nothing.
+Command-line access is
+via <code>sys::argc()</code> and <code>sys::arg(i)</code> (out-of-range → <code>&quot;&quot;</code>); <code>sys::exit(code)</code>
+terminates immediately (and still runs <code>atexit</code> cleanup, hence root-arena
+freeing, §10.1).</p>
+<h3 id="93-imports">9.3 Imports</h3>
+<ul><li><code>use &quot;path.wlel&quot;;</code> — imports a file relative to the importing file, <strong>recursively</strong>, with diamond deduplication by canonical path. Imported items are tagged with their source file. A <code>use std;</code> in any imported file propagates to the whole import tree.</li><li><code>use std;</code> — splices the embedded standard library ahead of user code; it flows through the same checker, so only used instantiations are emitted.</li><li>An import that contributes nothing produces the `import 'x' is never used` warning.</li></ul>
+<h3 id="94-toolchain-contract">9.4 Toolchain contract</h3>
+<ul><li><code>wlel run</code> — compile (safe-debug, §12) to a cache directory and execute.</li><li><code>wlel build [-O0..-O3]</code> — compile to a binary (release semantics, §12). <code>-sanitize</code> adds AddressSanitizer/UBSan instrumentation to the <em>generated C</em> compile. <code>--emit-c</code> writes the generated C next to the output.</li><li><code>wlel check</code> — type-check and print warnings, no codegen.</li><li><code>wlel test</code> — compile with safe-debug and a test runner: each <code>test</code> block runs isolated (a failing <code>assert</code>/<code>panic</code> fails one test, the suite continues); exit code 1 if any test failed.</li><li><code>wlel fmt</code>, <code>wlel doc</code>, <code>wlel lsp</code>, <code>wlel new</code>, <code>wlel add</code> — formatter, documentation generator, language server, project scaffolding, dependency management (see README).</li><li>Project mode: a <code>wlel.toml</code> manifest with <code>[package]</code> and <code>[deps]</code> (path and git dependencies, semver caret requirements, <code>wlel.lock</code> pin). Entry point <code>src/main.wlel</code>; <code>src/lib.wlel</code> is library-only.</li></ul>
+<h3 id="95-diagnostics">9.5 Diagnostics</h3>
+<p>One compile reports <strong>all</strong> syntax errors (parser recovery at statement and
+top level). Type checking reports the first error with <code>file:line:col</code>.
+The generated C carries <code>#line</code> directives so C-compiler diagnostics point
+back to the <code>.wlel</code> source.</p>
+<h3 id="96-warnings-non-fatal-sorted-by-position">9.6 Warnings (non-fatal, sorted by position)</h3>
+<ol><li><code>unused variable &#x27;x&#x27;</code> — never read; a pure write does not count as a read.</li><li><code>unused parameter &#x27;p&#x27;</code>.</li><li><code>import &#x27;x&#x27; is never used</code> (including <code>use std;</code>).</li><li><code>unreachable statement</code> — after <code>return</code>/<code>break</code>/<code>continue</code> in a block.</li></ol>
+<p>Names beginning with <code>_</code> are exempt from 1 and 2.</p>
+<h2 id="10-memory-model">10. Memory model</h2>
+<p>This section is the core contract of Wlel. It is deliberately small.</p>
+<h3 id="101-arenas">10.1 Arenas</h3>
+<ul><li>An arena is a growable chain of chunks; allocation is an O(1) pointer bump; freeing the arena frees every chunk in O(1) amortized (per-chain).</li><li><strong>Root arena</strong>: every thread of execution owns a root arena created at thread start (main: capacity 65536 bytes; spawned threads: 64 KiB). The main root arena is released by an <code>atexit</code> handler, so temporaries that outlive any block (e.g. strings built with <code>+</code> at top level) are freed at process exit. Spawned threads free their root arena at thread exit.</li><li><strong>Arena blocks</strong>: <code>arena { }</code> / <code>arena(n) { }</code> create a fresh arena, make it active, run the body, then free the whole arena and restore the previously active one. Blocks nest arbitrarily; each has its own capacity (default 4096 bytes). Allocation beyond the capacity chains a new chunk (capacity <code>max(n, block capacity)</code>), so programs never fail on arena exhaustion.</li><li><strong>Alignment</strong>: every arena allocation is aligned to <strong>8 bytes</strong>.</li><li>Arena state (current arena, root arena) is <strong>thread-local</strong>. A thread never allocates from another thread's arena.</li></ul>
+<h3 id="102-what-allocates-where">10.2 What allocates where</h3>
+<ul><li><code>new(T)</code> / <code>new(T, n)</code> allocate in the <strong>active arena</strong> (innermost open block; the root arena if no block is open).</li><li>Every string-producing operation (<code>+</code> concat, <code>std::format</code>, <code>int_to_str</code>, <code>float_to_str</code>, <code>read_file</code>, <code>fs::read_all</code>, <code>str_sub</code>, <code>str_trim</code>, <code>map_keys</code>, ...) allocates its result in the active arena.</li><li><code>std::Vec</code>/<code>HashMap</code> buffers bump-allocate in the active arena; growing a Vec abandons the old buffer to the arena (freed with it).</li><li>Raw escapes: <code>wlel_alloc(n) -&gt; *void</code> (malloc) and <code>wlel_free(p)</code> are plain heap allocation for FFI-shaped needs; they are not arena-managed.</li></ul>
+<h3 id="103-aliasing">10.3 Aliasing</h3>
+<p><strong>Wlel has no borrow checker and no aliasing restrictions.</strong> Any number of
+aliases to the same memory may exist and mutate concurrently in the same
+thread; the checker imposes no discipline beyond types.</p>
+<ul><li>Within one thread, mutable aliasing is ordinary C aliasing.</li><li>Across threads (§13): sharing a single non-thread-safe object (e.g. a <code>Vec</code>) between threads without a mutex is a <strong>data race — undefined behavior</strong>, exactly as in C. This is user discipline by design and is documented, not hidden: use <code>sys::mutex_*</code>, or communicate ownership through channels.</li><li>Channels transfer <strong>by value</strong> (copy semantics), which is the sanctioned way to move data between threads without locks.</li></ul>
+<h3 id="104-lifetime-and-escape">10.4 Lifetime and escape</h3>
+<ul><li>Nothing statically prevents a pointer from escaping an <code>arena</code> block: assigning it to an outer variable, storing it in a struct, or returning it are all legal.</li><li><strong>A pointer into an arena that has been freed is dangling.</strong> Reading or writing through it is undefined behavior. This is the single lifetime rule of the language: <em>a value borrowed from an arena dies with the arena.</em></li><li><code>return</code> inside an arena evaluates the return value first (§5.2), so scalars and pointers to memory that outlives the arena escape safely; memory allocated <em>in</em> the arena does not.</li><li><strong>Safe-debug poison</strong>: in safe mode, freed arena chunks are filled with <code>0xDE</code> before being released, so use-after-free reads deterministic <code>0xDEDE...</code> garbage unless the allocator reuses the memory first. Release mode does not poison. The poison is a debugging aid, not a guarantee.</li><li><code>arena_stats() -&gt; ArenaStats</code> reports <code>{ bytes, chunks, peak }</code> for the active arena (the root arena when no block is open): bytes used across the chunk chain, number of chunks, and the high-water mark.</li></ul>
+<h2 id="11-arithmetic-integrity">11. Arithmetic integrity</h2>
+<p><strong>Arithmetic never traps and is never undefined for in-range operands.</strong></p>
+<ol><li><strong>Unsigned</strong> widths wrap modulo 2^N (C unsigned semantics).</li><li><strong>Signed</strong> widths wrap two's-complement: the backend compiles all generated C with <code>-fwrapv</code>, so signed overflow is <em>defined</em> as wrap, in every build mode.</li><li>Widths &lt; 32 bits wrap at their own width (§4.5), not at <code>int</code> promotion width.</li><li><strong>Integer division by zero</strong>: in release mode it inherits C semantics (undefined); in safe mode it aborts with a <code>file:line</code> message (§12.1).</li><li><strong>Division overflow is defined, not a trap.</strong> The one overflow pair <code>MIN / -1</code> (for <code>i32</code>/<code>int</code>) yields <code>MIN</code> — two's complement, like every other signed operation — and <code>MIN % -1</code> yields <code>0</code>. C leaves this undefined and an x86 <code>idiv</code> raises <code>SIGFPE</code>, so the backend guards it in <strong>both</strong> build modes.</li><li><strong>Shift counts are masked to the operand width.</strong> <code>x &lt;&lt; n</code> and <code>x &gt;&gt; n</code> shift by <code>n mod width</code> (8/16/32/64 according to the left operand's type), so <code>x &lt;&lt; 64</code> is <code>x</code>, a negative count wraps like any other two's complement value, and no shift is undefined. <code>&gt;&gt;</code> on a signed value is an arithmetic (sign-preserving) shift.</li><li><strong>Float</strong> arithmetic is IEEE-754: division by zero yields <code>inf</code>/<code>NaN</code> in <strong>both</strong> modes; float <code>%</code> does not exist (§4.3).</li><li><code>std::checked_add(a, b, &amp;out) -&gt; bool</code> (and <code>sub</code>, <code>mul</code>) computes overflow-checked integer math; on overflow it returns <code>false</code> <strong>and still stores the wrapped result</strong> in <code>*out</code>.</li></ol>
+<h2 id="12-safe-debug-vs-release">12. Safe-debug vs release</h2>
+<table>
+<thead><tr><th>Check</th><th><code>wlel run</code> / <code>wlel test</code> (safe)</th><th><code>wlel build</code> (release)</th></tr></thead>
+<tbody>
+<tr><td>Array bounds (<code>[T; N]</code> indexing, for-in reads)</td><td>abort, <code>file:line: index N, length M</code></td><td>absent (zero overhead)</td></tr>
+<tr><td>Pointer indexing (<code>new(T,n)</code> buffers, decayed arrays)</td><td><strong>not checked</strong> (pointers carry no length)</td><td>absent</td></tr>
+<tr><td>Integer <code>/</code> and <code>%</code> by zero</td><td>abort, <code>file:line</code></td><td>C semantics (undefined)</td></tr>
+<tr><td>Float division by zero</td><td>IEEE <code>inf</code> (never checked)</td><td>IEEE <code>inf</code></td></tr>
+<tr><td>Arena free</td><td>poison-fill <code>0xDE</code></td><td>plain free</td></tr>
+</tbody></table>
+<p>Failure paths print to stderr and exit with code 1. Helper code is emitted
+only when used; a release binary contains none of it. Short-circuit
+operators skip the checks of the unevaluated operand (§5.2).</p>
+<h3 id="121-assert-assert-eq-panic">12.1 assert / assert_eq / panic</h3>
+<ul><li><code>assert(cond)</code> — aborts (or fails the enclosing test) with <code>assertion failed at file:line</code> when <code>cond</code> is false.</li><li><code>assert_eq(a, b)</code> — mirrors <code>==</code> exactly: literal adaptation, the mixed-width rule, string content comparison, bool, and f32↔f64 numeric comparison after widening (§4.3); other type pairs are rejected.</li><li><code>panic(msg: string)</code> — aborts with <code>panic at file:line: msg</code>; counted as a terminator for the return-path proof (§6.8); statements after it in the same block are unreachable.</li><li>Inside a spawned thread these <strong>abort the process</strong> (a thread never unwinds into another thread's stack).</li></ul>
+<h2 id="13-concurrency">13. Concurrency</h2>
+<p>Available without <code>use std;</code> via <code>sys::*</code>.</p>
+<ul><li><code>sys::thread(work, data) -&gt; *Thread</code> spawns a thread running the function named <code>work</code> (functions are not values: the worker is resolved <strong>by name</strong>, must be concrete, take exactly one parameter, and return <code>void</code>; <code>data</code> must be assignable to that parameter). The argument is boxed (copied) before spawn. <code>sys::join(t)</code> blocks until the thread ends and frees the handle (join once).</li><li>Each thread owns its <strong>root arena</strong> (§10.1); arena state is thread-local.</li><li><code>sys::mutex_new/lock/unlock/free</code> — a dynamic mutex. Lock discipline, deadlock avoidance, and which data a mutex guards are <strong>user responsibility</strong>; there is no compiler check. Forgetting <code>unlock</code> on some path is a bug Wlel does not catch.</li><li><code>sys::chan_new[T]()</code> — an unbounded FIFO channel of <code>T</code> (<code>T</code> not <code>void</code>/array; struct/enum elements move by copy). <code>send(ch, v) -&gt; bool</code> never blocks; <code>false</code> after <code>close</code> (value dropped). <code>recv(ch, &amp;out) -&gt; bool</code> blocks until a value is available; <code>false</code> means the channel is closed <strong>and drained</strong> (<code>*out</code> untouched). <code>close</code> wakes waiting receivers; <code>free</code> discards queued values. FIFO order per sender is preserved.</li><li><code>sys::sleep_ms(ms)</code>.</li><li>Channel send/recv and mutex lock/unlock establish happens-before edges (they are pthread-backed), so handoff through a channel or lock is a memory barrier for ordinary data.</li><li><code>assert</code>/<code>panic</code> in a spawned thread abort the process (§12.1).</li></ul>
+<h2 id="14-foreign-function-interface">14. Foreign function interface</h2>
+<ul><li><code>extern fn</code> binds a C symbol (§7.2). Link with <code>-l lib</code> / <code>-L dir</code> (repeatable, passed to <code>cc</code>).</li><li>Struct layout is the C layout (§3.2) — verified by the compiler's own test suite with <code>_Static_assert</code>/<code>offsetof</code>.</li><li>A C function's <code>int</code> parameter is Wlel <code>i32</code>; <code>long long</code> is <code>int</code>. Pointers arrive as <code>*T</code>; opaque handles are <code>*void</code>; C strings are <code>string</code> when the C side takes <code>const char *</code>.</li><li>Functions declared by the libc headers with the same name (e.g. <code>div</code>) cannot be redeclared; bind names not already in the generated prelude.</li><li>Memory passed to C outlives the call if allocated in an arena that is still open; C code MUST NOT free arena memory.</li></ul>
+<h2 id="15-standard-library-summary">15. Standard library summary</h2>
+<p>Normative reference: <code>wlel doc --std</code> (generated from the embedded source).
+Everything below requires <code>use std;</code> unless noted. All string-returning and
+buffer-allocating functions allocate in the active arena.</p>
+<p><strong>Types</strong>: <code>Vec[T]</code> (<code>*T data, int len, int cap</code>), <code>HashMap[K, V]</code>
+(open addressing + tombstones; keys: int/float/bool/string/pointer),
+<code>Result[T, E]</code>, <code>Option[T]</code>.</p>
+<table>
+<thead><tr><th>Area</th><th>API</th></tr></thead>
+<tbody>
+<tr><td>Vec</td><td><code>vec_new/vec_with_cap</code>; methods <code>push pop get set len clear</code> (get/pop assert in range)</td></tr>
+<tr><td>HashMap</td><td><code>map_new</code>; methods <code>set get get_or has del keys clear</code> (get asserts presence; <code>keys()</code> order unspecified)</td></tr>
+<tr><td>Result</td><td><code>is_ok is_err unwrap unwrap_or ok err</code> (methods + free fns; <code>unwrap</code> panics on Err)</td></tr>
+<tr><td>Option</td><td><code>is_some is_none unwrap unwrap_or</code></td></tr>
+<tr><td>Strings</td><td><code>str_find str_find_from str_sub str_trim str_split str_cmp str_is_space str_parse_int int_to_str</code></td></tr>
+<tr><td>Format</td><td><code>format(fmt, ...)</code> — <code>{}</code> slots for int/float/bool/string; <code>parse_float</code> (full-consume, <code>&amp;out</code>), <code>float_to_str</code> (<code>%g</code>)</td></tr>
+<tr><td>Print</td><td><code>print_int println_int print_float println_float print_str println_str</code></td></tr>
+<tr><td>Basics</td><td><code>streq strlen abs min max len(arr)</code></td></tr>
+<tr><td>Math</td><td>26 libm wrappers (<code>sqrt pow sin atan2 fmin ...</code>), all <code>float</code> in/out; <code>f32</code> args need a cast</td></tr>
+<tr><td>Random</td><td><code>random::seed next int float</code> — xorshift64*, auto-seeded, <code>seed</code> makes runs reproducible</td></tr>
+<tr><td>Checked ops</td><td><code>checked_add/sub/mul(a, b, &amp;out) -&gt; bool</code> (§11.6)</td></tr>
+<tr><td>Sort/search</td><td><code>sort(coll, cmp)</code> — in-place unstable quicksort; <code>binary_search(coll, needle, cmp) -&gt; int</code> (−1 absent); <code>cmp(a,b) -&gt; int</code> is a named concrete function; collections: <code>[T; N]</code>, <code>(ptr, n)</code>, Vec-shaped</td></tr>
+<tr><td>File I/O</td><td><code>fs::open -&gt; Result[*File, string]</code>, <code>fs::read_all -&gt; Result[string, string]</code>, <code>fs::write_all -&gt; Result[int, string]</code>, <code>fs::read/write -&gt; Result[int, string]</code> (EOF = Ok(0)), <code>fs::close</code> (void, idempotent); raw layer <code>sys::read_file/write_file</code> (bool + <code>&amp;out</code>)</td></tr>
+<tr><td>Time</td><td><code>sys::mono_ms()</code>, <code>sys::unix_ms()</code> (no import needed)</td></tr>
+</tbody></table>
+<h2 id="16-grammar">16. Grammar</h2>
+<p>Informal EBNF; <code>(* ... *)</code> comments, <code>...</code> repetition. Precedence is §5.1,
+not encoded here.</p>
+<pre><code>file        = { item } ;
+item        = use | func | extern_func | struct_def | enum_def
+            | impl_block | test_def ;
+use         = &quot;use&quot; ( &quot;std&quot; | STRING ) &quot;;&quot; ;
+func        = &quot;fn&quot; IDENT [ type_params ] &quot;(&quot; [ params ] &quot;)&quot; [ &quot;-&gt;&quot; type ] block ;
+extern_func = &quot;extern&quot; &quot;fn&quot; IDENT &quot;(&quot; [ params ] &quot;)&quot; &quot;-&gt;&quot; type &quot;;&quot; ;
+params      = param { &quot;,&quot; param } ;   param = IDENT [ &quot;:&quot; type ] ;
+type_params = &quot;[&quot; IDENT { &quot;,&quot; IDENT } &quot;]&quot; ;
+struct_def  = &quot;struct&quot; IDENT [ type_params ] &quot;{&quot; fields &quot;}&quot; ;
+fields      = field { &quot;,&quot; field } ;   field = IDENT &quot;:&quot; type ;
+enum_def    = &quot;enum&quot; IDENT [ type_params ] &quot;{&quot; variants &quot;}&quot; ;
+variants    = variant { &quot;,&quot; variant } ; variant = IDENT [ &quot;(&quot; types &quot;)&quot; ] ;
+impl_block  = &quot;impl&quot; IDENT [ type_params ] &quot;{&quot; { func } &quot;}&quot; ;
+test_def    = &quot;test&quot; STRING block ;
+
+block       = &quot;{&quot; { stmt } &quot;}&quot; ;
+stmt        = decl | assign | if_stmt | while_stmt | for_stmt
+            | return_stmt | break_stmt | continue_stmt
+            | defer_stmt | arena_stmt | match_stmt | try_stmt
+            | expr_or_call &quot;;&quot; | block ;
+decl        = [ &quot;let&quot; ] IDENT &quot;:=&quot; expr &quot;;&quot;
+            | &quot;let&quot; IDENT &quot;:&quot; type &quot;=&quot; expr &quot;;&quot; ;
+assign      = lvalue ( &quot;=&quot; | &quot;+=&quot; | &quot;-=&quot; | &quot;*=&quot; | &quot;/=&quot; | &quot;%=&quot; ) expr &quot;;&quot; ;
+try_stmt    = expr &quot;?&quot; &quot;;&quot; ;
+if_stmt     = &quot;if&quot; expr block [ &quot;else&quot; (if_stmt | block) ] ;
+while_stmt  = &quot;while&quot; expr block ;
+for_stmt    = &quot;for&quot; IDENT &quot;in&quot; expr &quot;..&quot; expr block        (* range *)
+            | &quot;for&quot; IDENT &quot;in&quot; expr block ;                 (* for-in *)
+defer_stmt  = &quot;defer&quot; ( expr &quot;;&quot; | block ) ;
+arena_stmt  = &quot;arena&quot; [ &quot;(&quot; expr &quot;)&quot; ] block ;
+return_stmt = &quot;return&quot; [ expr ] &quot;;&quot; ;
+
+expr        = logic_or ;   (* &quot;?&quot; is a postfix form, statement-checked *)
+logic_or    = logic_and { &quot;||&quot; logic_and } ;
+logic_and   = bitor { &quot;&amp;&amp;&quot; bitor } ;
+bitor       = bitxor { &quot;|&quot; bitxor } ;
+bitxor      = bitand { &quot;^&quot; bitand } ;
+bitand      = rel { &quot;&amp;&quot; rel } ;
+rel         = shift { ( &quot;==&quot; | &quot;!=&quot; | &quot;&lt;&quot; | &quot;&gt;&quot; | &quot;&lt;=&quot; | &quot;&gt;=&quot; ) shift } ;
+shift       = add { ( &quot;&lt;&lt;&quot; | &quot;&gt;&gt;&quot; ) add } ;
+add         = mul { ( &quot;+&quot; | &quot;-&quot; ) mul } ;
+mul         = cast { ( &quot;*&quot; | &quot;/&quot; | &quot;%&quot; ) cast } ;
+cast        = unary { &quot;as&quot; type } ;
+unary       = ( &quot;-&quot; | &quot;!&quot; | &quot;~&quot; | &quot;&amp;&quot; | &quot;*&quot; ) unary | postfix ;
+postfix     = primary { &quot;.&quot; IDENT [ call_args ] | &quot;[&quot; expr &quot;]&quot;
+                        | &quot;?&quot; } ;
+primary     = INT | FLOAT | STRING | &quot;true&quot; | &quot;false&quot;
+            | IDENT [ type_args ] [ call_args ]
+            | &quot;(&quot; expr &quot;)&quot; | &quot;[&quot; [ elems ] &quot;]&quot;
+            | &quot;new&quot; &quot;(&quot; type [ &quot;,&quot; expr ] &quot;)&quot;
+            | &quot;wlel_sizeof&quot; &quot;(&quot; type &quot;)&quot;
+            | &quot;wlel_arena&quot; &quot;(&quot; &quot;)&quot;
+            | &quot;match&quot; expr &quot;{&quot; match_arms &quot;}&quot; ;
+match_arms  = match_arm { &quot;,&quot; match_arm } [ &quot;,&quot; ] ;
+match_arm   = pattern &quot;=&gt;&quot; ( expr | block ) ;
+pattern     = IDENT [ &quot;(&quot; [ IDENT { &quot;,&quot; IDENT } ] &quot;)&quot; ] | &quot;_&quot; ;</code></pre>
+<p>Types: <code>IDENT</code> (builtin or user), <code>*</code> type, <code>[</code> type <code>;</code> INT <code>]</code>.</p>
+<h2 id="17-resolved-for-the-10-freeze">17. Resolved for the 1.0 freeze</h2>
+<p>This section records the decisions taken on the points that were previously
+listed as open questions, and the reasoning behind each. They are now part
+of the language: a conforming implementation MUST match them.</p>
+<ol><li><strong>Evaluation order of operands and arguments stays unspecified</strong> (§5.2). Guaranteeing left-to-right would constrain the codegen for no semantic gain, and C programmers already treat <code>f(a(), b())</code> as unordered. The language instead guarantees <em>what</em> is sequenced (§5.2 items 2–6) and leaves the rest inherited from C. Programs that depend on operand order are non-portable — that is the documented contract, not an oversight.</li></ol>
+<ol><li><strong>Mixed float widths: the wider operand wins</strong> (<code>f32 + f64</code> is <code>f64</code>, §4.3). The previous as-implemented rule took the <em>left</em> operand's width, which made <code>a + b</code> and <code>b + a</code> differ in type and silently truncated a <code>f64</code> operand. "Wider wins" is lossless and symmetric; narrowing is spelled <code>x as f32</code>. <code>f32</code> → <code>f64</code> is therefore also an implicit <em>assignment</em> widening (§4.1 rule 3), mirroring int→float. Untyped float literals adapt to the other operand (<code>f32v + 1.5</code> is <code>f32</code>), and the checker inserts the cast so C does not promote the expression to <code>double</code>.</li></ol>
+<ol><li><strong>Assignment lvalue checking is a checker responsibility</strong> (§5.7). A non-lvalue target (<code>1 = 2</code>, <code>f().x = 1</code>) is a Wlel compile-time error with a Wlel span, never a downstream C error.</li></ol>
+<ol><li><strong>Explicit array decay is part of the cast matrix</strong> (§4.4): <code>arr as *T</code> is legal anywhere and complements the implicit argument-only decay of §4.1 rule 5. Element types must match exactly; nested arrays are not flattened.</li></ol>
+<ol><li><strong><code>std::print_bool</code> / <code>std::println_bool</code> exist</strong> and print <code>true</code> / <code>false</code>.</li></ol>
+<ol><li><strong><code>std::len</code> accepts arrays only</strong>; Vec-shaped structs use <code>.len()</code>.</li></ol>
+<ol><li><strong>Pointer arithmetic beyond indexing does not exist</strong> (<code>p + 1</code> is a compile-time error). <code>p[i]</code> and explicit casts cover the FFI use cases; adding pointer arithmetic would invite the aliasing bugs the language exists to avoid.</li></ol>
+<ol><li><strong>Escape analysis stays out of 1.0.</strong> A pointer escaping an <code>arena</code> block is legal but dangles once the block ends (§10.4). A static warning is listed as future work, not a 1.0 requirement — the arena contract is lexical, and enforcing it statically would need the whole-program analysis the language deliberately avoids.</li></ol>
+<hr>
+<p>*Wlel spec v1.0 — generated against the reference compiler described in the
+repository README. Sections §5.2, §10, §11 and §12 (evaluation order, arena
+lifetime, overflow, safe-debug) are the load-bearing contracts.*</p></article></div>
+</main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cross-compiling — Wlel</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="spec.html">Spec</a>
+    <a href="editors.html">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main>
+<div class="docs-layout"><nav class="docs-nav"><ol><li class="lvl-2"><a href="#1-building-the-compiler-for-another-platform">1. Building the compiler for another platform</a></li><li class="lvl-2"><a href="#2-compiling-a-wlel-program-for-another-platform">2. Compiling a Wlel program for another platform</a></li><li class="lvl-3"><a href="#the-two-step-form-full-control">The two-step form (full control)</a></li><li class="lvl-3"><a href="#ffi-libraries">FFI libraries</a></li><li class="lvl-3"><a href="#running-a-cross-compiled-binary">Running a cross-compiled binary</a></li><li class="lvl-2"><a href="#release-artifacts">Release artifacts</a></li></ol></nav><article class="docs-body"><h1 id="cross-compiling-wlel">Cross-compiling Wlel</h1>
+<p>Two separate things can be cross-compiled:</p>
+<ol><li><strong>The compiler</strong> (<code>wlel</code> itself) — a pure-Rust binary. Build it once per host OS/arch and ship it (<code>scripts/release.sh</code>).</li><li><strong>Wlel programs</strong> — Wlel transpiles to C99, so cross-compiling one means pointing it at a C compiler for the target. No Rust toolchain is needed for this step.</li></ol>
+<h2 id="1-building-the-compiler-for-another-platform">1. Building the compiler for another platform</h2>
+<p>The compiler has no C dependency at build time and no runtime dependencies
+beyond libc:</p>
+<pre><code class="language-bash">rustup target add aarch64-unknown-linux-gnu
+scripts/release.sh aarch64-unknown-linux-gnu
+# -&gt; dist/wlel-&lt;version&gt;-aarch64-unknown-linux-gnu.tar.gz (+ .sha256)</code></pre>
+<p>What each target needs:</p>
+<table>
+<thead><tr><th>target</th><th>linker needed</th></tr></thead>
+<tbody>
+<tr><td><code>x86_64-unknown-linux-gnu</code></td><td>host <code>cc</code> (native)</td></tr>
+<tr><td><code>aarch64-unknown-linux-gnu</code></td><td><code>gcc-aarch64-linux-gnu</code> + <code>CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc</code></td></tr>
+<tr><td><code>x86_64-unknown-linux-musl</code></td><td><code>musl-gcc</code> (static binary; <code>rustup target add x86_64-unknown-linux-musl</code>)</td></tr>
+<tr><td><code>x86_64-pc-windows-gnu</code></td><td><code>mingw-w64</code> (<code>x86_64-w64-mingw32-gcc</code>)</td></tr>
+<tr><td><code>aarch64-apple-darwin</code></td><td>build natively on an Apple Silicon runner</td></tr>
+<tr><td><code>x86_64-apple-darwin</code></td><td>build natively on an Intel runner</td></tr>
+</tbody></table>
+<p>Apple targets must be built on macOS because of the SDK licence. The
+<code>release</code> workflow does exactly this: one native runner per target, no
+cross-OS faking.</p>
+<h2 id="2-compiling-a-wlel-program-for-another-platform">2. Compiling a Wlel program for another platform</h2>
+<p><code>wlel build</code> invokes a C compiler — it looks at <code>$CC</code>, then <code>cc</code>, <code>gcc</code>,
+<code>clang</code> on <code>PATH</code>. Set <code>$CC</code> to the cross compiler:</p>
+<pre><code class="language-bash"># Linux x86_64 -&gt; Linux aarch64
+CC=aarch64-linux-gnu-gcc wlel build app.wlel -O2 -o app-arm64
+
+# Linux -&gt; Windows
+CC=x86_64-w64-mingw32-gcc wlel build app.wlel -O2 -o app.exe
+
+# statically linked Linux binary (musl)
+CC=musl-gcc wlel build app.wlel -O2 -o app-static</code></pre>
+<p><code>$CC</code> is used for both the compile and the link, so a wrapper script works
+when extra flags are needed:</p>
+<pre><code class="language-bash">cat &gt; cc-aarch64-static.sh &lt;&lt;&#x27;EOF&#x27;
+#!/bin/sh
+exec aarch64-linux-gnu-gcc &quot;$@&quot; -static
+EOF
+chmod +x cc-aarch64-static.sh
+CC=$PWD/cc-aarch64-static.sh wlel build app.wlel -O2 -o app</code></pre>
+<h3 id="the-two-step-form-full-control">The two-step form (full control)</h3>
+<p><code>--emit-c</code> writes the generated C99 and stops, which is the escape hatch
+for any toolchain the one-shot build cannot express:</p>
+<pre><code class="language-bash">wlel build app.wlel --emit-c -o app.c
+aarch64-linux-gnu-gcc -O2 -std=gnu99 -fwrapv app.c -o app-arm64 -lm -lpthread</code></pre>
+<p><code>-std=gnu99</code> (not strict <code>c99</code>): the runtime uses <code>clock_gettime</code> /
+<code>CLOCK_MONOTONIC</code> and <code>pthread_*</code> from <code>sys::mono_ms</code>, <code>sys::unix_ms</code> and the
+concurrency layer, which strict ISO C99 hides. If you must use <code>-std=c99</code>,
+add <code>-D_POSIX_C_SOURCE=200809L</code>.</p>
+<p>The generated C needs <code>-lm</code> when <code>std::math</code>, <code>std::random</code> or
+<code>parse_float</code> is used, and <code>-lpthread</code> when <code>sys::thread</code>/<code>sys::mutex</code>/
+<code>sys::chan_*</code> is used. <code>wlel build</code> adds both automatically when the
+program uses them; a manual link must add them explicitly, <strong>after</strong> the
+source/object, or <code>--as-needed</code> linkers will drop them.</p>
+<p><code>-fwrapv</code> is part of Wlel's signed-overflow contract (§11) — the backend
+always passes it, and manual links must too.</p>
+<h3 id="ffi-libraries">FFI libraries</h3>
+<p><code>-l &lt;lib&gt;</code> / <code>-L &lt;dir&gt;</code> pass straight through to the link, repeatable:</p>
+<pre><code class="language-bash">wlel build app.wlel -O2 -o app -L ./vendor/lib -l raylib -l GL</code></pre>
+<h3 id="running-a-cross-compiled-binary">Running a cross-compiled binary</h3>
+<p><code>wlel run</code> executes the program on the host, so it only works for native
+targets. Use <code>wlel build</code> for cross targets and copy the binary to the
+target machine (or run it under <code>qemu-aarch64 ./app-arm64</code>).</p>
+<p><code>wlel test</code> also runs locally — tests for cross-compiled programs are best
+run on the target, or natively on the same OS/arch.</p>
+<h2 id="release-artifacts">Release artifacts</h2>
+<p><code>scripts/release.sh</code> (no arguments) builds the host target; with arguments
+it builds each requested Rust target and writes
+<code>dist/wlel-&lt;version&gt;-&lt;target&gt;.tar.gz</code> plus a <code>.sha256</code>:</p>
+<pre><code class="language-bash">./scripts/release.sh x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu</code></pre>
+<p>The <code>release</code> GitHub workflow runs the same script on native runners for
+every target when a <code>v*</code> tag is pushed and attaches the archives to the
+release.</p></article></div>
+</main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

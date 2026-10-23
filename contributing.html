@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contributing — Wlel</title>
+<meta name="description" content="Wlel — the arena-first systems programming language. Docs, the frozen spec, and a browser playground.">
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">
+    <img src="assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="spec.html">Spec</a>
+    <a href="editors.html">Editors</a>
+    <a href="playground/index.html">Playground</a>
+    <a href="changelog.html">Changelog</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+<main>
+<div class="docs-layout"><nav class="docs-nav"><ol><li class="lvl-2"><a href="#getting-set-up">Getting set up</a></li><li class="lvl-2"><a href="#what-ci-enforces">What CI enforces</a></li><li class="lvl-2"><a href="#changing-the-language">Changing the language</a></li><li class="lvl-2"><a href="#tests">Tests</a></li><li class="lvl-2"><a href="#style">Style</a></li><li class="lvl-2"><a href="#commits-and-pull-requests">Commits and pull requests</a></li><li class="lvl-2"><a href="#reporting-bugs">Reporting bugs</a></li><li class="lvl-2"><a href="#license">License</a></li></ol></nav><article class="docs-body"><h1 id="contributing-to-wlel">Contributing to Wlel</h1>
+<p>Thanks for taking a look. Wlel is a small language with a deliberately
+small compiler, and the bar for a change is: <strong>it must keep the whole test
+suite green and make the language simpler or more predictable, not just
+bigger.</strong></p>
+<h2 id="getting-set-up">Getting set up</h2>
+<pre><code class="language-bash">git clone https://github.com/WildanDeveloper/wlel
+cd wlel
+cargo build --release          # builds target/release/wlel
+./target/release/wlel --version
+
+cargo test --release --locked  # the whole suite (needs cc and git on PATH)
+cargo clippy --all-targets -- -D warnings
+find examples flagship -name &#x27;*.wlel&#x27; -print0 | xargs -0 ./target/release/wlel fmt -check</code></pre>
+<p>A C compiler (<code>cc</code>/<code>gcc</code>/<code>clang</code>) is required because Wlel transpiles to
+C99; <code>git</code> is required for the dependency tests. Everything else is
+dependency-free — the compiler, formatter, language server and doc
+generator are plain Rust with no third-party crates.</p>
+<h2 id="what-ci-enforces">What CI enforces</h2>
+<p>Every pull request must pass:</p>
+<ul><li><code>cargo test --release --locked</code> on Linux, macOS and Windows.</li><li><code>cargo clippy --all-targets -- -D warnings</code> — warnings are errors.</li><li><code>wlel fmt -check</code> over <code>examples/</code> and <code>flagship/</code> — the formatter is canonical, so committed <code>.wlel</code> files must already be formatted.</li><li>The flagship job: type-check, run every <code>test</code> block and build <code>flagship/*.wlel</code>, plus a JSON throughput smoke test.</li><li><code>scripts/release.sh</code> (the packaging path) in the lint job.</li></ul>
+<h2 id="changing-the-language">Changing the language</h2>
+<p>The specification is normative: <code>docs/spec.md</code>. If a change affects
+observable behavior, update the spec in the same pull request, and add a
+section to <code>CHANGELOG.md</code>. Anything that changes syntax or semantics after
+1.0 needs a strong reason — the syntax is frozen.</p>
+<p>A language change usually touches several layers, and all of them must
+agree:</p>
+<ol><li><code>src/lexer.rs</code> / <code>src/token.rs</code> — if it needs new tokens.</li><li><code>src/parser.rs</code> — the grammar (with error recovery and the nesting guard).</li><li><code>src/ast.rs</code> — the node, if it is new syntax.</li><li><code>src/checker.rs</code> — typing, plus the monomorphization and cycle rules.</li><li><code>src/codegen.rs</code> — the C backend is normative; <strong>and</strong> <code>src/qbe.rs</code> if the construct belongs to the QBE subset.</li><li><code>src/fmt.rs</code>, <code>src/lsp.rs</code>, <code>src/doc.rs</code> — the tooling must not lose it.</li><li><code>docs/spec.md</code> — the normative description.</li></ol>
+<h2 id="tests">Tests</h2>
+<ul><li>Put unit tests next to the layer they cover (<code>tests/lang_tests.rs</code>, <code>tests/checker_tests.rs</code>, <code>tests/qbe_tests.rs</code>, …).</li><li>End-to-end behavior goes in <code>tests/cli_tests.rs</code> or a focused file.</li><li>A bug fix needs a test that <strong>fails before</strong> the fix. Name it after the bug, not after the function (<code>min_div_minus_one_wraps_instead_of_trapping</code>).</li><li>Anything touching generated C should be checked under the sanitizers:</li></ul>
+<ul><li><code>wlel run</code> and <code>wlel test</code> compile in safe mode (bounds and division checks); <code>wlel build</code> is release mode. Test both when the behavior differs.</li></ul>
+<h2 id="style">Style</h2>
+<ul><li>Rust: <code>cargo fmt</code> plus the clippy gate. Comments explain <em>why</em> (especially where a C or LLVM behavior is surprising), not <em>what</em>.</li><li>Generated C must stay readable — it is part of the product. <code>#line</code> directives must point back into the <code>.wlel</code> file.</li><li>Error messages: lowercase, name the file and position, and say what to do ("store a pointer (<code>*N</code>) instead", "rename it: <code>mv a.wl a.wlel</code>").</li></ul>
+<h2 id="commits-and-pull-requests">Commits and pull requests</h2>
+<ul><li>One logical change per commit. The subject line is the changelog entry: it states what changed and why, in the present tense, and ends with the verification (<code>548 cargo tests green, clippy -D warnings clean, wlel fmt canonical</code>).</li><li>Reference the issue a pull request closes.</li><li>Keep the diff reviewable; split mechanical renames from behavior changes.</li></ul>
+<h2 id="reporting-bugs">Reporting bugs</h2>
+<p>Include:</p>
+<ul><li>the Wlel source that reproduces it (minimal),</li><li><code>wlel --version</code>, your OS, and the C compiler (<code>cc --version</code>),</li><li>the exact command and the full output,</li><li>if it is a miscompile: <code>wlel build --emit-c -o out.c</code> and the relevant part of the generated C.</li></ul>
+<p>Crashes of the compiler itself (a panic or an abort, rather than a
+diagnostic) are always bugs — the compiler must report errors, never die.</p>
+<h2 id="license">License</h2>
+<p>By contributing you agree that your contribution is licensed under the
+Apache License 2.0 (see <code>LICENSE</code>), without additional terms.</p></article></div>
+</main>
+<footer>
+  <span>Apache-2.0 · <a href="https://github.com/WildanDeveloper/wlel/blob/main/LICENSE">license</a></span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+</body>
+</html>

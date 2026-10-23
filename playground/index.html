@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wlel playground</title>
+<meta name="description" content="Type-check and format Wlel in the browser: the real front-end, compiled to WebAssembly.">
+<link rel="icon" href="../assets/logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="../index.html">
+    <img src="../assets/logo.png" alt="" width="28" height="28">
+    <span>Wlel</span>
+  </a>
+  <nav>
+    <a href="../index.html">Docs</a>
+    <a href="../spec.html">Spec</a>
+    <a href="index.html" class="current">Playground</a>
+    <a href="https://github.com/WildanDeveloper/wlel">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <section class="intro">
+    <h1>Playground</h1>
+    <p>
+      The real Wlel front-end — lexer, error-recovering parser and type
+      checker — compiled to WebAssembly. Everything runs in this tab; nothing
+      is uploaded. Use <kbd>Tab</kbd> to indent and <kbd>Ctrl</kbd>+<kbd>Enter</kbd>
+      to re-check.
+    </p>
+  </section>
+
+  <section class="editor">
+    <div class="toolbar">
+      <div class="examples" id="examples">
+        <button data-example="hello">hello</button>
+        <button data-example="enums">enums</button>
+        <button data-example="generics">generics</button>
+        <button data-example="errors">errors</button>
+      </div>
+      <div class="actions">
+        <span id="status" class="status loading">loading…</span>
+        <button id="format" type="button" title="Replace the buffer with wlel fmt output">Format</button>
+      </div>
+    </div>
+
+    <div class="panes">
+      <div class="pane">
+        <label class="pane-title" for="source">source</label>
+        <textarea id="source" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+      </div>
+      <div class="pane">
+        <span class="pane-title">diagnostics</span>
+        <ol id="diagnostics" class="diagnostics"><li class="muted">No problems.</li></ol>
+      </div>
+    </div>
+
+    <details id="formatted-wrap" class="formatted">
+      <summary>canonical form (<code>wlel fmt</code>)</summary>
+      <pre id="formatted"></pre>
+    </details>
+  </section>
+
+  <section class="note">
+    <p>
+      This checks types and formatting, not code generation: the compiler's C
+      backend needs a C toolchain, which does not belong in a browser tab. A
+      program that says <em>ok</em> here will build with
+      <code>wlel build</code> on your machine.
+    </p>
+  </section>
+</main>
+
+<footer>
+  <span>Apache-2.0</span>
+  <a href="https://github.com/WildanDeveloper/wlel">WildanDeveloper/wlel</a>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
