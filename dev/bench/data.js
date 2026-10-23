@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792790091523,
+  "lastUpdate": 1792791388271,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -604,6 +604,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "sort 1M pre-sorted ints",
             "value": 4,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 2.8,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "b3385679868dcd91b65b4482ae7ee4e9ad42da6e",
+          "message": "v1.1.0: ecosystem release — Apache-2.0 license + package metadata, dependency lifecycle (`init`, `remove`, `update`, `tree`, `clean`), scaffolds with README + CI, and the repository hygiene a public language needs: `wlel new`/`init` now write a README and a GitHub Actions workflow that installs the exact release that scaffolded the project (`wlel check` + `test` + `fmt -check`), `wlel init [dir]` adopts an existing directory without overwriting sources and refuses one that already has a manifest, `wlel remove <name>` drops the manifest line + `wlel.lock` pin + `.wlel/deps` clone in one step (the edited text is re-parsed before it is written, other bytes untouched, previous state restored if the project stops loading), `wlel update [name]` re-resolves git dependencies to the newest tag satisfying their caret requirement (fetches tags, keeps the requirement, reports old -> new revisions, restores the lock on failure, path deps are reported as nothing to update), `wlel tree` renders the resolved graph with path/git sources + manifest versions + pinned revisions and labels unresolved clones or repeats instead of failing, `wlel clean [--cache]` removes the clone cache while keeping `wlel.lock` (`--cache` also clears the compiler cache); legal: Apache-2.0 `LICENSE` + `NOTICE` + Cargo metadata (`license`, `repository`, `homepage`, `readme`, `keywords`, `categories`, `rust-version = 1.82`) with a README License section; hygiene: `CONTRIBUTING.md` (build/test/lint checklist, the language-change layering, the per-layer test rule, the commit-subject convention), `SECURITY.md` (the compiler is a parser of hostile input: crashes, codegen escapes, cache/temp attacks, dependency resolution), `CHANGELOG.md` (Keep a Changelog, 1.1.0/1.0.0/0.7.0/0.3.0/0.1.0), bug + feature issue forms with a private security-report link, PR template, `.editorconfig`, `rust-toolchain.toml` pinning stable + clippy, Dependabot for the fuzz crate and Actions, README roadmap restructured so the ecosystem comes before self-hosting; version 1.0.0 -> 1.1.0 (additive, no language change); 562 cargo tests green (14 new lifecycle tests: init adopt/empty/refuse/CI pin, tree path+git+unresolved, remove bytes/pin/cache/unknown, update move/idempotent/single/unknown/path, clean keeps lock, commands outside a project), clippy -D warnings clean, wlel fmt canonical, all examples/flagships pass, scripts/release.sh produces wlel-1.1.0 archives",
+          "timestamp": "2026-10-23T21:35:41Z",
+          "tree_id": "64eb140c2f5d6429b1ef58dd7c833d916530eb22",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/b3385679868dcd91b65b4482ae7ee4e9ad42da6e"
+        },
+        "date": 1792791387444,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 18,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 69,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 8,
             "unit": "ms"
           },
           {
