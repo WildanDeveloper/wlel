@@ -916,7 +916,7 @@ fn assert_eq_semantics_match_eq_operator() {
     )
     .unwrap_err();
     assert!(e2.contains("mixed int widths: u8 and i32"), "{e2}");
-    // mixed float widths
+    // mixed float widths: f32 widens to f64 (lossless, §4.1/§4.3)
     let e3 = check(
         "fn main() -> int {
              let a: f32 = 1.0;
@@ -924,9 +924,8 @@ fn assert_eq_semantics_match_eq_operator() {
              assert_eq(a, b);
              return 0;
          }",
-    )
-    .unwrap_err();
-    assert!(e3.contains("comparison between f32 and float"), "{e3}");
+    );
+    assert!(e3.is_ok(), "f32 must widen to f64: {e3:?}");
     // unsupported operand kinds
     let e4 = check(
         "struct Pt { x: int }

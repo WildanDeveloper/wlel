@@ -145,6 +145,55 @@ fn il_float_ops_and_conversions() {
 }
 
 #[test]
+fn il_mixed_float_widths_use_one_instruction_width() {
+    // §4.3: f32 + f64 is f64, and both operands must reach the instruction
+    // at the same QBE width (`s`/`d` cannot be mixed on one line)
+    let out = il(
+        "fn main() -> int {
+            a := 1.5f32;
+            b := 2.5;
+            c := a + b;
+            wlel_print_float(c);
+            if a < b { wlel_print_int(1); }
+            return 0;
+        }",
+    );
+    assert!(out.contains("=d exts"), "f32 must widen to d: {out}");
+    assert!(out.contains("=d add"), "{out}");
+    assert!(out.contains("cltd"), "{out}");
+    assert!(!out.contains("=s add"), "{out}");
+    // f32-only arithmetic stays at `s`
+    let out = il(
+        "fn main() -> int {
+            a := 1.5f32;
+            b := 2.5f32;
+            c := a + b;
+            wlel_print_float(c as f64);
+            return 0;
+        }",
+    );
+    assert!(out.contains("=s add"), "{out}");
+    assert!(!out.contains("=d add"), "{out}");
+}
+
+#[test]
+fn il_float_literal_keeps_f32_width() {
+    // an unsuffixed literal adapts to the f32 operand, so the checker casts
+    // it and the QBE instruction stays `s`
+    let out = il(
+        "fn main() -> int {
+            a := 1.5f32;
+            c := a + 2.5;
+            wlel_print_float(c as f64);
+            return 0;
+        }",
+    );
+    assert!(out.contains("=s add"), "{out}");
+    assert!(out.contains("=s truncd d_2.5"), "{out}");
+    assert!(!out.contains("=d add"), "{out}");
+}
+
+#[test]
 fn il_arrays_decay_and_slots() {
     let out = il(
         "fn sum(p: *int, n: int) -> int {

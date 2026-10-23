@@ -60,7 +60,7 @@ is freed (LIFO unwind — verified with AddressSanitizer). Strings you build wit
 `+` live in a root arena that is released automatically at exit, so **Wlel
 programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 
-## Feature status (pre-1.0)
+## Feature status (1.0)
 
 ### Language
 - [x] First-class arenas: `arena(size) { ... }`, `arena { ... }` (default 4 KiB), `wlel_arena()`
@@ -70,7 +70,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] `defer` — LIFO at scope exit, loop-aware, early-return-aware; multi-statement `defer { ... }` blocks with their own defer scope
 - [x] Control flow: `if / else if / else`, `while`, `for i in a..b`, `break`, `continue`
 - [x] Structs (nominal, C layout), struct literals, field access with auto-deref; forward & recursive definitions
-- [x] Pointers (`*T`, `&`, `*`), arrays `[T; N]` with C-style decay, `wlel_sizeof(T)`
+- [x] Pointers (`*T`, `&`, `*`), arrays `[T; N]` with C-style decay (implicit at call arguments, explicit `arr as *T` anywhere), `wlel_sizeof(T)`
 - [x] Casts: `expr as T` (numerics, pointers, int↔ptr)
 - [x] Compound assignment `+= -= *= /= %=`, bitwise `& | ^ ~ << >>`
 - [x] Modules: recursive `use "path.wl";` with diamond-import deduplication, `use std;`
@@ -80,7 +80,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 ### Numbers
 - [x] Width types: `u8 u16 u32 u64, i8 i16 i32 i64, usize, f32 f64` (`int` = i64, `float` = f64, `byte`/`char` = u8)
 - [x] Literal suffixes: `10u8`, `2.5f32`, full u64 range (`18_446_744_073_709_551_615u64`)
-- [x] Untyped literals adapt to context with range checks; narrowing requires an explicit cast; mixed widths require a cast
+- [x] Untyped literals adapt to context with range checks; narrowing requires an explicit cast; mixed int widths require a cast, while `f32` → `f64` widens implicitly and mixed float widths take the wider side
 - [x] Overflow is never UB — see [Overflow semantics](#overflow-semantics)
 
 ### Diagnostics & tooling
@@ -114,18 +114,24 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 ## Specification
 
 The normative language definition lives in [docs/spec.md](docs/spec.md) —
-**v1 draft for public review**. It pins down the load-bearing contracts:
+**v1.0, frozen**. It pins down the load-bearing contracts:
 lexical structure, the full precedence table, evaluation order (what is
 guaranteed, what is inherited from C), conversion/literal rules, `defer` and
 `?` semantics, the memory model (arena lifetime, aliasing discipline,
 poison-fill behavior), overflow semantics, safe-debug vs release, the FFI
-type mapping, and a reference grammar. An [open questions](docs/spec.md#17-open-questions-for-review)
-section lists the as-implemented behaviors that are explicitly up for
-review before the 1.0 syntax freeze.
+type mapping, and a reference grammar. [§17](docs/spec.md#17-resolved-for-the-10-freeze)
+records the decisions that closed the last open questions — mixed float
+widths, explicit array decay, evaluation order, pointer arithmetic.
 
 ## Try it
 
 Requires a C compiler (`cc`, `gcc`, or `clang`) and Rust/Cargo to build `wlel` itself.
+
+Prebuilt binaries are attached to every [release](https://github.com/WildanDeveloper/wlel/releases)
+(Linux x86_64/aarch64, macOS Intel/Apple Silicon, Windows x86_64) with
+`SHA256SUMS`. See [docs/cross-compile.md](docs/cross-compile.md) for building
+the compiler for another platform and for cross-compiling *Wlel programs*
+(set `$CC` to a cross compiler, or use `--emit-c` and link by hand).
 
 ```bash
 cargo run --release -- run examples/arena.wl             # scoped arena demo
@@ -909,15 +915,12 @@ Shipped:
 
 1. **Stdlib & tooling** — generics via monomorphization, `Vec[T]`/`HashMap[K,V]`, string library, file I/O, `wlel fmt`, FFI.
 2. **Expressiveness** — tagged enums + exhaustive `match`, `Result[T,E]`, method sugar, concurrency, LSP, `wlel doc`.
-3. **1.0 scope** — git-tag package registry, QBE backend, three flagship apps, fuzz soak, spec v1 draft.
+3. **1.0 scope** — git-tag package registry, QBE backend, three flagship apps, fuzz soak, spec v1.0.
+4. **CI integrity** — flagship check/test/build/bench jobs and `fmt -check` over `flagship/`.
+5. **1.0 freeze** — the spec's open questions are resolved and documented in [§17](docs/spec.md#17-resolved-for-the-10-freeze) (mixed float widths take the wider side, f32→f64 widens implicitly, explicit array decay, evaluation order stays C-inherited, no pointer arithmetic); `wlel --version`; `scripts/release.sh` + `docs/cross-compile.md` for release binaries.
 
 Next, ordered by impact-per-effort:
 
-4. **CI integrity** — flagship check/test/build/bench jobs and `fmt -check`
-   over `flagship/` (the apps used to be outside CI entirely, so
-   `flagship/json.wl` could stop type-checking while every job stayed green).
-5. **1.0 freeze** — resolve the [open questions](docs/spec.md#17-open-questions-for-review)
-   in the spec, `wlel --version`, release binaries and cross-compile recipes.
 6. **Module namespaces** — imports currently merge into one flat global
    scope (two files defining `helper` is a duplicate-symbol error); this is
    also the main blocker for self-hosting.

@@ -1,0 +1,108 @@
+name: release
+
+# Tag-driven releases: pushing v1.0.0 builds the compiler natively on each
+# supported OS/arch, checks the version agrees with the tag, and attaches the
+# archives (+ SHA256SUMS) to the GitHub release. The compiler is pure Rust,
+# so every target builds on its own native runner — no cross-OS faking.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    # a tag must never publish an untested commit: ci.yml only runs on
+    # branches, so the release pipeline carries its own gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test suite
+        run: cargo test --release --locked
+
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            linker: aarch64-linux-gnu-gcc
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install the aarch64 linker
+        if: matrix.linker == 'aarch64-linux-gnu-gcc'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          staging="wlel-${version}-${{ matrix.target }}"
+          mkdir -p "dist/$staging"
+          cp README.md "dist/$staging/"
+          if [ -f "target/${{ matrix.target }}/release/wlel.exe" ]; then
+            cp "target/${{ matrix.target }}/release/wlel.exe" "dist/$staging/"
+          else
+            cp "target/${{ matrix.target }}/release/wlel" "dist/$staging/"
+          fi
+          tar -C dist -czf "dist/$staging.tar.gz" "$staging"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wlel-${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Check the tag matches Cargo.toml
+        # version drift between the tag and the binary's --version was a real
+        # bug once: every archive must claim exactly the tag it ships under
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $version" >&2
+            exit 1
+          fi
+      - name: Checksums
+        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/*
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --generate-notes --verify-tag dist/*
+          fi

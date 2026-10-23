@@ -62,3 +62,32 @@ test "suffix and wrap per-width" {
     p := 0.25f32;
     assert_eq(p, 0.25f32);
 }
+
+// Mixed float widths: the wider operand wins (spec §4.3), f32 widens into
+// f64 implicitly (spec §4.1), and an unsuffixed literal adapts to the other
+// operand instead of forcing `double`.
+test "mixed float widths take the wider side" {
+    narrow := 1.5f32;
+    wide := 2.5;
+    let up: float = narrow; // f32 -> f64 widening is implicit
+    let sum: float = narrow + wide;
+    let flipped: float = wide + narrow;
+    assert_eq(up, 1.5);
+    assert_eq(sum, 4.0);
+    assert_eq(flipped, 4.0);
+    // literal arithmetic stays at f32 width
+    let stays_narrow: f32 = narrow + 0.5;
+    assert_eq(stays_narrow, 2.0f32);
+    // comparisons widen too, and literals compare at the variable's width
+    assert(narrow < wide);
+    assert(narrow == 1.5);
+}
+
+// Explicit array decay: `arr as *T` works anywhere, not just as a call
+// argument (spec §4.4).
+test "explicit array decay yields a pointer" {
+    let arr: [int; 3] = [10, 20, 30];
+    let p: *int = arr as *int;
+    assert_eq(p[0], 10);
+    assert_eq(p[2], 30);
+}

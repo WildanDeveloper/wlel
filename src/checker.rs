@@ -264,6 +264,7 @@ fn lit_val(e: &Expr) -> Option<LitVal> {
         ExprKind::Float(_) => Some(LitVal::Float),
         ExprKind::Unary(UnOp::Neg, x) => match &x.node {
             ExprKind::Int(v) => Some(LitVal::Int(*v, true)),
+            ExprKind::Float(_) => Some(LitVal::Float),
             _ => None,
         },
         _ => None,
@@ -273,6 +274,12 @@ fn lit_val(e: &Expr) -> Option<LitVal> {
 /// true when the expression is an unsuffixed (width-flexible) literal
 fn is_untyped_lit(e: &Expr) -> bool {
     lit_val(e).is_some()
+}
+
+/// true when the expression is an unsuffixed *float* literal (`1.5`, `1e3`,
+/// `-2.5`): it adapts to any float width in context
+fn is_untyped_float_lit(e: &Expr) -> bool {
+    matches!(lit_val(e), Some(LitVal::Float))
 }
 
 #[derive(Clone)]
@@ -2493,14 +2500,15 @@ impl Checker {
                             return Ok(res);
                         }
                         if is_num(&lt) && is_num(&rt) && *op != Mod {
-                            // int op float, or float op float: C usual arithmetic
-                            // conversions apply; the result takes the float side's
-                            // width (f64 wins when both are float)
-                            let res = match (float_width(&lt), float_width(&rt)) {
-                                (Some(w), _) if is_float_t(&lt) => Type::Float(w),
-                                (_, Some(w)) => Type::Float(w),
-                                _ => Type::Float(FloatW::F64),
-                            };
+                            // int op float widens implicitly; float op float
+                            // takes the wider width (f64 wins, §4.3). An
+                            // untyped literal adapts to the other side, so it
+                            // is cast explicitly — C would otherwise promote
+                            // a bare `1.5` to double and change the width of
+                            // the whole expression.
+                            let res = Type::Float(self.float_op_width(l, &lt, r, &rt));
+                            self.adapt_float_lit(l, &res);
+                            self.adapt_float_lit(r, &res);
                             return Ok(res);
                         }
                         err_at(
@@ -2598,6 +2606,17 @@ impl Checker {
                                     );
                                 }
                             }
+                        } else if is_num(&lt) && is_num(&rt) {
+                            // numeric comparison: int widens to float, f32
+                            // widens to f64 (§4.3). An untyped float literal
+                            // is cast to the resolved width so both sides
+                            // really are the same C type — comparing a float
+                            // against a double literal would otherwise
+                            // promote the float and answer wrongly.
+                            let w = self.float_op_width(l, &lt, r, &rt);
+                            let res = Type::Float(w);
+                            self.adapt_float_lit(l, &res);
+                            self.adapt_float_lit(r, &res);
                         } else if lt != rt {
                             return err_at(
                                 sp,
@@ -2642,7 +2661,9 @@ impl Checker {
                     || (ptr(&from) && is_int(&to))
                     || (is_int(&from) && ptr(&to))
                     || (from == Type::Str && ptr(&to))
-                    || (ptr(&from) && to == Type::Str);
+                    || (ptr(&from) && to == Type::Str)
+                    // explicit array decay: `arr as *T` where arr: [T; N]
+                    || matches!((&from, &to), (Type::Array(el, _), Type::Ptr(t)) if el == t);
                 if !ok {
                     return err_at(
                         sp,
@@ -4264,7 +4285,8 @@ impl Checker {
                             } else {
                                 Type::Float(FloatW::F64)
                             };
-                            if t != want {
+                            // f32 widens into the f64 parameter (§4.1)
+                            if !assignable_checked(&want, &args[0], &t, sp)? {
                                 return err_at(
                                     sp,
                                     format!("{name} expects {}, got {}", want.name(), t.name()),
@@ -4558,6 +4580,10 @@ impl Checker {
                     if a.op == CompoundOp::Mod && !is_int(&target_ty) {
                         return err_at(sp, "%= requires int operands");
                     }
+                    // `x op= 1.5` is `x = x op 1.5` (§5.6), so an untyped
+                    // literal computes at the target's width — C would
+                    // otherwise do the whole update in double
+                    self.adapt_float_lit(&mut a.value, &target_ty);
                 }
                 Ok(())
             }
@@ -5634,17 +5660,20 @@ impl Checker {
                 ExprKind::Call("_wlel_streq".into(), vec![], vec![left, right]),
                 sp,
             )
-        } else if lt == rt && matches!(lt, Type::Bool | Type::Float(_)) {
+        } else if lt == rt && matches!(lt, Type::Bool) {
             let left = std::mem::replace(l, dummy_expr(sp));
             let right = std::mem::replace(r, dummy_expr(sp));
             Spanned::new(ExprKind::Binary(BinOp::Eq, Box::new(left), Box::new(right)), sp)
-        } else if is_float_t(&lt) && is_float_t(&rt) {
-            // f32 vs f64 compares via a cast in normal code; keep assert_eq
-            // as strict as `==` so widths stay explicit
-            return err_at(
-                sp,
-                format!("comparison between {} and {}", lt.name(), rt.name()),
-            );
+        } else if is_num(&lt) && is_num(&rt) {
+            // assert_eq mirrors `==` exactly: int widens to float, f32
+            // widens to f64, and an untyped float literal adapts (§4.3)
+            let w = self.float_op_width(l, &lt, r, &rt);
+            let res = Type::Float(w);
+            self.adapt_float_lit(l, &res);
+            self.adapt_float_lit(r, &res);
+            let left = std::mem::replace(l, dummy_expr(sp));
+            let right = std::mem::replace(r, dummy_expr(sp));
+            Spanned::new(ExprKind::Binary(BinOp::Eq, Box::new(left), Box::new(right)), sp)
         } else {
             return err_at(
                 sp,
@@ -5702,6 +5731,44 @@ impl Checker {
         )
     }
 
+    /// Width resolution for a binary float op (arithmetic or comparison):
+    /// the wider operand wins, so `f32 + f64` is `f64` (§4.3). An untyped
+    /// float literal never forces a width — it adapts to the other operand,
+    /// exactly like an untyped integer literal does.
+    fn float_op_width(&self, l: &Expr, lt: &Type, r: &Expr, rt: &Type) -> FloatW {
+        let w = |e: &Expr, t: &Type| -> Option<FloatW> {
+            match t {
+                Type::Float(w) => {
+                    if is_untyped_float_lit(e) {
+                        None
+                    } else {
+                        Some(*w)
+                    }
+                }
+                _ => None,
+            }
+        };
+        match (w(l, lt), w(r, rt)) {
+            (Some(FloatW::F64), _) | (_, Some(FloatW::F64)) => FloatW::F64,
+            (Some(w), _) | (_, Some(w)) => w,
+            // both sides untyped literals: the default literal width
+            (None, None) => FloatW::F64,
+        }
+    }
+
+    /// Cast an untyped float literal to the expression's resolved width.
+    /// C would promote a bare `1.5` to `double` and quietly widen the whole
+    /// expression, so the cast is what keeps `f32` arithmetic at `f32`.
+    fn adapt_float_lit(&mut self, e: &mut Expr, res: &Type) {
+        let Type::Float(FloatW::F32) = res else { return };
+        if !is_untyped_float_lit(e) {
+            return;
+        }
+        let sp = e.span;
+        let inner = std::mem::replace(e, dummy_expr(sp));
+        *e = Spanned::new(ExprKind::Cast("f32".into(), Box::new(inner)), sp);
+    }
+
     fn require_lit_fits(&mut self, e: &Expr, w: IntW, sp: Span) -> CResult<()> {
         if let Some(LitVal::Int(v, neg)) = lit_val(e) {
             if w.fits_literal(v, neg) {
@@ -5723,7 +5790,10 @@ impl Checker {
             Some(w) if w.needs_wrap_cast() => w,
             _ => return,
         };
-        let inner = std::mem::replace(e, dummy_expr(sp));
+        let mut inner = std::mem::replace(e, dummy_expr(sp));
+        // the wrapped node still *is* the narrow-typed expression; record it
+        // so backends that read `.ty` (the QBE emitter) keep the exact width
+        inner.ty = Some(t.name());
         *e = Spanned::new(ExprKind::Cast(w.name().into(), Box::new(inner)), sp);
     }
 }
@@ -5759,6 +5829,12 @@ fn c_reserved(name: &str) -> bool {
 fn assignable(target: &Type, value: &Type) -> bool {
     target == value
         || (matches!(target, Type::Float(_)) && matches!(value, Type::Int(_)))
+        // f32 -> f64 is a lossless widening, so it is implicit like int ->
+        // float; f64 -> f32 narrows and still needs an explicit cast (§4.1)
+        || matches!(
+            (target, value),
+            (Type::Float(FloatW::F64), Type::Float(FloatW::F32))
+        )
 }
 
 /// Assignability including untyped-literal adaptation: an unsuffixed literal

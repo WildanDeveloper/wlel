@@ -83,3 +83,9 @@ jobs:
         run: |
           cargo build --release --locked
           find examples flagship -name '*.wl' -print0 | xargs -0 ./target/release/wlel fmt -check
+      # the tag-driven release workflow only runs on v* tags; exercise the
+      # packaging script on every push so a broken artifact is caught here
+      - name: Release packaging dry run
+        run: |
+          ./scripts/release.sh
+          tar -tzf dist/wlel-*-x86_64-unknown-linux-gnu.tar.gz | grep -qx '.*/wlel'

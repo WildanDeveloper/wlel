@@ -1,11 +1,15 @@
 # The Wlel Language Specification
 
-**Version 1.0 — draft for public review**
+**Version 1.0 — frozen**
 
 > This document is the normative definition of the Wlel programming language.
 > It describes the language as implemented by the reference compiler (`wlel`,
 > C99 backend). Where this document and the compiler disagree, that is a bug
 > in one of them — please open an issue and cite the section number.
+>
+> **1.0 syntax freeze.** The syntax and semantics described here are frozen
+> for 1.0. §17 records the decisions that closed the last open questions;
+> new syntax is out of scope until after 1.0.
 >
 > The keywords **MUST**, **MUST NOT**, **SHALL**, **SHOULD** and **MAY** are
 > to be read as described in RFC 2119. Behavior labeled *unspecified* or
@@ -31,7 +35,7 @@
 14. [Foreign function interface](#14-foreign-function-interface)
 15. [Standard library summary](#15-standard-library-summary)
 16. [Grammar](#16-grammar)
-17. [Open questions for review](#17-open-questions-for-review)
+17. [Resolved for the 1.0 freeze](#17-resolved-for-the-10-freeze)
 
 ---
 
@@ -229,10 +233,14 @@ A value of type `V` is assignable to a target of type `T` if and only if:
 1. `T` and `V` are the same type, **or**
 2. `T` is any float width and `V` is any integer width (implicit
    int→float widening — variables included), **or**
-3. `V` is an untyped literal that fits `T` (§4.2), **or**
-4. `V` is `[T'; N]` and `T` is `*T'` — **argument decay only**: this rule
+3. `V` is `f32` and `T` is `f64` — **float widening**: lossless, therefore
+   implicit, and the mirror image of rule 2. `f64` → `f32` narrows and
+   requires an explicit cast (§4.4), **or**
+4. `V` is an untyped literal that fits `T` (§4.2), **or**
+5. `V` is `[T'; N]` and `T` is `*T'` — **argument decay only**: this rule
    applies exclusively when the array is a function-call argument, never to
-   `let` initialization, assignment, struct literals, or returns.
+   `let` initialization, assignment, struct literals, or returns. An
+   explicit `arr as *T'` is the general form and works anywhere (§4.4).
 
 Everything else requires an explicit cast (§4.4).
 
@@ -265,11 +273,14 @@ For a binary arithmetic or comparison operator with integer operands:
 - **Exception — shifts**: the shift amount converts freely to any integer
   width; the result takes the **left** operand's width.
 
-For float operands: int op float widens implicitly; f32↔f64 mixing requires
-an explicit cast. When both operands are already float typed, the result
-takes the **left** operand's width (`f32 + f64` is typed `f32`). This
-asymmetry is intentional for review (§17). `%` on floats is a compile-time
-error.
+For float operands: int op float widens implicitly. When both operands are
+float typed, the **wider width wins** (`f32 + f64` is `f64`; `f32 + f32` is
+`f32`), which is lossless and symmetric — narrowing back to `f32` is an
+explicit cast (§4.4). An unsuffixed float literal never forces a width: it
+adapts to the other operand, exactly like an untyped integer literal
+(`f32v + 1.5` is `f32`). Comparisons follow the same rules: `f32` values
+compare against `f64` values after widening, and against float literals at
+the variable's width. `%` on floats is a compile-time error.
 
 ### 4.4 Casts
 
@@ -283,10 +294,16 @@ a compile-time error:
 | any pointer | any integer |
 | any integer | any pointer |
 | `string` | any pointer |
+| an array `[T; N]` | `*T` (explicit decay) |
 
 Casts never range-check: `300 as i8` wraps (§11). Pointer↔integer and
 `string`↔pointer casts are the FFI escape hatches; dereferencing a pointer
 produced by an invalid cast is undefined behavior.
+
+Explicit array decay `arr as *T` yields a pointer to the first element and
+is legal wherever an expression is (§4.1 rule 5 covers only the implicit
+argument case). The element types must match exactly — `[[int; 2]; 3]` does
+not cast to `*int`.
 
 ### 4.5 Wrap-cast canonicalization (< 32-bit)
 
@@ -798,8 +815,8 @@ operators skip the checks of the unevaluated operand (§5.2).
 - `assert(cond)` — aborts (or fails the enclosing test) with
   `assertion failed at file:line` when `cond` is false.
 - `assert_eq(a, b)` — mirrors `==` exactly: literal adaptation, the
-  mixed-width rule, string content comparison, bool; f32-vs-f64 is
-  rejected; other type pairs are rejected.
+  mixed-width rule, string content comparison, bool, and f32↔f64 numeric
+  comparison after widening (§4.3); other type pairs are rejected.
 - `panic(msg: string)` — aborts with `panic at file:line: msg`; counted as
   a terminator for the return-path proof (§6.8); statements after it in the
   same block are unreachable.
@@ -941,37 +958,56 @@ pattern     = IDENT [ "(" [ IDENT { "," IDENT } ] ")" ] | "_" ;
 
 Types: `IDENT` (builtin or user), `*` type, `[` type `;` INT `]`.
 
-## 17. Open questions for review
+## 17. Resolved for the 1.0 freeze
 
-This is a **draft**. The following points are specified as-implemented and
-are explicitly up for review before 1.0 freeze:
+This section records the decisions taken on the points that were previously
+listed as open questions, and the reasoning behind each. They are now part
+of the language: a conforming implementation MUST match them.
 
-1. **Evaluation order of operands and arguments** is unspecified (§5.2.1).
-   Defining left-to-right would cost a little codegen freedom; leaving it
-   unspecified matches C. Feedback welcome.
-2. **Mixed float widths** take the *left* operand's width (`f32 + f64` is
-   `f32`, §4.3). An alternative is "f64 wins" (symmetric, lossy-free for
-   assignments like `let x: f64 = f32v + f64v`). Current behavior matches
-   the shipped compiler; changing it is a one-line checker change plus
-   tests.
-3. **Assignment lvalue checking** is done by the checker (§5.7): a
-   non-lvalue target is rejected with a compile-time message.
-4. **Array decay** happens only at call arguments (§4.1.4); explicit
-   `arr as *T` is currently rejected. Either generalizing decay or adding
-   the cast is under discussion.
-5. **`std::print_bool` / `std::println_bool`** are implemented (they print
-   `true`/`false`); the doc table and the checker now agree.
-6. **`std::len`** accepts arrays only (use `.len()` for Vec-shaped
-   structs); the doc table now states this explicitly.
-7. **Pointer arithmetic beyond indexing** (`p + 1`) does not exist; FFI
-   code uses casts. Whether to add it pre-1.0 is open (default: no).
-8. **Escape analysis** (a static warning when a pointer provably escapes an
-   arena block) is listed in the risk register as future work; the spec
-   currently defines escape as legal-but-dangling (§10.4).
+1. **Evaluation order of operands and arguments stays unspecified** (§5.2).
+   Guaranteeing left-to-right would constrain the codegen for no semantic
+   gain, and C programmers already treat `f(a(), b())` as unordered. The
+   language instead guarantees *what* is sequenced (§5.2 items 2–6) and
+   leaves the rest inherited from C. Programs that depend on operand order
+   are non-portable — that is the documented contract, not an oversight.
+
+2. **Mixed float widths: the wider operand wins** (`f32 + f64` is `f64`,
+   §4.3). The previous as-implemented rule took the *left* operand's width,
+   which made `a + b` and `b + a` differ in type and silently truncated a
+   `f64` operand. "Wider wins" is lossless and symmetric; narrowing is
+   spelled `x as f32`. `f32` → `f64` is therefore also an implicit
+   *assignment* widening (§4.1 rule 3), mirroring int→float. Untyped float
+   literals adapt to the other operand (`f32v + 1.5` is `f32`), and the
+   checker inserts the cast so C does not promote the expression to
+   `double`.
+
+3. **Assignment lvalue checking is a checker responsibility** (§5.7). A
+   non-lvalue target (`1 = 2`, `f().x = 1`) is a Wlel compile-time error
+   with a Wlel span, never a downstream C error.
+
+4. **Explicit array decay is part of the cast matrix** (§4.4):
+   `arr as *T` is legal anywhere and complements the implicit
+   argument-only decay of §4.1 rule 5. Element types must match exactly;
+   nested arrays are not flattened.
+
+5. **`std::print_bool` / `std::println_bool` exist** and print `true` /
+   `false`.
+
+6. **`std::len` accepts arrays only**; Vec-shaped structs use `.len()`.
+
+7. **Pointer arithmetic beyond indexing does not exist** (`p + 1` is a
+   compile-time error). `p[i]` and explicit casts cover the FFI use cases;
+   adding pointer arithmetic would invite the aliasing bugs the language
+   exists to avoid.
+
+8. **Escape analysis stays out of 1.0.** A pointer escaping an `arena`
+   block is legal but dangles once the block ends (§10.4). A static warning
+   is listed as future work, not a 1.0 requirement — the arena contract is
+   lexical, and enforcing it statically would need the whole-program
+   analysis the language deliberately avoids.
 
 ---
 
-*Wlel spec v1.0-draft — generated against the reference compiler described
-in the repository README. Sections §5.2, §10, §11 and §12 (evaluation
-order, arena lifetime, overflow, safe-debug) are the load-bearing
-contracts; please review those first.*
+*Wlel spec v1.0 — generated against the reference compiler described in the
+repository README. Sections §5.2, §10, §11 and §12 (evaluation order, arena
+lifetime, overflow, safe-debug) are the load-bearing contracts.*

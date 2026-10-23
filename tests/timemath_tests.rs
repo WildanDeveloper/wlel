@@ -145,16 +145,19 @@ fn math_argument_type_and_arity_errors() {
 }
 
 #[test]
-fn math_f32_requires_explicit_cast_but_ints_widen() {
-    // mixed-width rule: f32 must cast explicitly
+fn math_f32_widens_but_narrowing_requires_a_cast() {
+    // f32 -> f64 is a lossless widening, so it is implicit (§4.1)
+    let c = front(
+        "use std; fn main() -> int { v := 1.5f32; assert_eq(std::math::sqrt(v), 1.0); s := std::math::sqrt(9); return s as int; }",
+    )
+    .expect("f32 and int widen into a float parameter");
+    assert!(c.contains("std__math__sqrt"), "{c}");
+    // narrowing f64 -> f32 still needs the explicit cast
     let msg = check_err_msg(
         "use std;
-         fn main() -> int { v := 1.5f32; std::math::sqrt(v); return 0; }",
+         fn main() -> int { let v: f32 = 1.5; let w: f32 = std::math::sqrt(2.25); return 0; }",
     );
-    assert!(msg.contains("std::math::sqrt: argument must be float (f64), got f32"), "{msg}");
-    // cast makes it fine, and plain ints widen per the usual rules
-    front("use std; fn main() -> int { v := 1.5f32; assert_eq(std::math::sqrt(v as float), 1.0); s := std::math::sqrt(9); return s as int; }")
-        .expect("cast f32 and widening int accepted");
+    assert!(msg.contains("cannot initialize 'w' of type f32 with float"), "{msg}");
 }
 
 #[test]

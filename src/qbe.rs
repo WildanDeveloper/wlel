@@ -525,7 +525,10 @@ impl Qb {
                     }
                 }
             }
-            ExprKind::Binary(op, l, r) => self.gen_binop(*op, l, r, e.span),
+            ExprKind::Binary(op, l, r) => {
+                let res = self.ty_of(e);
+                self.gen_binop(*op, l, r, e.span, res)
+            }
             ExprKind::AddrOf(x) => {
                 let (a, _) = self.addr_of(x);
                 (a, QT::Ptr)
@@ -595,9 +598,15 @@ impl Qb {
         (slot, arr_ty.clone())
     }
 
-    fn gen_binop(&mut self, op: BinOp, l: &Expr, r: &Expr, span: Span) -> (String, QT) {
+    fn gen_binop(
+        &mut self,
+        op: BinOp,
+        l: &Expr,
+        r: &Expr,
+        span: Span,
+        res_ty: QT,
+    ) -> (String, QT) {
         let (lv, lt) = self.gen_expr(l);
-        let out_ty = self.ty_of(l);
         // short-circuit logical operators: bools, evaluated via branches
         if matches!(op, BinOp::And | BinOp::Or) {
             let short = self.lbl("sc");
@@ -623,10 +632,41 @@ impl Qb {
             let _ = lt;
             return (res, QT::Bool);
         }
-        let (rv, _rt) = self.gen_expr(r);
+        let (rv, rt) = self.gen_expr(r);
+        // a comparison yields bool, so the instruction width has to come from
+        // its operands (numeric widening, §4.3); arithmetic uses the
+        // checker-annotated result type
+        let is_cmp = matches!(
+            op,
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+        );
+        let out_ty = if is_cmp {
+            match (&lt, &rt) {
+                (QT::Float { bits: 64 }, _) | (_, QT::Float { bits: 64 }) => {
+                    QT::Float { bits: 64 }
+                }
+                (QT::Float { bits }, _) | (_, QT::Float { bits }) => QT::Float { bits: *bits },
+                (QT::Int { bits: 64, signed }, _) | (_, QT::Int { bits: 64, signed }) => {
+                    QT::Int { bits: 64, signed: *signed }
+                }
+                (QT::Int { bits, signed }, _) | (_, QT::Int { bits, signed }) => {
+                    QT::Int { bits: *bits, signed: *signed }
+                }
+                (QT::Bool, _) | (_, QT::Bool) => QT::Bool,
+                _ => lt.clone(),
+            }
+        } else {
+            res_ty
+        };
         match &out_ty {
             QT::Float { bits } => {
-                let b = if *bits == 64 { "d" } else { "s" };
+                // Both sides convert to the one instruction width; QBE
+                // rejects `s` and `d` operands on the same line.
+                let bits = *bits;
+                let common = QT::Float { bits };
+                let lv = self.convert(&lv, &lt, &common, l.span);
+                let rv = self.convert(&rv, &rt, &common, r.span);
+                let b = if bits == 64 { "d" } else { "s" };
                 let name = match op {
                     BinOp::Add => "add",
                     BinOp::Sub => "sub",
@@ -652,12 +692,17 @@ impl Qb {
                     (x, QT::Bool)
                 } else {
                     self.emit(format!("{x} ={b} {name} {lv}, {rv}"));
-                    (x, out_ty)
+                    (x, QT::Float { bits })
                 }
             }
             QT::Int { bits, signed } => {
                 let b = if *bits == 64 { "l" } else { "w" };
                 let sfx = if *signed { "s" } else { "u" };
+                // one width per instruction: an untyped literal adapted by
+                // the checker may still arrive at a different QBE width
+                let common = QT::Int { bits: *bits, signed: *signed };
+                let lv = self.convert(&lv, &lt, &common, l.span);
+                let rv = self.convert(&rv, &rt, &common, r.span);
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
                         let name = match (op, *signed) {
@@ -748,8 +793,14 @@ impl Qb {
         // bare runtime builtins (available without `use std`)
         match name {
             "wlel_print_int" | "wlel_print_float" | "wlel_print_str" => {
-                let (v, _) = self.gen_expr(&args[0]);
+                let (v, vty) = self.gen_expr(&args[0]);
                 let b = if name == "wlel_print_float" { "d" } else { "l" };
+                let v = if name == "wlel_print_float" {
+                    // print_float takes a C double; widen an f32 first
+                    self.convert(&v, &vty, &QT::Float { bits: 64 }, args[0].span)
+                } else {
+                    v
+                };
                 let short = name.trim_start_matches("wlel_print_");
                 self.emit(format!("call $wlel_print_{short}({b} {v})"));
                 return ("%void".into(), QT::Void);
