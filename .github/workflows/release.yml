@@ -16,6 +16,7 @@ jobs:
     # a tag must never publish an untested commit: ci.yml only runs on
     # branches, so the release pipeline carries its own gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -34,13 +35,17 @@ jobs:
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             linker: aarch64-linux-gnu-gcc
-          - os: macos-13
+          # GitHub retired the Intel macos-13 label (jobs targeting it stay
+          # queued forever); the Apple SDK on an ARM runner cross-links both
+          # architectures, so both Darwin targets build on macos-14
+          - os: macos-14
             target: x86_64-apple-darwin
           - os: macos-14
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -77,6 +82,7 @@ jobs:
   publish:
     needs: [test, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
