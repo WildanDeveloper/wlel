@@ -1,0 +1,81 @@
+{
+  "name": "wlel",
+  "displayName": "Wlel",
+  "description": "Wlel — the arena-first systems language: syntax highlighting and the wlel language server (diagnostics, hover, go-to-definition, completion).",
+  "version": "1.2.0",
+  "license": "Apache-2.0",
+  "publisher": "WildanDeveloper",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WildanDeveloper/wlel"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "wlel",
+    "systems",
+    "arena",
+    "compiler"
+  ],
+  "activationEvents": [
+    "onLanguage:wlel"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "wlel",
+        "aliases": [
+          "Wlel",
+          "wlel"
+        ],
+        "extensions": [
+          ".wlel"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "wlel",
+        "scopeName": "source.wlel",
+        "path": "./syntaxes/wlel.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Wlel",
+      "properties": {
+        "wlel.serverPath": {
+          "type": "string",
+          "default": "wlel",
+          "description": "Path to the wlel binary used for `wlel lsp`. Defaults to `wlel` on PATH."
+        },
+        "wlel.serverArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lsp"
+          ],
+          "description": "Arguments passed to the server binary. The default runs `wlel lsp`."
+        },
+        "wlel.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the JSON-RPC traffic between VS Code and wlel lsp."
+        }
+      }
+    }
+  },
+  "icon": "icon.png"
+}

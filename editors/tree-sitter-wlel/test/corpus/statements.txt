@@ -1,0 +1,95 @@
+==================
+control flow with a name before the opening brace
+==================
+
+fn main() -> int {
+    while i < n {
+        i = i + 1;
+    }
+    if x {
+        return 1;
+    }
+    for i in 0..n {
+        xs[i] = i * i;
+    }
+    return 0;
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (while_statement
+        condition: (binary_expression
+          left: (identifier)
+          right: (identifier))
+        body: (block
+          (assignment
+            target: (identifier)
+            value: (binary_expression
+              left: (identifier)
+              right: (integer_literal)))))
+      (if_statement
+        condition: (identifier)
+        consequence: (block
+          (return_statement
+            (integer_literal))))
+      (for_statement
+        variable: (identifier)
+        range: (range_expression
+          start: (integer_literal)
+          end: (identifier))
+        body: (block
+          (assignment
+            target: (index_expression
+              value: (identifier)
+              index: (identifier))
+            value: (binary_expression
+              left: (identifier)
+              right: (identifier)))))
+      (return_statement
+        (integer_literal)))))
+
+==================
+struct literal
+==================
+
+fn main() -> int {
+    let v: Vec2 = Vec2 { x: 1.0, y: 2.0 };
+    v.x = v.y;
+    return 0;
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_declaration
+        name: (identifier)
+        type: (named_type
+          (identifier))
+        value: (struct_literal
+          name: (identifier)
+          (field_initializer
+            name: (identifier)
+            value: (float_literal))
+          (field_initializer
+            name: (identifier)
+            value: (float_literal))))
+      (assignment
+        target: (field_expression
+          receiver: (identifier)
+          field: (identifier))
+        value: (field_expression
+          receiver: (identifier)
+          field: (identifier)))
+      (return_statement
+        (integer_literal)))))

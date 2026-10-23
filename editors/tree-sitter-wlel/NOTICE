@@ -1,0 +1,9 @@
+tree-sitter-wlel
+Copyright 2026 WildanDeveloper
+
+This product includes software developed as part of the Wlel project
+(https://github.com/WildanDeveloper/wlel).
+
+Licensed under the Apache License, Version 2.0. The generated parser in
+src/ (parser.c, node-types.json, grammar.json) is produced from grammar.js
+by tree-sitter and carries the same license.

@@ -1,0 +1,304 @@
+==================
+whole language
+==================
+
+use std;
+
+extern fn c_abs(x: int) -> int;
+
+struct Box[T] {
+    v: T,
+    n: int,
+}
+
+enum Shape {
+    Circle(float),
+    Rect(float, float),
+    Point,
+}
+
+struct Vec2 {
+    x: float,
+    y: float,
+}
+
+impl Vec2 {
+    fn len(self) -> float {
+        return std::math::sqrt(self.x * self.x + self.y * self.y);
+    }
+}
+
+test "box works" {
+    assert_eq(1, 1);
+}
+
+fn gen[T](x: T) -> T {
+    return x;
+}
+
+fn main() -> int {
+    let a: [int; 3] = [1, 2, 3];
+    let p: *int = wlel_alloc(8) as *int;
+    p[0] = a[0];
+    a[1] += 2;
+    a[2] = a[2] << 1;
+    let b: Box[int] = Box { v: 1, n: 2 };
+    defer std::println_str("bye");
+    arena (1024) {
+        let q: *void = wlel_arena();
+        let r: Box[int] = Box { v: 2, n: 3 };
+    }
+    for i in 0..3 {
+        a[i] = a[i] * 2;
+    }
+    for x in a {
+        std::println_int(x);
+    }
+    while true {
+        break;
+    }
+    if a[0] > 0 {
+        return 1;
+    } else if a[0] < 0 {
+        return 2;
+    } else {
+        return 0;
+    }
+}
+
+---
+
+(source_file
+  (use_declaration
+    (std_module))
+  (extern_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (primitive_type)))
+    (primitive_type))
+  (struct_declaration
+    (identifier)
+    (type_parameters
+      (identifier))
+    (field_declaration
+      (identifier)
+      (named_type
+        (identifier)))
+    (field_declaration
+      (identifier)
+      (primitive_type)))
+  (enum_declaration
+    (identifier)
+    (variant
+      (identifier)
+      (primitive_type))
+    (variant
+      (identifier)
+      (primitive_type)
+      (primitive_type))
+    (variant
+      (identifier)))
+  (struct_declaration
+    (identifier)
+    (field_declaration
+      (identifier)
+      (primitive_type))
+    (field_declaration
+      (identifier)
+      (primitive_type)))
+  (impl_declaration
+    (identifier)
+    (function_declaration
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)))
+      (primitive_type)
+      (block
+        (return_statement
+          (call_expression
+            (path_expression
+              (identifier)
+              (identifier)
+              (identifier))
+            (argument_list
+              (binary_expression
+                (binary_expression
+                  (field_expression
+                    (self_expression)
+                    (identifier))
+                  (field_expression
+                    (self_expression)
+                    (identifier)))
+                (binary_expression
+                  (field_expression
+                    (self_expression)
+                    (identifier))
+                  (field_expression
+                    (self_expression)
+                    (identifier))))))))))
+  (test_declaration
+    (string_literal)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (integer_literal)
+            (integer_literal))))))
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (identifier))
+    (parameter_list
+      (parameter
+        (identifier)
+        (named_type
+          (identifier))))
+    (named_type
+      (identifier))
+    (block
+      (return_statement
+        (identifier))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (let_declaration
+        (identifier)
+        (array_type
+          (primitive_type)
+          (integer_literal))
+        (array_literal
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)))
+      (let_declaration
+        (identifier)
+        (pointer_type
+          (primitive_type))
+        (cast_expression
+          (call_expression
+            (identifier)
+            (argument_list
+              (integer_literal)))
+          (pointer_type
+            (primitive_type))))
+      (assignment
+        (index_expression
+          (identifier)
+          (integer_literal))
+        (index_expression
+          (identifier)
+          (integer_literal)))
+      (compound_assignment
+        (index_expression
+          (identifier)
+          (integer_literal))
+        (integer_literal))
+      (assignment
+        (index_expression
+          (identifier)
+          (integer_literal))
+        (binary_expression
+          (index_expression
+            (identifier)
+            (integer_literal))
+          (integer_literal)))
+      (let_declaration
+        (identifier)
+        (generic_type
+          (identifier)
+          (primitive_type))
+        (struct_literal
+          (identifier)
+          (field_initializer
+            (identifier)
+            (integer_literal))
+          (field_initializer
+            (identifier)
+            (integer_literal))))
+      (defer_statement
+        (call_expression
+          (path_expression
+            (identifier)
+            (identifier))
+          (argument_list
+            (string_literal))))
+      (arena_statement
+        (integer_literal)
+        (block
+          (let_declaration
+            (identifier)
+            (pointer_type
+              (primitive_type))
+            (arena_handle))
+          (let_declaration
+            (identifier)
+            (generic_type
+              (identifier)
+              (primitive_type))
+            (struct_literal
+              (identifier)
+              (field_initializer
+                (identifier)
+                (integer_literal))
+              (field_initializer
+                (identifier)
+                (integer_literal))))))
+      (for_statement
+        (identifier)
+        (range_expression
+          (integer_literal)
+          (integer_literal))
+        (block
+          (assignment
+            (index_expression
+              (identifier)
+              (identifier))
+            (binary_expression
+              (index_expression
+                (identifier)
+                (type_arguments
+                  (named_type
+                    (identifier))))
+              (integer_literal)))))
+      (for_statement
+        (identifier)
+        (identifier)
+        (block
+          (expression_statement
+            (call_expression
+              (path_expression
+                (identifier)
+                (identifier))
+              (argument_list
+                (identifier))))))
+      (while_statement
+        (boolean_literal)
+        (block
+          (break_statement)))
+      (if_statement
+        (binary_expression
+          (index_expression
+            (identifier)
+            (integer_literal))
+          (integer_literal))
+        (block
+          (return_statement
+            (integer_literal)))
+        (if_statement
+          (binary_expression
+            (index_expression
+              (identifier)
+              (integer_literal))
+            (integer_literal))
+          (block
+            (return_statement
+              (integer_literal)))
+          (block
+            (return_statement
+              (integer_literal))))))))

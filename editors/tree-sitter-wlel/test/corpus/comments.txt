@@ -1,0 +1,41 @@
+==================
+doc comments, comments and strings
+==================
+
+/// A point in the plane.
+struct Pt {
+    x: float, // trailing
+    y: float,
+}
+
+// a plain comment is not a doc comment
+fn main() -> int {
+    let s: string = "a // not a comment";
+    return 0;
+}
+
+---
+
+(source_file
+  (doc_comment)
+  (struct_declaration
+    name: (identifier)
+    (field_declaration
+      name: (identifier)
+      type: (primitive_type))
+    (line_comment)
+    (field_declaration
+      name: (identifier)
+      type: (primitive_type)))
+  (line_comment)
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (let_declaration
+        name: (identifier)
+        type: (primitive_type)
+        value: (string_literal))
+      (return_statement
+        (integer_literal)))))

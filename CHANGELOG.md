@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.2.0] — 2026-10-23
+
+Editor support: Wlel now highlights, navigates and completes in the editors
+people already use, and the grammar is registered everywhere it needs to be.
+
+### Added
+
+- **Editor support** (`editors/`), all three under Apache-2.0:
+  - **`editors/vscode-wlel`** — a VS Code extension with a TextMate grammar
+    (`source.wlel`) and a zero-dependency language client over `wlel lsp`:
+    diagnostics, hover, go-to-definition and completion, with
+    `wlel.serverPath` / `wlel.serverArgs` / `wlel.trace.server` settings and
+    a restart-on-config-change path. No `tsc`, no `node_modules`.
+  - **`editors/tree-sitter-wlel`** — a tree-sitter grammar (`source.wlel`)
+    that parses every file in `examples/` and `flagship/` with zero `ERROR`
+    or `MISSING` nodes, with `queries/highlights.scm`, `queries/locals.scm`,
+    corpus tests and committed generated `src/`. Works from Neovim, Helix,
+    Emacs and Node.
+  - **`editors/linguist`** — the GitHub Linguist registration kit
+    (`languages.yml`, `grammars.yml`, sample staging script, PR checklist).
+    `.gitattributes` already marks `*.wlel` as Wlel in this repository.
+- **Editor tests** (`tests/editor_tests.rs`) — 12 tests that validate the
+  manifest, TextMate grammar, language configuration and JavaScript, load the
+  extension against a stub `vscode` module and drive it against the real
+  `wlel lsp` (hover, definition, completion, diagnostics), compile the
+  generated tree-sitter parser as C, regenerate the grammar to catch a stale
+  `src/`, parse every `.wlel` file in the repository, and compile both query
+  files. Tests needing `node`, `cc` or `tree-sitter` skip cleanly when the
+  tool is absent, and a new `editors` CI job installs them and runs the
+  suite for real.
+
+### Changed
+
+- Version 1.1.0 -> 1.2.0 (additive; no language or CLI behavior changed).
+
 ## [1.1.0] — 2026-10-23
 
 The first ecosystem release: the project is now legally usable, the
@@ -42,7 +77,6 @@ dependency lifecycle is complete, and a new project ships with CI.
   parser of hostile input), `CHANGELOG.md`, bug/feature issue forms, a
   pull-request template, `.editorconfig`, `rust-toolchain.toml` and
   Dependabot for the fuzz crate and the pinned Actions.
-
 ### Changed
 
 - Version 1.0.0 -> 1.1.0 (additive; no language or CLI behavior changed for

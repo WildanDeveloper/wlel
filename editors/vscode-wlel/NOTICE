@@ -1,0 +1,8 @@
+Wlel for VS Code
+Copyright 2026 WildanDeveloper
+
+This product includes software developed as part of the Wlel project
+(https://github.com/WildanDeveloper/wlel).
+
+Licensed under the Apache License, Version 2.0. The extension talks to the
+`wlel lsp` server, which is distributed under the same license.

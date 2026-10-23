@@ -1,0 +1,9 @@
+Wlel:
+  type: programming
+  color: "#6a5acd"
+  extensions:
+  - ".wlel"
+  ace_mode: text
+  codemirror_mode: clike
+  codemirror_mime_type: text/x-csrc
+  tm_scope: source.wlel

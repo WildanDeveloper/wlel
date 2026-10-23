@@ -1,0 +1,47 @@
+{
+  "name": "tree-sitter-wlel",
+  "version": "1.2.0",
+  "description": "Wlel grammar for tree-sitter",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WildanDeveloper/wlel"
+  },
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "tree-sitter-grammar",
+    "wlel",
+    "parser",
+    "incremental"
+  ],
+  "tree-sitter": [
+    {
+      "scope": "source.wlel",
+      "file-types": [
+        "wlel"
+      ],
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm",
+      "injection-regex": "^wlel$"
+    }
+  ],
+  "files": [
+    "grammar.js",
+    "src/**",
+    "bindings/**",
+    "queries/**",
+    "tree-sitter.json",
+    "binding.gyp",
+    "LICENSE",
+    "README.md"
+  ],
+  "devDependencies": {
+    "node-addon-api": "^8.0.0",
+    "node-gyp-build": "^4.8.0"
+  },
+  "scripts": {
+    "test": "tree-sitter test",
+    "generate": "tree-sitter generate"
+  }
+}

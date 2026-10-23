@@ -792,12 +792,35 @@ vim.api.nvim_create_autocmd('filetype', {
 })
 ```
 
-**VS Code** — point a generic LSP client at `wlel lsp` (e.g. via the
-"any-lsp" style extensions), or launch it manually:
+**VS Code** — install the bundled extension, which ships the syntax
+highlighting and the language client together:
 
 ```bash
-wlel lsp   # speaks on stdin/stdout; diagnostics on open/change
+git clone https://github.com/WildanDeveloper/wlel
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.2.0
+# reload the window, then open any .wlel file
 ```
+
+It has no build step and no dependencies: the TextMate grammar is plain JSON
+and the client is a small JSON-RPC bridge over `wlel lsp`. Settings:
+`wlel.serverPath` (default `wlel`), `wlel.serverArgs` (default `["lsp"]`),
+`wlel.trace.server` (`off`/`messages`/`verbose`).
+
+**Other editors** — anything that speaks LSP works by pointing it at
+`wlel lsp`:
+
+```bash
+wlel lsp   # LSP 3.17 on stdin/stdout; diagnostics on open/change
+```
+
+**Syntax highlighting everywhere** — `editors/tree-sitter-wlel` is a
+tree-sitter grammar (`source.wlel`) that parses every file in `examples/` and
+`flagship/` with zero errors, with `queries/highlights.scm` and
+`queries/locals.scm`. Use it from Neovim (`nvim-treesitter`), Helix, Emacs
+(`treesit`) or Node; the build is `tree-sitter generate` in that directory.
+GitHub's language bar is covered by the `.gitattributes` override, and the
+[Linguist registration kit](editors/linguist/README.md) is ready to submit
+upstream.
 
 Notes:
 - The stdlib is embedded in the compiler, so std symbols resolve even
@@ -965,12 +988,12 @@ Shipped:
 4. **CI integrity** — flagship check/test/build/bench jobs and `fmt -check` over `flagship/`.
 5. **1.0 freeze** — the spec's open questions are resolved and documented in [§17](docs/spec.md#17-resolved-for-the-10-freeze) (mixed float widths take the wider side, f32→f64 widens implicitly, explicit array decay, evaluation order stays C-inherited, no pointer arithmetic); source extension is `.wlel` (the pre-1.0 one is claimed by Wolfram Language in Linguist/editors); `wlel --version`; `scripts/release.sh` + `docs/cross-compile.md` for release binaries.
 
-6. **Ecosystem** — shipped in 1.1.0: Apache-2.0 license and package
-   metadata, the dependency lifecycle (`init/remove/update/tree/clean`), and
-   scaffolds with a README and a CI workflow. Remaining: editor support
-   (tree-sitter grammar, VS Code extension, GitHub Linguist registration),
-   an install script and package-manager manifests, and a documentation
-   site.
+6. **Ecosystem** — shipped in 1.1.0–1.2.0: Apache-2.0 license and package
+   metadata, the dependency lifecycle (`init/remove/update/tree/clean`),
+   scaffolds with a README and a CI workflow, and editor support — the VS Code
+   extension, the tree-sitter grammar, and the GitHub Linguist registration
+   kit. Remaining: an install script and package-manager manifests, and a
+   documentation site.
 7. **Module namespaces** — imports currently merge into one flat global
    scope (two files defining `helper` is a duplicate-symbol error); this is
    also the main blocker for self-hosting.

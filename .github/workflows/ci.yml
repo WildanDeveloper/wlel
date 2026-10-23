@@ -67,6 +67,24 @@ jobs:
         run: |
           "$RUNNER_TEMP/json" bench 8 10
 
+  # The editor artifacts are JSON, JavaScript and a generated C parser, so
+  # nothing in a normal `cargo test` would notice them rotting. This job
+  # installs the two tools the editor tests look for and runs them for real:
+  # the TextMate grammar, the extension bridge, the generated tree-sitter
+  # parser and its queries.
+  editors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+      - name: Editor artefacts (VS Code + tree-sitter)
+        run: cargo test --locked --test editor_tests -- --nocapture
+
   # keep the quality bar the repo already claims: clippy -D warnings and
   # canonical .wlel formatting (wlel fmt -check, the fmt∘fmt == fmt guarantee)
   lint:

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "wlel",
+      "camelcase": "Wlel",
+      "title": "Wlel",
+      "scope": "source.wlel",
+      "file-types": [
+        "wlel"
+      ],
+      "injection-regex": "^wlel$",
+      "class-name": "TreeSitterWlel",
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm"
+    }
+  ],
+  "metadata": {
+    "version": "1.2.0",
+    "license": "Apache-2.0",
+    "description": "Wlel grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "WildanDeveloper",
+        "url": "https://github.com/WildanDeveloper"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/WildanDeveloper/wlel"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "node": true
+  }
+}

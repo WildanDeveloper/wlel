@@ -1,0 +1,46 @@
+==================
+index and generic call
+==================
+
+fn main() -> int {
+    a[0];
+    a[i];
+    vec_new[int](4);
+    map_new[string, int]();
+    return 0;
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    return_type: (primitive_type)
+    body: (block
+      (expression_statement
+        (index_expression
+          value: (identifier)
+          index: (integer_literal)))
+      (expression_statement
+        (index_expression
+          value: (identifier)
+          index: (identifier)))
+      (expression_statement
+        (call_expression
+          function: (index_expression
+            value: (identifier)
+            type_arguments: (type_arguments
+              (primitive_type)))
+          arguments: (argument_list
+            (integer_literal))))
+      (expression_statement
+        (call_expression
+          function: (index_expression
+            value: (identifier)
+            type_arguments: (type_arguments
+              (primitive_type)
+              (primitive_type)))
+          arguments: (argument_list)))
+      (return_statement
+        (integer_literal)))))

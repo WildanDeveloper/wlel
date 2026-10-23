@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+
+Name: tree-sitter-wlel
+Description: Wlel grammar for tree-sitter
+Version: @VERSION@
+Requires: tree-sitter
+Libs: -L${libdir} -ltree-sitter-wlel
+Cflags: -I${includedir}

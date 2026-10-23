@@ -1,0 +1,123 @@
+==================
+match in value and statement form
+==================
+
+enum Shape {
+    Circle(float),
+    Rect(float, float),
+    Point,
+}
+
+fn area(s: Shape) -> float {
+    return match s {
+        Circle(r) => 3.141592653589793 * r * r,
+        Rect(w, h) => w * h,
+        Point => 0.0,
+    };
+}
+
+fn log_shape(s: Shape) {
+    match s {
+        Circle(r) => {
+            std::println_float(r);
+        }
+        Rect(w, h) => {
+            std::println_float(w + h);
+        }
+        Point => {
+        }
+    }
+}
+
+---
+
+(source_file
+  (enum_declaration
+    name: (identifier)
+    (variant
+      name: (identifier)
+      (primitive_type))
+    (variant
+      name: (identifier)
+      (primitive_type)
+      (primitive_type))
+    (variant
+      name: (identifier)))
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (named_type
+          (identifier))))
+    return_type: (primitive_type)
+    body: (block
+      (return_statement
+        (match_expression
+          value: (identifier)
+          (match_arm
+            pattern: (pattern
+              (variant_pattern
+                variant: (identifier)
+                (identifier)))
+            value: (binary_expression
+              left: (binary_expression
+                left: (float_literal)
+                right: (identifier))
+              right: (identifier)))
+          (match_arm
+            pattern: (pattern
+              (variant_pattern
+                variant: (identifier)
+                (identifier)
+                (identifier)))
+            value: (binary_expression
+              left: (identifier)
+              right: (identifier)))
+          (match_arm
+            pattern: (pattern
+              (identifier))
+            value: (float_literal))))))
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list
+      (parameter
+        name: (identifier)
+        type: (named_type
+          (identifier))))
+    body: (block
+      (match_expression
+        value: (identifier)
+        (match_arm
+          pattern: (pattern
+            (variant_pattern
+              variant: (identifier)
+              (identifier)))
+          value: (block_expression
+            (expression_statement
+              (call_expression
+                function: (path_expression
+                  module: (identifier)
+                  name: (identifier))
+                arguments: (argument_list
+                  (identifier))))))
+        (match_arm
+          pattern: (pattern
+            (variant_pattern
+              variant: (identifier)
+              (identifier)
+              (identifier)))
+          value: (block_expression
+            (expression_statement
+              (call_expression
+                function: (path_expression
+                  module: (identifier)
+                  name: (identifier))
+                arguments: (argument_list
+                  (binary_expression
+                    left: (identifier)
+                    right: (identifier)))))))
+        (match_arm
+          pattern: (pattern
+            (identifier))
+          value: (block_expression))))))

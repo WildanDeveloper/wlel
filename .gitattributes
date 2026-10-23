@@ -8,3 +8,10 @@
 # this line keeps the language bar honest if a future Linguist release guesses
 # wrong.
 *.wlel linguist-language=Wlel linguist-detectable=true
+
+# Generated tree-sitter parser. It is committed so consumers only need a C
+# compiler, but it is not hand-written code and should not count as such in
+# language statistics or review diffs.
+editors/tree-sitter-wlel/src/parser.c linguist-generated=true
+editors/tree-sitter-wlel/src/grammar.json linguist-generated=true
+editors/tree-sitter-wlel/src/node-types.json linguist-generated=true
