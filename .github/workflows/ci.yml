@@ -85,6 +85,30 @@ jobs:
       - name: Editor artefacts (VS Code + tree-sitter)
         run: cargo test --locked --test editor_tests -- --nocapture
 
+  # The distribution artifacts are shell scripts, a Python renderer and a
+  # WebAssembly build, none of which `cargo test` would otherwise compile.
+  # This job builds the playground module and the site for real, so a broken
+  # install script or an unrendered doc page fails the push.
+  distribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install a C compiler and shell tools
+        run: sudo apt-get update && sudo apt-get install -y gcc
+      - name: Install script, manifests and docs site
+        run: cargo test --locked --test distribution_tests -- --nocapture
+      - name: Playground and site end to end
+        run: |
+          ./scripts/site.sh _site
+          test -s _site/index.html
+          test -s _site/playground/wlel.wasm
+          test -s _site/spec.html
+
   # keep the quality bar the repo already claims: clippy -D warnings and
   # canonical .wlel formatting (wlel fmt -check, the fmt∘fmt == fmt guarantee)
   lint:

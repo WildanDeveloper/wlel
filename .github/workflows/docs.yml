@@ -1,0 +1,55 @@
+name: docs
+
+# Builds the documentation site (including the WebAssembly playground) and
+# publishes it to GitHub Pages.
+#
+# The gh-pages branch already hosts the benchmark trend from bench.yml at
+# dev/bench/, so this job publishes with `keep_files: true` and the site
+# lives at the root of the same branch. A separate Pages source would need a
+# second repository.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "docs/**"
+      - "editors/**/README.md"
+      - "playground/**"
+      - "scripts/docsite.py"
+      - "scripts/site.sh"
+      - "assets/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check the markdown renders
+        run: python3 scripts/docsite.py --check
+      - name: Build the site
+        run: ./scripts/site.sh _site
+      - name: Publish
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          # dev/bench/ belongs to bench.yml; never delete it
+          keep_files: true
+          commit_message: "docs: publish ${{ github.sha }}"

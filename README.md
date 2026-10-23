@@ -133,6 +133,29 @@ Prebuilt binaries are attached to every [release](https://github.com/WildanDevel
 the compiler for another platform and for cross-compiling *Wlel programs*
 (set `$CC` to a cross compiler, or use `--emit-c` and link by hand).
 
+### Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/WildanDeveloper/wlel/main/install.sh | sh
+```
+
+The script picks the archive for your platform, verifies it against the
+release's `SHA256SUMS`, and installs to `/usr/local/bin` when that is writable
+and `~/.local/bin` otherwise — never `sudo`. Pin a release with
+`WLEL_VERSION=v1.2.0` and choose the directory with `WLEL_INSTALL_DIR`.
+
+Homebrew and Scoop manifests are generated from the release hashes:
+
+```bash
+./scripts/packaging.sh                       # writes dist/packaging/
+brew install WildanDeveloper/wlel/wlel       # once the tap is published
+scoop install wlel                           # once the bucket is published
+```
+
+Or try it without installing anything: the [playground](playground/index.html)
+runs the real front-end (lexer, parser, type checker) compiled to WebAssembly,
+so a type error there is the same message `wlel check` prints.
+
 ```bash
 cargo run --release -- run examples/arena.wlel             # scoped arena demo
 cargo run --release -- run examples/loops.wlel             # for-in range demo
@@ -797,7 +820,7 @@ highlighting and the language client together:
 
 ```bash
 git clone https://github.com/WildanDeveloper/wlel
-cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.2.0
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.3.0
 # reload the window, then open any .wlel file
 ```
 
@@ -988,12 +1011,13 @@ Shipped:
 4. **CI integrity** — flagship check/test/build/bench jobs and `fmt -check` over `flagship/`.
 5. **1.0 freeze** — the spec's open questions are resolved and documented in [§17](docs/spec.md#17-resolved-for-the-10-freeze) (mixed float widths take the wider side, f32→f64 widens implicitly, explicit array decay, evaluation order stays C-inherited, no pointer arithmetic); source extension is `.wlel` (the pre-1.0 one is claimed by Wolfram Language in Linguist/editors); `wlel --version`; `scripts/release.sh` + `docs/cross-compile.md` for release binaries.
 
-6. **Ecosystem** — shipped in 1.1.0–1.2.0: Apache-2.0 license and package
+6. **Ecosystem** — shipped in 1.1.0–1.3.0: Apache-2.0 license and package
    metadata, the dependency lifecycle (`init/remove/update/tree/clean`),
-   scaffolds with a README and a CI workflow, and editor support — the VS Code
-   extension, the tree-sitter grammar, and the GitHub Linguist registration
-   kit. Remaining: an install script and package-manager manifests, and a
-   documentation site.
+   scaffolds with a README and a CI workflow, editor support (VS Code
+   extension, tree-sitter grammar, GitHub Linguist registration kit), a
+   checksum-verifying `install.sh`, generated Homebrew/Scoop manifests, a
+   documentation site, and a WebAssembly playground that runs the real
+   lexer/parser/type checker in the browser.
 7. **Module namespaces** — imports currently merge into one flat global
    scope (two files defining `helper` is a duplicate-symbol error); this is
    also the main blocker for self-hosting.

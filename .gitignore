@@ -7,3 +7,9 @@ wlel_json_test.tmp
 /dist
 # scratch file written by examples/fileio.wlel
 wlel_fileio_demo.tmp
+# generated documentation site + its WebAssembly module
+/_site
+/site
+/playground/wlel.wasm
+__pycache__/
+/playground/wasm/target

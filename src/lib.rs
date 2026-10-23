@@ -6,6 +6,7 @@ pub mod fmt;
 pub mod lexer;
 pub mod lsp;
 pub mod parser;
+pub mod playground;
 pub mod project;
 pub mod qbe;
 pub mod registry;

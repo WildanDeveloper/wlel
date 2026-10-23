@@ -6,6 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.3.0] — 2026-10-23
+
+Distribution: Wlel is now one command away on every platform, and the front-end
+runs in a browser tab.
+
+### Added
+
+- **`install.sh`** — one-line install for Linux and macOS. It resolves the
+  latest release through the `/releases/latest` redirect (no API rate limit),
+  picks the archive for the host, verifies it against the release's
+  `SHA256SUMS` with `sha256sum` or `shasum`, and installs to `/usr/local/bin`
+  when writable and `~/.local/bin` otherwise. Never runs `sudo`; `WLEL_VERSION`
+  pins a release and `WLEL_INSTALL_DIR` picks the directory.
+- **Homebrew and Scoop manifests** — `scripts/packaging.sh` renders
+  `packaging/homebrew/wlel.rb` and `packaging/scoop/wlel.json` from a release's
+  `SHA256SUMS`, so the URLs and per-architecture hashes cannot drift from the
+  archives. `packaging/README.md` documents publishing the tap and bucket.
+- **Documentation site** — `scripts/docsite.py` renders the repository's
+  markdown (README, spec, changelog, contributing, security, cross-compile and
+  the three editor READMEs) into a static site with a shared header, per-page
+  table of contents and syntax-tagged code blocks, using only the Python
+  standard library. `scripts/site.sh` builds it plus the playground, and the
+  new `docs` workflow publishes to GitHub Pages with `keep_files` so the
+  benchmark trend that already lives on `gh-pages` survives.
+- **WebAssembly playground** (`playground/`) — the real front-end (lexer,
+  error-recovering parser, `use std` splice, type checker) compiled to
+  `wasm32-unknown-unknown` behind a five-function C ABI (`wlel_alloc`,
+  `wlel_analyze`, `wlel_result_ptr`, `wlel_dealloc`, `wlel_version`), with no
+  wasm-bindgen and no JS build step. The page shows diagnostics with
+  click-to-jump positions, offers `wlel fmt` output, and runs four examples;
+  the whole module is ~470 KiB.
+- **`src/playground.rs`** — the analysis pipeline the playground exposes, as
+  JSON: `{"ok":…,"diagnostics":[…],"formatted":…}`. A file import is a clean
+  diagnostic rather than a filesystem read, and a panic inside the pipeline is
+  caught and reported instead of trapping the module.
+- **Tests** — `tests/playground_tests.rs` (8 tests: ok/warn/error/lex/syntax,
+  import rejection, JSON escaping) and `tests/distribution_tests.rs` (8 tests:
+  POSIX syntax of both scripts, archive layout agreement with `release.sh`,
+  manifest rendering with a synthetic `SHA256SUMS`, doc-site rendering and
+  internal links, playground ABI agreement between Rust and JS, and a real
+  wasm build). A new `distribution` CI job runs both.
+
+### Changed
+
+- `scripts/packaging.sh` writes `packaging/` instead of `dist/packaging/`
+  (`dist/` is build output and git-ignored); override with
+  `WLEL_PACKAGING_OUT`.
+- `docs.yml` and `bench.yml` share a `gh-pages` concurrency group so the two
+  publishers cannot race each other.
+- Version 1.2.0 -> 1.3.0 (additive; no language or CLI behavior changed).
+
 ## [1.2.0] — 2026-10-23
 
 Editor support: Wlel now highlights, navigates and completes in the editors

@@ -41,3 +41,8 @@ tree-sitter test
 
 `grammar.js` is the source of truth; `src/` is committed so consumers only
 need a C compiler. The editor test fails if the two disagree.
+
+One wrinkle: `src/parser.c` embeds a language version derived from
+`tree-sitter.json`'s `metadata.version`, so **a version bump requires
+`tree-sitter generate`**. The `tree_sitter_generated_sources_are_current` test
+is what catches it.

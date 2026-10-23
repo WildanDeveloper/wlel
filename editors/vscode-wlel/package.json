@@ -2,7 +2,7 @@
   "name": "wlel",
   "displayName": "Wlel",
   "description": "Wlel — the arena-first systems language: syntax highlighting and the wlel language server (diagnostics, hover, go-to-definition, completion).",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "license": "Apache-2.0",
   "publisher": "WildanDeveloper",
   "repository": {

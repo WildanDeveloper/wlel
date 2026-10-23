@@ -21,6 +21,12 @@ permissions:
   contents: write
   deployments: write
 
+# docs.yml also publishes to gh-pages; serialise the two so neither push is
+# rejected because the branch moved under it
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
 jobs:
   bench:
     runs-on: ubuntu-latest
