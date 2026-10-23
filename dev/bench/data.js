@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792791388271,
+  "lastUpdate": 1792791524490,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -653,6 +653,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 2.8,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "0ea0157ea6d8a5bcef7f28c8bae6f55cfd5289c9",
+          "message": "bench: stop the trend gate from failing on shared-runner noise — 15 samples instead of 7 and a 250% alert threshold, because the 150% gate tripped twice on a byte-identical codegen commit (fib(35) 11 -> 18 ms, a 4 -> 8 ms front-end sample) purely from scheduler interference, and a flaky red job trains people to ignore the graph; the regressions the gate exists for are order-of-magnitude events (the sorted-input quicksort regression was 184x, the JSON parser one ~100x), so 2.5x still catches them while `scripts/bench.sh` keeps reporting the fastest sample (interference only adds time); verified locally (fib 9.1 ms, sort 51/4 ms, front-end 2.5 ms, valid customSmallerIsBetter JSON) and with `bash -n` + a YAML parse",
+          "timestamp": "2026-10-23T21:38:05Z",
+          "tree_id": "fe8e4d928ab363306c1003240564abef6b5050dd",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/0ea0157ea6d8a5bcef7f28c8bae6f55cfd5289c9"
+        },
+        "date": 1792791524091,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.4,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 66,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.4,
             "unit": "ms"
           }
         ]
