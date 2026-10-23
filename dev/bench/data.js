@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792793952904,
+  "lastUpdate": 1792795587159,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -741,6 +741,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.1,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "2dfc9d74766b111831d643356ec31d72094eb824",
+          "message": "distribution: install.sh, Homebrew/Scoop manifests, docs site and a WASM playground — `install.sh` is a one-line install for Linux and macOS that resolves the latest release through the `/releases/latest` redirect (no API rate limit, no token), maps uname to the five release targets, downloads the archive plus `SHA256SUMS`, verifies it with `sha256sum` or `shasum -a 256`, and installs to `/usr/local/bin` when writable and `~/.local/bin` otherwise — never `sudo`, `WLEL_VERSION` pins a release, `WLEL_INSTALL_DIR` picks the directory; verified against the real v1.2.0 assets (correct archive installed and runs), a pinned v1.1.0, a 404 version, and a tampered checksum (all three fail with a clear message, exit 1); `scripts/packaging.sh` renders `packaging/homebrew/wlel.rb` and `packaging/scoop/wlel.json` from a release's own `SHA256SUMS` so per-architecture URLs and hashes cannot drift from the archives (no placeholders survive, the formula's `test do` asserts `wlel --version`, Scoop's `checkver`/`autoupdate` follow GitHub releases), with `packaging/README.md` covering publishing the tap and bucket; the docs site is `scripts/docsite.py`, a stdlib-only markdown renderer for the subset the repo actually writes (headings, fences, nested lists, tables, quotes, inline code, links, raw HTML passthrough) that emits a shared-header site with per-page TOC, rewrites repo-relative links to GitHub blob URLs, and `--check` fails on any unrendered fence or leftover markdown link — verified by an HTML parser (balanced tags on all 10 pages), a local-link crawl (0 broken) and an HTTP serve of the built site; `scripts/site.sh` builds the site plus the playground, and `.github/workflows/docs.yml` publishes to gh-pages with `keep_files: true` so the benchmark trend already there survives, with docs.yml and bench.yml sharing a `gh-pages` concurrency group so the two publishers cannot race; the playground (`playground/`) compiles the real front-end — lexer, error-recovering parser, `use std` splice, type checker — to wasm32-unknown-unknown behind a five-function C ABI (`wlel_alloc`, `wlel_analyze`, `wlel_result_ptr`, `wlel_dealloc`, `wlel_version`) with no wasm-bindgen and no JS build step, 474 KiB total, and the page shows click-to-jump diagnostics, `wlel fmt` output and four examples; `src/playground.rs` is the pipeline behind it, as JSON (`ok`, `diagnostics` with 1-based line/col spans, `formatted`), where a file import is a clean diagnostic instead of a filesystem read and a panic is caught rather than trapping the module (verified through Node instantiating the built wasm: ok/type error/syntax error/lex error/import all report the compiler's own message); version 1.2.0 -> 1.3.0 (additive, no language change); 590 cargo tests green (8 playground tests, 8 distribution tests — POSIX syntax of both scripts, archive layout agreement with release.sh, manifest rendering from a synthetic SHA256SUMS, doc-site rendering + internal links, playground ABI agreement between Rust and JS, and a real wasm build), a new `distribution` CI job runs the site and the module end to end, clippy -D warnings clean, wlel fmt canonical",
+          "timestamp": "2026-10-23T22:45:40Z",
+          "tree_id": "a825207f225ccaed23552d17425c7dd3daf7b13b",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/2dfc9d74766b111831d643356ec31d72094eb824"
+        },
+        "date": 1792795586399,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.4,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 66,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.5,
             "unit": "ms"
           }
         ]
