@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792791524490,
+  "lastUpdate": 1792793952904,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -697,6 +697,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.4,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "f0b57e55fa078058ac7f51f83f3b1db36719ba7b",
+          "message": "editor support: VS Code extension, tree-sitter grammar and the GitHub Linguist kit — `editors/vscode-wlel` ships the syntax highlighting and the language client in one package: a TextMate grammar (`source.wlel`) covering declarations, types, builtins, `std::`/`sys::` paths, doc comments and every literal form (decimal, hex, binary, octal, width suffixes), bracket matching/auto-closing/indent rules, and a 420-line JSON-RPC bridge over `wlel lsp` that publishes diagnostics on open and on every edit and answers hover, go-to-definition and completion (verified live: hover `x: int`, definition landing on the declaring `:=`, 110 completion items, `return type mismatch: expected int, found string`); plain JavaScript on purpose, so no `tsc` and no `node_modules` before it can run, with a `generation` counter so a killed process cannot restart itself and a queue that holds notifications until `initialize` is answered (VS Code opens the document before the first round-trip finishes); `editors/tree-sitter-wlel` is a second grammar for the editors that use tree-sitter (Neovim, Helix, Emacs, Node), and getting it to agree with the reference parser took three real fixes: struct literals are kept out of the expression rule used for conditions and operands so `while i < n {` no longer reads `n { ... }` as a struct, `a[i]` and `vec_new[int](4)` are the same `name [` prefix and now parse the bracket content once and resolve it into an index or type arguments only after the `]` (previously every `xs[i] = i * i` was an ERROR), and `match` needed a `prec(2)` scrutinee plus statement-form placement to stop being read as a struct literal called `match` — 18 of 26 examples rejected -> 34/34 `.wlel` files in the repo parse with zero ERROR/MISSING, with `queries/highlights.scm` (1207 captures on enums.wlel), `queries/locals.scm`, five corpus tests, a committed `src/` (compiles as C11 and links `tree_sitter_wlel`, and the Node binding builds and parses through `tree-sitter`), `tree-sitter.json`/`binding.gyp`/C bindings for publishing; `editors/linguist` is the registration kit (languages.yml + grammars.yml fragments, `prepare.sh` staging the repo's own examples as samples so they cannot drift, PR checklist) since Linguist highlights samples with TextMate and not tree-sitter; tests/editor_tests.rs adds 12 tests that validate the manifest, grammar, language configuration and JS, load the extension against a stub `vscode` and drive it against the real `wlel lsp` binary, compile the generated parser as C, regenerate the grammar in a scratch copy to catch a stale `src/` (the check that caught a `minor_version` drift the moment the version bumped), parse every `.wlel` file in the repository and compile both query files, skipping with a printed reason when node/cc/tree-sitter are absent so a bare machine still gets green; a new `editors` CI job installs node + tree-sitter-cli and runs the suite for real, `.gitattributes` marks the generated parser linguist-generated; version 1.1.0 -> 1.2.0 (additive, no language or CLI change); 574 cargo tests green (12 new editor tests), clippy -D warnings clean, wlel fmt canonical, all examples/flagships pass",
+          "timestamp": "2026-10-23T22:18:12Z",
+          "tree_id": "76e1faa9fa9841eef34a3657131bd38a7b906c5d",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/f0b57e55fa078058ac7f51f83f3b1db36719ba7b"
+        },
+        "date": 1792793952009,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 15.3,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 58,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 7,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.1,
             "unit": "ms"
           }
         ]
