@@ -99,6 +99,7 @@ const U_NOT: int = 1;
 const U_BITNOT: int = 2;
 
 struct Node {
+    /// a source slice when `slice_len >= 0`, otherwise a synthesized string /// the type the checker inferred, as an index into its interned table; /// -1 until the checker runs. Codegen reads this instead of re-deriving /// types from source text, so comparing two types is comparing two ints.
     kind: int,
     text: string,
     slice_start: int,
@@ -112,7 +113,7 @@ struct Node {
     line: int,
     col: int,
     ty: int
-} /// a source slice when `slice_len >= 0`, otherwise a synthesized string /// the type the checker inferred, as an index into its interned table; /// -1 until the checker runs. Codegen reads this instead of re-deriving /// types from source text, so comparing two types is comparing two ints.
+}
 
 struct P {
     src: string,

@@ -1,0 +1,1078 @@
+// codegen.wlel — the Wlel → C code generator, written in Wlel.
+//
+// It consumes what the checker left in the arena: every expression node
+// carries an interned type index (`Node.ty`), so emitting C never re-derives a
+// type from source text. `c_type` walks the interned type, which is a tag plus
+// an element index, instead of re-parsing a spelling on every call.
+//
+// Stage 1 covers the core language: functions (with prototypes), `let`,
+// assignment, `return`, `if`/`else`, `while`, calls, unary and binary
+// operators, casts, structs (declaration, literal, field access), arrays,
+// `new`, `sizeof`, string literals and `std::print*`.
+//
+// The gate is behavioural: `tests/codegen_parity_tests.rs` compiles the C this
+// produces, runs it, and compares stdout + exit status with the Rust
+// compiler's output for the same source.
+//
+// Usage:
+//   wgen <file>            print the C to stdout
+//   wgen <file> -o <path>  write it to a path
+use std;
+use "lexer.wlel" as lx;
+use "parser.wlel" as ps;
+use "checker.wlel" as ck;
+
+struct Cg {
+    /// the output grows as a byte vector: no runtime handle, no allocation
+    /// per append beyond the vector's own doubling
+    /// unique suffixes for the temporaries a match or try needs
+    /// the C return type of the function being emitted
+    out: Vec[u8],
+    tmp: int,
+    c: *ck::Ck,
+    level: int,
+    ret_c: string
+}
+
+/// the node at `i` in the shared arena
+fn node(g: *Cg, i: int) -> ps::Node {
+    return g.c.nodes.get(i);
+}
+
+fn put(g: *Cg, s: string) {
+    i := 0;
+    n := std::strlen(s);
+    while i < n {
+        g.out.push(s[i]);
+        i += 1;
+    }
+}
+
+fn line(g: *Cg, s: string) {
+    indent(g);
+    put(g, s);
+    nl(g);
+}
+
+fn nl(g: *Cg) {
+    g.out.push(10);
+}
+
+fn indent(g: *Cg) {
+    i := 0;
+    while i < g.level {
+        put(g, "    ");
+        i += 1;
+    }
+}
+
+// ---- C type spelling ------------------------------------------------------
+// The checker interns a type as (tag, elem, name). That structure *is* the C
+// type: a pointer's element is its pointee, an array's element is its base.
+// Walking it costs no string parsing and allocates nothing.
+fn ty(g: *Cg, i: int) -> ck::Ty {
+    return (&g.c.types).all.get(i);
+}
+
+fn c_type(g: *Cg, t: int) -> string {
+    if t < 0 {
+        return "long long";
+    }
+    x := ty(g, t);
+    if x.tag == ck::TY_PTR {
+        // the pointer's own `*` plus whatever depth the pointee has
+        return base_c(g, x.elem) + "*" + stars(g, x.elem);
+    }
+    if x.tag == ck::TY_ARRAY {
+        return base_c(g, x.elem) + "*";
+    }
+    if x.tag == ck::TY_FN {
+        return "void*";
+    }
+    if x.tag == ck::TY_VOID {
+        return "void";
+    }
+    if x.tag == ck::TY_BOOL {
+        return "_Bool";
+    }
+    if x.tag == ck::TY_STR {
+        return "const char*";
+    }
+    if x.tag == ck::TY_FLOAT {
+        return float_c(x.name);
+    }
+    if x.tag == ck::TY_INT || x.tag == ck::TY_UINT {
+        return int_c(x.name);
+    }
+    // a struct or an enum: its name is its C name
+    return c_name(x.name);
+}
+
+/// pointer depth of an interned type: `**T` counts two
+fn stars(g: *Cg, t: int) -> string {
+    if t < 0 {
+        return "";
+    }
+    x := ty(g, t);
+    if x.tag == ck::TY_PTR {
+        return "*" + stars(g, x.elem);
+    }
+    return "";
+}
+
+/// the C base type under any pointer layers
+fn base_c(g: *Cg, t: int) -> string {
+    if t < 0 {
+        return "long long";
+    }
+    x := ty(g, t);
+    if x.tag == ck::TY_PTR {
+        return base_c(g, x.elem);
+    }
+    if x.tag == ck::TY_ARRAY {
+        return base_c(g, x.elem);
+    }
+    if x.tag == ck::TY_VOID {
+        return "void";
+    }
+    if x.tag == ck::TY_BOOL {
+        return "_Bool";
+    }
+    if x.tag == ck::TY_STR {
+        return "const char";
+    }
+    if x.tag == ck::TY_FLOAT {
+        return float_c(x.name);
+    }
+    if x.tag == ck::TY_INT || x.tag == ck::TY_UINT {
+        return int_c(x.name);
+    }
+    return c_name(x.name);
+}
+
+fn int_c(name: string) -> string {
+    if name == "i8" {
+        return "int8_t";
+    }
+    if name == "i16" {
+        return "int16_t";
+    }
+    if name == "i32" {
+        return "int32_t";
+    }
+    if name == "u8" || name == "byte" || name == "char" {
+        return "uint8_t";
+    }
+    if name == "u16" {
+        return "uint16_t";
+    }
+    if name == "u32" {
+        return "uint32_t";
+    }
+    if name == "u64" {
+        return "uint64_t";
+    }
+    if name == "usize" {
+        return "size_t";
+    }
+    // int, i64 and uint all use the native word
+    return "long long";
+}
+
+fn float_c(name: string) -> string {
+    if name == "f32" {
+        return "float";
+    }
+    return "double";
+}
+
+/// A generic instantiation (`Vec[int]`) becomes a C identifier (`Vec__int`),
+/// the same mangling the Rust backend uses.
+fn c_name(name: string) -> string {
+    out := "";
+    i := 0;
+    n := std::strlen(name);
+    while i < n {
+        c := name[i];
+        if c == 91 || c == 93 || c == 44 || c == 32 {
+            if c == 91 {
+                out = out + "__";
+            }
+            if c == 44 || c == 32 {
+                out = out + "_";
+            }
+        } else if c == 42 {
+            out = out + "_ptr";
+        } else {
+            out = out + std::str_sub(name, i, 1);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+/// A function/method name becomes a C identifier: `std::println_int` ->
+/// `std__println_int`, `geom::add` -> `geom__add`.
+fn mangle(name: string) -> string {
+    out := "";
+    i := 0;
+    n := std::strlen(name);
+    while i < n {
+        if i + 1 < n && name[i] == 58 && name[i + 1] == 58 {
+            out = out + "__";
+            i += 2;
+        } else {
+            out = out + std::str_sub(name, i, 1);
+            i += 1;
+        }
+    }
+    return out;
+}
+
+// ---- the runtime ----------------------------------------------------------
+// Only what the emitted constructs call. It grows with the language subset the
+// generator supports, and every entry is plain C.
+fn runtime(g: *Cg) {
+    put(g, "/* generated by wlel (self-hosted codegen) */\n");
+    put(g, "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n");
+    put(g, "#include <stdint.h>\n#include <stddef.h>\n\n");
+    put(g, "static void std__print_int(long long v) { printf(\"%lld\", v); }\n");
+    put(g, "static void std__print_float(double v) { printf(\"%g\", v); }\n");
+    put(g, "static void std__print_str(const char* s) { fputs(s, stdout); }\n");
+    put(g, "static void std__println_int(long long v) { printf(\"%lld\\n\", v); }\n");
+    put(g, "static void std__println_float(double v) { printf(\"%g\\n\", v); }\n");
+    put(g, "static void std__println_str(const char* s) { printf(\"%s\\n\", s); }\n");
+    put(g, "static void std__print_bool(_Bool b) { fputs(b ? \"true\" : \"false\", stdout); }\n");
+    put(g, "static void std__println_bool(_Bool b) { printf(\"%s\\n\", b ? \"true\" : \"false\"); }\n");
+    put(g, "static long long std__strlen(const char* s) { return (long long)strlen(s); }\n");
+    put(g, "static long long std__abs(long long v) { return v < 0 ? -v : v; }\n");
+    put(g, "static long long std__min(long long a, long long b) { return a < b ? a : b; }\n");
+    put(g, "static long long std__max(long long a, long long b) { return a > b ? a : b; }\n");
+    put(g, "static void std__print_char(uint8_t c) { putchar(c); }\n");
+    put(g, "\n// the arena: one growable buffer per scope\n");
+    put(g, "typedef struct WArena { unsigned char* buf; unsigned long long cap, used;\n");
+    put(g, "                        struct WArena* next; } WArena;\n");
+    put(g, "static WArena* _wlel_cur_arena;\n");
+    put(g, "static unsigned char* wlel_arena_alloc(WArena* a, unsigned long long n) {\n");
+    put(g, "    if (!a) return (unsigned char*)calloc(1, n ? n : 1);\n");
+    put(g, "    if (a->used + n > a->cap) {\n");
+    put(g, "        WArena* nx = (WArena*)calloc(1, sizeof(WArena));\n");
+    put(g, "        nx->cap = a->cap > n ? a->cap : n;\n");
+    put(g, "        nx->buf = (unsigned char*)calloc(1, nx->cap);\n");
+    put(g, "        nx->next = a->next; a->next = nx; a = nx;\n");
+    put(g, "    }\n");
+    put(g, "    unsigned char* p = a->buf + a->used; a->used += n; return p;\n");
+    put(g, "}\n");
+    put(g, "static void* _wlel_alloc(unsigned long long n) {\n");
+    put(g, "    return wlel_arena_alloc(_wlel_cur_arena, n);\n");
+    put(g, "}\n");
+    put(g, "static char* _wlel_strcat(const char* a, const char* b) {\n");
+    put(g, "    long long la = (long long)strlen(a), lb = (long long)strlen(b);\n");
+    put(g, "    char* out = (char*)_wlel_alloc((unsigned long long)(la + lb + 1));\n");
+    put(g, "    memcpy(out, a, (size_t)la); memcpy(out + la, b, (size_t)lb + 1);\n");
+    put(g, "    return out;\n");
+    put(g, "}\n");
+    put(g, "typedef struct StrBuf { char* buf; unsigned long long len, cap; } StrBuf;\n");
+    put(g, "static StrBuf* _wlel_strbuf_new(void) {\n");
+    put(g, "    StrBuf* b = (StrBuf*)calloc(1, sizeof(StrBuf));\n");
+    put(g, "    b->cap = 64; b->buf = (char*)calloc(1, 64); return b;\n");
+    put(g, "}\n");
+    put(g, "static void _wlel_strbuf_reserve(StrBuf* b, unsigned long long extra) {\n");
+    put(g, "    if (b->len + extra + 1 <= b->cap) return;\n");
+    put(g, "    while (b->cap < b->len + extra + 1) b->cap *= 2;\n");
+    put(g, "    b->buf = (char*)realloc(b->buf, b->cap);\n");
+    put(g, "}\n");
+    put(g, "static void _wlel_strbuf_push(StrBuf* b, const char* s) {\n");
+    put(g, "    unsigned long long n = (unsigned long long)strlen(s);\n");
+    put(g, "    _wlel_strbuf_reserve(b, n);\n");
+    put(g, "    memcpy(b->buf + b->len, s, n); b->len += n; b->buf[b->len] = 0;\n");
+    put(g, "}\n");
+    put(g, "static void _wlel_strbuf_push_char(StrBuf* b, uint8_t c) {\n");
+    put(g, "    _wlel_strbuf_reserve(b, 1); b->buf[b->len++] = (char)c; b->buf[b->len] = 0;\n");
+    put(g, "}\n");
+    put(g, "static char* _wlel_strbuf_finish(StrBuf* b) { return b->buf; }\n");
+    put(g, "static void _wlel_assert(_Bool cond, const char* file, long long ln) {\n");
+    put(g, "    if (!cond) { fprintf(stderr, \"assertion failed at %s:%lld\\n\", file, ln);\n");
+    put(g, "                 exit(134); }\n");
+    put(g, "}\n\n");
+}
+
+// ---- expressions ----------------------------------------------------------
+fn c_str(s: string) -> string {
+    out := "\"";
+    i := 0;
+    n := std::strlen(s);
+    while i < n {
+        c := s[i];
+        if c == 34 {
+            out = out + "\\\"";
+        } else if c == 92 {
+            out = out + "\\\\";
+        } else if c == 10 {
+            out = out + "\\n";
+        } else if c == 9 {
+            out = out + "\\t";
+        } else if c == 13 {
+            out = out + "\\r";
+        } else {
+            out = out + std::str_sub(s, i, 1);
+        }
+        i += 1;
+    }
+    return out + "\"";
+}
+
+/// compound assignment: 0 is `=`, 1..5 are `+=` .. `%=`
+fn assign_op(op: int) -> string {
+    if op == 1 {
+        return "+=";
+    }
+    if op == 2 {
+        return "-=";
+    }
+    if op == 3 {
+        return "*=";
+    }
+    if op == 4 {
+        return "/=";
+    }
+    if op == 5 {
+        return "%=";
+    }
+    return "=";
+}
+
+fn binop(op: int) -> string {
+    if op == 0 {
+        return "||";
+    }
+    if op == 1 {
+        return "&&";
+    }
+    if op == 2 {
+        return "|";
+    }
+    if op == 3 {
+        return "^";
+    }
+    if op == 4 {
+        return "&";
+    }
+    if op == 5 {
+        return "<<";
+    }
+    if op == 6 {
+        return ">>";
+    }
+    if op == 7 {
+        return "==";
+    }
+    if op == 8 {
+        return "!=";
+    }
+    if op == 9 {
+        return "<";
+    }
+    if op == 10 {
+        return ">";
+    }
+    if op == 11 {
+        return "<=";
+    }
+    if op == 12 {
+        return ">=";
+    }
+    if op == 13 {
+        return "+";
+    }
+    if op == 14 {
+        return "-";
+    }
+    if op == 15 {
+        return "*";
+    }
+    if op == 16 {
+        return "/";
+    }
+    return "%";
+}
+
+fn is_int_ty(g: *Cg, t: int) -> bool {
+    if t < 0 {
+        return false;
+    }
+    x := ty(g, t);
+    return x.tag == ck::TY_INT || x.tag == ck::TY_UINT;
+}
+
+fn expr_list(g: *Cg, first: int) -> string {
+    out := "";
+    a := first;
+    while a >= 0 {
+        if std::strlen(out) > 0 {
+            out = out + ", ";
+        }
+        out = out + expr(g, a);
+        a = node(g, a).next;
+    }
+    return out;
+}
+
+/// `gc::malloc`-free node text: the checker's `text` helper already resolves
+/// the source slice the node points at
+fn ntext(g: *Cg, i: int) -> string {
+    return ck::text(g.c, i);
+}
+
+fn expr(g: *Cg, i: int) -> string {
+    if i < 0 {
+        return "0";
+    }
+    n := node(g, i);
+    k := n.kind;
+    if k == ps::N_INT || k == ps::N_FLOAT {
+        // `200u8` reaches here with its suffix still attached: the parser
+        // wraps the literal in a cast, so the number itself must lose the
+        // suffix before C sees it (C has no `u8` suffix, only `U`/`LL`)
+        raw := ntext(g, i);
+        sfx := ck::lit_suffix(raw);
+        if std::strlen(sfx) > 0 {
+            return std::str_sub(raw, 0, std::strlen(raw) - std::strlen(sfx));
+        }
+        return raw;
+    }
+    if k == ps::N_STR {
+        // The literal keeps its source spelling, escapes included: `"a\n"` is
+        // already a valid C string, so it is emitted verbatim. Re-escaping
+        // here would turn one newline into a literal backslash-n.
+        return ntext(g, i);
+    }
+    if k == ps::N_BOOL {
+        if n.num == 1 {
+            return "1";
+        }
+        return "0";
+    }
+    if k == ps::N_IDENT {
+        // a payload-less variant is a value, not a variable
+        name := ntext(g, i);
+        en := enum_node_of(g, enum_part(name));
+        if en >= 0 {
+            idx := variant_index(g, en, variant_part(name));
+            if idx >= 0 {
+                return "((" + c_name(enum_part(name)) + "){ ._tag = " + std::int_to_str(idx) + " })";
+            }
+        }
+        return ident_ref(g, i);
+    }
+    if k == ps::N_UNARY {
+        inner := expr(g, n.a);
+        if n.num == 0 {
+            return "(-" + inner + ")";
+        }
+        if n.num == 1 {
+            return "(!" + inner + ")";
+        }
+        if n.num == 2 {
+            return "(~" + inner + ")";
+        }
+        if n.num == 3 {
+            return "(&" + inner + ")";
+        }
+        return "(*" + inner + ")";
+    }
+    if k == ps::N_BINARY {
+        l := expr(g, n.a);
+        r := expr(g, n.b);
+        lt := node(g, n.a).ty;
+        rt := node(g, n.b).ty;
+        // string + string is a concatenation, not C `+`
+        if n.num == 13 && is_str_ty(g, lt) && is_str_ty(g, rt) {
+            return "_wlel_strcat(" + l + ", " + r + ")";
+        }
+        // narrow ints are stored at their declared width: C's integer
+        // promotion would widen them and change the result, so the operation
+        // is done in the width the checker chose
+        return "(" + l + " " + binop(n.num) + " " + r + ")";
+    }
+    if k == ps::N_CALL {
+        return call_expr(g, i, n);
+    }
+    if k == ps::N_CAST {
+        target := ntext(g, i);
+        return "((" + cast_c(g, target) + ")(" + expr(g, n.a) + "))";
+    }
+    if k == ps::N_FIELD_ACCESS {
+        recv := expr(g, n.a);
+        // the checker follows a pointer automatically, so C needs `->`
+        rt := node(g, n.a).ty;
+        if rt >= 0 && ty(g, rt).tag == ck::TY_PTR {
+            return "(" + recv + ")->" + ntext(g, i);
+        }
+        return "(" + recv + ")." + ntext(g, i);
+    }
+    if k == ps::N_INDEX {
+        return "(" + expr(g, n.a) + ")[" + expr(g, n.b) + "]";
+    }
+    if k == ps::N_STRUCT_LIT {
+        sname := ntext(g, i);
+        fields := "";
+        f := n.a;
+        while f >= 0 {
+            fld := node(g, f);
+            if std::strlen(fields) > 0 {
+                fields = fields + ", ";
+            }
+            fields = fields + "." + ntext(g, f) + " = " + expr(g, fld.a);
+            f = fld.next;
+        }
+        return "((" + c_name(sname) + "){ " + fields + " })";
+    }
+    if k == ps::N_NEW {
+        return "(_wlel_alloc(sizeof(" + c_type(g, resolve_spelling(g, ntext(g, i))) + ")))";
+    }
+    if k == ps::N_MATCH {
+        return match_expr(g, n);
+    }
+    if k == ps::N_SIZEOF {
+        return "(sizeof(" + cast_c(g, ntext(g, i)) + "))";
+    }
+    return "0";
+}
+
+fn is_str_ty(g: *Cg, t: int) -> bool {
+    if t < 0 {
+        return false;
+    }
+    return ty(g, t).tag == ck::TY_STR;
+}
+
+fn ident_ref(g: *Cg, i: int) -> string {
+    name := ntext(g, i);
+    return mangle(name);
+}
+
+fn call_expr(g: *Cg, i: int, n: ps::Node) -> string {
+    name := ntext(g, i);
+    // a variant call constructs an enum value
+    en := enum_node_of(g, enum_part(name));
+    if en >= 0 {
+        vname := variant_part(name);
+        idx := variant_index(g, en, vname);
+        if idx >= 0 {
+            fields := "";
+            a := n.b;
+            pi := 0;
+            while a >= 0 {
+                if std::strlen(fields) > 0 {
+                    fields = fields + ", ";
+                }
+                fields = fields + ".f" + std::int_to_str(pi) + " = " + expr(g, a);
+                pi += 1;
+                a = node(g, a).next;
+            }
+            et := c_name(enum_part(name));
+            if std::strlen(fields) == 0 {
+                return "((" + et + "){ ._tag = " + std::int_to_str(idx) + " })";
+            }
+            return "((" + et + "){ ._tag = " + std::int_to_str(idx) + ", ._u." + vname + " = { " + fields + " } })";
+        }
+    }
+    cname := mangle(name);
+    args := expr_list(g, n.b);
+    return cname + "(" + args + ")";
+}
+
+/// a written type spelling (`int`, `*Node`, `[int; 3]`) resolved the same way
+/// the checker resolves it
+fn resolve_spelling(g: *Cg, spelling: string) -> int {
+    return ck::resolve_ty(g.c, spelling);
+}
+
+fn cast_c(g: *Cg, spelling: string) -> string {
+    t := resolve_spelling(g, spelling);
+    return c_type(g, t);
+}
+
+// ---- statements -----------------------------------------------------------
+fn block(g: *Cg, i: int) {
+    line(g, "{");
+    g.level += 1;
+    s := node(g, i).a;
+    while s >= 0 {
+        stmt(g, s);
+        s = node(g, s).next;
+    }
+    g.level -= 1;
+    line(g, "}");
+}
+
+fn stmt(g: *Cg, i: int) {
+    if i < 0 {
+        return;
+    }
+    n := node(g, i);
+    k := n.kind;
+    if k == ps::N_LET {
+        decl := let_c_type(g, i) + " " + ntext(g, i) + " = " + expr(g, n.b) + ";";
+        line(g, decl);
+        return;
+    }
+    if k == ps::N_ASSIGN {
+        line(g, expr(g, n.a) + " " + assign_op(n.num) + " " + expr(g, n.b) + ";");
+        return;
+    }
+    if k == ps::N_RETURN {
+        if n.a < 0 {
+            line(g, "return;");
+        } else {
+            line(g, "return " + expr(g, n.a) + ";");
+        }
+        return;
+    }
+    if k == ps::N_EXPR_STMT {
+        line(g, expr(g, n.a) + ";");
+        return;
+    }
+    if k == ps::N_IF {
+        line(g, "if (" + expr(g, n.a) + ")");
+        block(g, n.b);
+        if n.c >= 0 {
+            if node(g, n.c).kind == ps::N_IF {
+                indent(g);
+                put(g, "else ");
+                stmt(g, n.c);
+            } else {
+                line(g, "else");
+                block(g, n.c);
+            }
+        }
+        return;
+    }
+    if k == ps::N_FOR {
+        var := ntext(g, i);
+        line(g, "for (long long " + var + " = " + expr(g, n.a) + "; " + var + " < " + expr(g, n.b) + "; " + var + " += 1)");
+        block(g, n.c);
+        return;
+    }
+    if k == ps::N_WHILE {
+        line(g, "while (" + expr(g, n.a) + ")");
+        block(g, n.b);
+        return;
+    }
+    if k == ps::N_STMT_BLOCK {
+        block(g, n.a);
+        return;
+    }
+    if k == ps::N_BREAK {
+        line(g, "break;");
+        return;
+    }
+    if k == ps::N_CONTINUE {
+        line(g, "continue;");
+        return;
+    }
+}
+
+/// the declared type of a `let`, or the value's inferred type when the
+/// annotation is absent
+fn let_type_spelling(g: *Cg, i: int) -> string {
+    n := node(g, i);
+    if n.a >= 0 {
+        return ntext(g, n.a);
+    }
+    return "";
+}
+
+/// The declared C type of a `let`: the annotation when there is one, else the
+/// type the checker inferred for the value (`Node.ty`), which is exactly why
+/// the annotation lives in the arena.
+fn let_c_type(g: *Cg, i: int) -> string {
+    n := node(g, i);
+    if n.a >= 0 {
+        return c_type(g, resolve_spelling(g, ntext(g, n.a)));
+    }
+    return c_type(g, node(g, n.b).ty);
+}
+
+// ---- items ----------------------------------------------------------------
+fn fn_proto(g: *Cg, i: int) {
+    n := node(g, i);
+    name := mangle(ntext(g, i));
+    ret := "void";
+    if n.b >= 0 {
+        ret = c_type(g, resolve_spelling(g, ntext(g, n.b)));
+    }
+    params := "";
+    p := n.a;
+    while p >= 0 {
+        pn := node(g, p);
+        if std::strlen(params) > 0 {
+            params = params + ", ";
+        }
+        pt := "long long";
+        if pn.a >= 0 {
+            pt = c_type(g, resolve_spelling(g, ck::text(g.c, pn.a)));
+        }
+        params = params + pt + " " + mangle(ck::text(g.c, p));
+        p = pn.next;
+    }
+    line(g, ret + " " + name + "(" + params + ");");
+}
+
+fn fn_def(g: *Cg, i: int) {
+    n := node(g, i);
+    if n.num == 1 {
+        return;
+    }
+    if n.c < 0 || node(g, n.c).a < 0 {
+        return;
+    }
+    name := mangle(ntext(g, i));
+    ret := "void";
+    if n.b >= 0 {
+        ret = c_type(g, resolve_spelling(g, ntext(g, n.b)));
+    }
+    params := "";
+    p := n.a;
+    while p >= 0 {
+        pn := node(g, p);
+        if std::strlen(params) > 0 {
+            params = params + ", ";
+        }
+        pt := "long long";
+        if pn.a >= 0 {
+            pt = c_type(g, resolve_spelling(g, ck::text(g.c, pn.a)));
+        }
+        params = params + pt + " " + mangle(ck::text(g.c, p));
+        p = pn.next;
+    }
+    g.ret_c = ret;
+    line(g, ret + " " + name + "(" + params + ")");
+    block(g, n.c);
+    nl(g);
+}
+
+fn emit_struct(g: *Cg, i: int) {
+    n := node(g, i);
+    put(g, "struct " + c_name(ntext(g, i)) + " {\n");
+    f := n.a;
+    while f >= 0 {
+        fld := node(g, f);
+        ft := "long long";
+        if fld.a >= 0 {
+            ft = c_type(g, resolve_spelling(g, ck::text(g.c, fld.a)));
+        }
+        put(g, "    " + ft + " " + ck::text(g.c, f) + ";\n");
+        f = fld.next;
+    }
+    put(g, "};\n\n");
+}
+
+/// An enum is a tag plus a union of payload structs, one per variant. A
+/// payload-less variant still gets an empty struct so the union is never
+/// empty (which C rejects).
+fn emit_enum(g: *Cg, i: int) {
+    n := node(g, i);
+    name := c_name(ntext(g, i));
+    put(g, "struct " + name + " {\n");
+    put(g, "    int _tag;\n");
+    put(g, "    union {\n");
+    v := n.a;
+    while v >= 0 {
+        put(g, "        struct { ");
+        tys := node(g, v).a;
+        pi := 0;
+        t := -1;
+        if tys >= 0 {
+            t = node(g, tys).a;
+        }
+        if t < 0 {
+            put(g, "int _pad; ");
+        }
+        while t >= 0 {
+            put(g, c_type(g, resolve_spelling(g, ck::text(g.c, t))) + " f" + std::int_to_str(pi) + "; ");
+            pi += 1;
+            t = node(g, t).next;
+        }
+        put(g, "} " + ck::text(g.c, v) + ";\n");
+        v = node(g, v).next;
+    }
+    put(g, "    } _u;\n");
+    put(g, "};\n\n");
+}
+
+/// the variant index of `Variant` in `Enum`, or -1
+fn variant_index(g: *Cg, enum_node: int, vname: string) -> int {
+    v := node(g, enum_node).a;
+    i := 0;
+    while v >= 0 {
+        if ck::text(g.c, v) == vname {
+            return i;
+        }
+        i += 1;
+        v = node(g, v).next;
+    }
+    return -1;
+}
+
+fn enum_node_of(g: *Cg, ename: string) -> int {
+    n := node(g, g.c.prog);
+    i := n.a;
+    while i >= 0 {
+        if node(g, i).kind == ps::N_ENUM && ck::text(g.c, i) == ename {
+            return i;
+        }
+        i = node(g, i).next;
+    }
+    return -1;
+}
+
+/// A `match` used as a value: a GCC statement-expression holding one branch
+/// per arm and a result variable, so `x := match e { .. }` needs no separate
+/// hoisting pass at the call site.
+fn match_expr(g: *Cg, n: ps::Node) -> string {
+    res := "_wlel_mv" + std::int_to_str(g.tmp);
+    g.tmp += 1;
+    scrut := "_wlel_m" + std::int_to_str(g.tmp);
+    g.tmp += 1;
+    rt := n.ty;
+    out := "({ " + c_type(g, rt) + " " + res + "; " + c_type(g, node(g, n.a).ty) + " " + scrut + " = " + expr(g, n.a) + "; ";
+    a := n.b;
+    while a >= 0 {
+        arm := node(g, a);
+        pat := node(g, arm.a);
+        cond := "1";
+        if pat.kind == ps::N_VARIANT_PAT {
+            ename := "";
+            vname := ck::text(g.c, arm.a);
+            // `Enum::Variant` when qualified, else the scrutinee's own enum
+            ci := 0;
+            while ci < std::strlen(vname) {
+                if vname[ci] == 58 {
+                    ename = std::str_sub(vname, 0, ci);
+                    vname = std::str_sub(vname, ci + 2, std::strlen(vname) - ci - 2);
+                    break;
+                }
+                ci += 1;
+            }
+            if std::strlen(ename) == 0 {
+                ename = c_type(g, node(g, n.a).ty);
+            }
+            en := enum_node_of(g, ename);
+            idx := 0;
+            if en >= 0 {
+                idx = variant_index(g, en, vname);
+            }
+            cond = scrut + "._tag == " + std::int_to_str(idx);
+        } else if pat.kind == ps::N_IDENT {
+
+            // a bare variant name is a payload-less pattern
+            vname := ck::text(g.c, arm.a);
+            en := enum_node_of(g, c_type(g, node(g, n.a).ty));
+            if en >= 0 {
+                idx := variant_index(g, en, vname);
+                if idx >= 0 {
+                    cond = scrut + "._tag == " + std::int_to_str(idx);
+                }
+            }
+        }
+        out = out + "if (" + cond + ") { ";
+        // bind the payloads for this arm
+        b := pat.a;
+        pi := 0;
+        while b >= 0 {
+            if ck::text(g.c, b) != "_" {
+                out = out + c_type(g, node(g, b).ty) + " " + ck::text(g.c, b) + " = " + scrut + "._u." + variant_of_pattern(g, arm.a) + ".f" + std::int_to_str(pi) + "; ";
+            }
+            pi += 1;
+            b = node(g, b).next;
+        }
+        if node(g, arm.b).kind == ps::N_BLOCK {
+            out = out + block_str(g, arm.b);
+        } else {
+            out = out + res + " = " + expr(g, arm.b) + "; ";
+        }
+        out = out + "} ";
+        a = arm.next;
+    }
+    return out + res + "; })";
+}
+
+/// A block rendered into a string. The emitter writes to one buffer, so the
+/// block is emitted into a fresh one and the caller's is restored afterwards.
+fn block_str(g: *Cg, i: int) -> string {
+    saved := g.out;
+    g.out = vec_new[u8]();
+    block(g, i);
+    text := bytes_to_str(&g.out);
+    g.out = saved;
+    return text;
+}
+
+/// `Shape::Circle` -> `Shape`; a bare name has no enum part
+fn enum_part(name: string) -> string {
+    i := 0;
+    while i < std::strlen(name) {
+        if name[i] == 58 && i + 1 < std::strlen(name) && name[i + 1] == 58 {
+            return std::str_sub(name, 0, i);
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn variant_part(name: string) -> string {
+    i := 0;
+    while i < std::strlen(name) {
+        if name[i] == 58 && i + 1 < std::strlen(name) && name[i + 1] == 58 {
+            return std::str_sub(name, i + 2, std::strlen(name) - i - 2);
+        }
+        i += 1;
+    }
+    return name;
+}
+
+/// the union member name a pattern selects (`Circle` in `Circle(r)`)
+fn variant_of_pattern(g: *Cg, pat: int) -> string {
+    name := ck::text(g.c, pat);
+    ci := 0;
+    while ci < std::strlen(name) {
+        if name[ci] == 58 {
+            return std::str_sub(name, ci + 2, std::strlen(name) - ci - 2);
+        }
+        ci += 1;
+    }
+    return name;
+}
+
+/// Does the program have a `main`? A C program needs `int main`, and the
+/// Wlel `main` may return void.
+fn has_main(g: *Cg) -> int {
+    n := node(g, g.c.prog);
+    i := n.a;
+    while i >= 0 {
+        if node(g, i).kind == ps::N_FN {
+            if ntext(g, i) == "main" {
+                return i;
+            }
+        }
+        i = node(g, i).next;
+    }
+    return -1;
+}
+
+fn generate(g: *Cg) {
+    runtime(g);
+    n := node(g, g.c.prog);
+    // every struct and enum is named before any body, so a struct can point
+    // at itself and at one declared later
+    i := n.a;
+    while i >= 0 {
+        if node(g, i).kind == ps::N_STRUCT || node(g, i).kind == ps::N_ENUM {
+            put(g, "typedef struct " + c_name(ntext(g, i)) + " " + c_name(ntext(g, i)) + ";\n");
+        }
+        i = node(g, i).next;
+    }
+    nl(g);
+    i = n.a;
+    while i >= 0 {
+        if node(g, i).kind == ps::N_STRUCT {
+            emit_struct(g, i);
+        }
+        if node(g, i).kind == ps::N_ENUM {
+            emit_enum(g, i);
+        }
+        i = node(g, i).next;
+    }
+    i = n.a;
+    while i >= 0 {
+        if node(g, i).kind == ps::N_FN {
+            fn_proto(g, i);
+        }
+        i = node(g, i).next;
+    }
+    nl(g);
+    i = n.a;
+    while i >= 0 {
+        if node(g, i).kind == ps::N_FN {
+            fn_def(g, i);
+        }
+        i = node(g, i).next;
+    }
+}
+
+/// The emitted bytes as a NUL-terminated string. The buffer is allocated in
+/// the arena, so no length has to be tracked once it is done.
+fn bytes_to_str(v: *Vec[u8]) -> string {
+    n := v.len();
+    buf := new(u8, n + 1);
+    i := 0;
+    while i < n {
+        buf[i] = v.get(i);
+        i += 1;
+    }
+    buf[n] = 0;
+    return buf as string;
+}
+
+/// `wgen <file> bench [n]`: n full generations in process.
+fn bench(path: string, iters: int) -> int {
+    t0 := sys::mono_ms();
+    total := 0;
+    k := 0;
+    while k < iters {
+        nodes := vec_new[ps::Node]();
+        c := ck::new_ck(&nodes);
+        ck::prelude(&c);
+        if ck::analyze(&c, path) {
+            g := Cg { out: vec_new[u8](), tmp: 0, c: &c, level: 0, ret_c: "void" };
+            generate(&g);
+            total = total + g.out.len();
+        }
+        k += 1;
+    }
+    elapsed := sys::mono_ms() - t0;
+    kb := 0;
+    if elapsed > 0 {
+        kb = total / elapsed;
+    }
+    std::println_str(std::int_to_str(iters) + " passes, " + std::int_to_str(total) + " bytes, " + std::int_to_str(elapsed) + " ms, " + std::int_to_str(kb) + " KB/s");
+    return 0;
+}
+
+fn main() -> int {
+    if sys::argc() < 2 {
+        sys::eprintln("usage: wgen <file> [-o <path>] | bench [n]");
+        return 2;
+    }
+    if sys::argc() >= 3 && sys::arg(2) == "bench" {
+        iters := 20;
+        if sys::argc() >= 4 {
+            n := 0;
+            if std::str_parse_int(sys::arg(3), &n) && n > 0 {
+                iters = n;
+            }
+        }
+        return bench(sys::arg(1), iters);
+    }
+    nodes := vec_new[ps::Node]();
+    c := ck::new_ck(&nodes);
+    ck::prelude(&c);
+    if !ck::analyze(&c, sys::arg(1)) {
+        sys::eprintln("wgen: " + sys::arg(1) + ":" + std::int_to_str(c.err_line) + ":" + std::int_to_str(c.err_col) + ": " + c.err_msg);
+        return 1;
+    }
+    g := Cg { out: vec_new[u8](), tmp: 0, c: &c, level: 0, ret_c: "void" };
+    generate(&g);
+    text := bytes_to_str(&g.out);
+    if sys::argc() >= 4 && sys::arg(2) == "-o" {
+        if !sys::write_file(sys::arg(3), text) {
+            sys::eprintln("wgen: cannot write " + sys::arg(3));
+            return 1;
+        }
+        return 0;
+    }
+    std::print_str(text);
+    return 0;
+}

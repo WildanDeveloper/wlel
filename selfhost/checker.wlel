@@ -39,10 +39,12 @@ const W_32: int = 32;
 const W_64: int = 64;
 
 struct Ty {
+    /// element type for pointers and arrays, return type for functions
+    /// the source spelling, which is also the printed name
     tag: int,
     elem: int,
     name: string
-} /// element type for pointers and arrays, return type for functions /// the source spelling, which is also the printed name
+}
 
 struct TyTab {
     all: Vec[Ty]
@@ -135,12 +137,29 @@ struct Seg {
 }
 
 struct Sym {
+    /// how many arguments a call must pass
     name: string,
     ty: int,
     arity: int
-} /// how many arguments a call must pass
+}
 
 struct Ck {
+    /// did the program write `use std;`?
+    /// The tables are owned here, not pointed at: a struct that held
+    /// `&local` would dangle the moment it was returned.
+    /// where each open scope began in `vars`
+    /// every declared function's full signature, by name
+    /// "Struct.field" -> field type
+    /// constants and payload-less enum variants, by written name
+    /// "Type.method" -> the method's signature
+    /// enum variant -> its enum name
+    /// "Enum::Variant:i" -> the type of the i-th payload
+    /// the return type of the function being checked
+    /// the type parameters of the function being checked
+    /// which structs and enums are generic
+    /// scratch buffers, so helpers never return a pointer to a local
+    /// the source each range of the node arena came from
+    /// the program node the analysis produced
     src: string,
     nodes: *Vec[ps::Node],
     use_std: bool,
@@ -166,7 +185,7 @@ struct Ck {
     err_msg: string,
     depth: int,
     prog: int
-} /// did the program write `use std;`? /// The tables are owned here, not pointed at: a struct that held /// `&local` would dangle the moment it was returned. /// where each open scope began in `vars` /// every declared function's full signature, by name /// "Struct.field" -> field type /// constants and payload-less enum variants, by written name /// "Type.method" -> the method's signature /// enum variant -> its enum name /// "Enum::Variant:i" -> the type of the i-th payload /// the return type of the function being checked /// the type parameters of the function being checked /// which structs and enums are generic /// scratch buffers, so helpers never return a pointer to a local /// the source each range of the node arena came from /// the program node the analysis produced
+}
 
 /// Record the first diagnostic. The checker stops at the first error, which is
 /// what the Rust checker does too.
@@ -247,6 +266,22 @@ fn lookup(c: *Ck, name: string) -> int {
         i -= 1;
     }
     return -1;
+}
+
+/// `mod::S` -> `S`; a name without a qualifier is returned unchanged
+fn last_segment(name: string) -> string {
+    i := 0;
+    last := 0;
+    n := std::strlen(name);
+    while i + 1 < n {
+        if name[i] == 58 && name[i + 1] == 58 {
+            last = i + 2;
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    return std::str_sub(name, last, n - last);
 }
 
 fn find_sym(list: *Vec[Sym], name: string) -> int {
@@ -1087,7 +1122,9 @@ fn expr_ty(c: *Ck, i: int) -> int {
             } else {
                 fi := find_sym(&c.fields, rn + "." + fname);
                 if fi < 0 {
-                    // `Box[T].val` is declared once, on `Box`
+                    // `Box[T].val` is declared once, on `Box`, and
+                    // `mod::S.x` once on `S`: the generic suffix and the
+                    // module qualifier are not part of the declaration
                     base := rn;
                     b := 0;
                     while b < std::strlen(base) {
@@ -1098,6 +1135,9 @@ fn expr_ty(c: *Ck, i: int) -> int {
                         b += 1;
                     }
                     fi = find_sym(&c.fields, base + "." + fname);
+                    if fi < 0 {
+                        fi = find_sym(&c.fields, last_segment(base) + "." + fname);
+                    }
                 }
                 if fi < 0 {
                     fail(c, rnode.line, rnode.col, "struct '" + rn + "' has no field '" + fname + "'");

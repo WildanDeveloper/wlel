@@ -153,6 +153,10 @@ const KNOWN_GAPS: &[(&str, &str)] = &[
     ("examples/timemath.wlel", "std::math and std::random modules"),
     ("examples/strlib.wlel", "string + int formatting"),
     ("selfhost/lexer.wlel", "std::str_parse_int arity"),
+    // an imported module's declarations are not collected, so `ck::Ck` has no
+    // known fields; `codegen.wlel` is the first stage that imports another
+    // stage's structs
+    ("selfhost/codegen.wlel", "imported module declarations"),
 ];
 
 
