@@ -637,6 +637,11 @@ match scrutinee {
 - The scrutinee MUST be an enum type and is evaluated exactly once.
 - A pattern binds each payload to a name (scope: the arm). A binding named
   `_` discards. The number of bindings MUST equal the variant's arity.
+- **Variants belong to their enum.** Two enums MAY both declare `Ident`; write
+  `Tok::Ident(x)` / `Tok::Ident(s) => ...` (or `module::Ident` when the enum
+  comes from another module) to name one. A bare `Ident` is accepted while
+  exactly one enum in scope claims it; once two do, a bare reference is an
+  ambiguity error that names both.
 - **Exhaustiveness is enforced**: every variant MUST be covered exactly once
   by a named pattern or by `_`. `_` MUST be the last arm; an arm after `_`
   is an error; duplicate arms are errors; unknown variant names are errors.
@@ -758,14 +763,39 @@ the importing module's own scope.
   (path and git dependencies, semver caret requirements, `wlel.lock` pin).
   Entry point `src/main.wlel`; `src/lib.wlel` is library-only.
 
-### 9.5 Diagnostics
+### 9.5 Host integration (`sys::`)
+
+`sys::` is the compiler-provided module for talking to the host. It needs no
+import. Every function is total: a failure returns a false/empty/‑1 value
+rather than trapping.
+
+| Function | Result |
+|---|---|
+| `sys::argc() -> int`, `sys::arg(i) -> string` | command line |
+| `sys::exit(code)` | terminate, running `atexit` cleanup |
+| `sys::getenv(name) -> string` | environment variable (`""` when unset) |
+| `sys::spawn(cmd, &out) -> int` | run a shell command line, capture stdout into `out`, return the exit status (‑1 if it could not start) |
+| `sys::run(cmd) -> int` | run a shell command line, discard output, return the exit status |
+| `sys::read_dir(path) -> string` | entry names, newline-separated (`""` when unreadable) |
+| `sys::read_line() -> string` | one stdin line without the newline (`""` at EOF) |
+| `sys::read_stdin() -> string` | all remaining stdin |
+| `sys::eprint(s)`, `sys::eprintln(s)` | stderr (diagnostics belong here, not on stdout) |
+| `sys::mkdir(path)`, `sys::remove(path)`, `sys::rename(a, b)`, `sys::exists(path)` | filesystem changes |
+| `sys::read_file`, `sys::write_file` | whole-file I/O (bool + `&out`) |
+| `sys::mono_ms()`, `sys::unix_ms()`, `sys::sleep_ms(ms)` | time |
+| `sys::thread/join`, `sys::mutex_*`, `sys::chan_*` | concurrency |
+
+`std::` is the other compiler-provided module; `std::name` and the plain
+`name` (after `use std;`) are the same function.
+
+### 9.6 Diagnostics
 
 One compile reports **all** syntax errors (parser recovery at statement and
 top level). Type checking reports the first error with `file:line:col`.
 The generated C carries `#line` directives so C-compiler diagnostics point
 back to the `.wlel` source.
 
-### 9.6 Warnings (non-fatal, sorted by position)
+### 9.7 Warnings (non-fatal, sorted by position)
 
 1. `unused variable 'x'` — never read; a pure write does not count as a read.
 2. `unused parameter 'p'`.
@@ -991,6 +1021,7 @@ fields      = field { "," field } ;   field = IDENT ":" type ;
 enum_def    = "enum" IDENT [ type_params ] "{" variants "}" ;
 variants    = variant { "," variant } ; variant = IDENT [ "(" types ")" ] ;
 impl_block  = "impl" IDENT [ type_params ] "{" { func } "}" ;
+(* a variant is written Enum::Variant, or Variant while one enum claims it *)
 test_def    = "test" STRING block ;
 
 block       = "{" { stmt } "}" ;

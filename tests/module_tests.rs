@@ -848,3 +848,179 @@ fn main() -> int {
     }
     let _ = Path::new(&c.dir);
 }
+
+// ---- enum variant namespaces ----------------------------------------------
+
+#[test]
+fn two_enums_may_share_a_variant_name() {
+    let c = Case::new("variantns");
+    c.write(
+        "main.wlel",
+        r#"use std;
+
+enum Tok {
+    Ident(string),
+    Eof,
+}
+
+enum Expr {
+    Ident(string),
+    Lit(int),
+}
+
+fn describe_tok(t: Tok) -> string {
+    return match t {
+        Tok::Ident(s) => s,
+        Tok::Eof => "eof",
+    };
+}
+
+fn describe_expr(e: Expr) -> string {
+    return match e {
+        Expr::Ident(s) => s,
+        Expr::Lit(n) => std::int_to_str(n),
+    };
+}
+
+fn main() -> int {
+    std::println_str(describe_tok(Tok::Ident("tok")));
+    std::println_str(describe_tok(Tok::Eof));
+    std::println_str(describe_expr(Expr::Ident("expr")));
+    std::println_str(describe_expr(Expr::Lit(7)));
+    return 0;
+}
+"#,
+    );
+    let (out, code) = c.run("main.wlel");
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("tok"), "{out}");
+    assert!(out.contains("eof"), "{out}");
+    assert!(out.contains("expr"), "{out}");
+    assert!(out.contains('7'), "{out}");
+}
+
+#[test]
+fn a_unique_variant_still_works_without_a_qualifier() {
+    let c = Case::new("variantbare");
+    c.write(
+        "main.wlel",
+        r#"use std;
+
+enum Shape { Circle(float), Point }
+
+fn area(s: Shape) -> float {
+    return match s {
+        Circle(r) => 3.0 * r * r,
+        Point => 0.0,
+    };
+}
+
+fn main() -> int {
+    std::println_int(area(Circle(2.0)) as int);
+    std::println_int(area(Point) as int);
+    return 0;
+}
+"#,
+    );
+    let (out, code) = c.run("main.wlel");
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("12"), "{out}");
+}
+
+#[test]
+fn an_ambiguous_bare_variant_names_both_enums() {
+    let c = Case::new("variantamb");
+    c.write(
+        "main.wlel",
+        r#"enum A { Same(int) }
+enum B { Same(string) }
+
+fn main() -> int {
+    x := Same(1);
+    return 0;
+}
+"#,
+    );
+    let (out, code) = c.check("main.wlel");
+    assert_ne!(code, Some(0), "{out}");
+    assert!(out.contains("ambiguous"), "{out}");
+    assert!(out.contains("A::Same"), "{out}");
+    assert!(out.contains("B::Same"), "{out}");
+}
+
+#[test]
+fn a_variant_reached_through_a_module_stays_qualified() {
+    let c = Case::new("variantmodule");
+    c.write(
+        "lib/shapes.wlel",
+        "module shapes;\n\nenum Shape { Circle(float), Point }\n\nfn unit() -> Shape { return Circle(1.0); }\n",
+    );
+    c.write(
+        "main.wlel",
+        r#"use std;
+use "lib/shapes.wlel";
+
+fn main() -> int {
+    s := shapes::Circle(2.0);
+    match s {
+        shapes::Circle(r) => { std::println_float(r); }
+        shapes::Point => { std::println_str("point"); }
+    }
+    t := shapes::unit();
+    match t {
+        shapes::Circle(_) => { std::println_str("unit circle"); }
+        shapes::Point => {}
+    }
+    return 0;
+}
+"#,
+    );
+    let (out, code) = c.run("main.wlel");
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains('2'), "{out}");
+    assert!(out.contains("unit circle"), "{out}");
+}
+
+// ---- std:: coverage -------------------------------------------------------
+
+#[test]
+fn std_reaches_library_functions_as_well_as_builtins() {
+    let c = Case::new("stdprefix");
+    c.write(
+        "main.wlel",
+        r#"use std;
+
+fn main() -> int {
+    s := std::str_sub("abcdef", 1, 3);
+    std::println_str(s);
+    std::println_int(std::str_find(s, "c"));
+    std::println_str(std::int_to_str(7));
+    xs := std::vec_new[int]();
+    xs.push(3);
+    std::println_int(std::len([1, 2, 3]));
+    std::println_str(std::str_trim("  y "));
+    std::println_int(std::str_cmp("a", "b"));
+    return 0;
+}
+"#,
+    );
+    let (out, code) = c.run("main.wlel");
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("bcd"), "{out}");
+    assert!(out.contains('1'), "{out}");
+    assert!(out.contains('7'), "{out}");
+    assert!(out.contains('3'), "{out}");
+    assert!(out.contains('y'), "{out}");
+}
+
+#[test]
+fn an_unknown_std_function_is_reported() {
+    let c = Case::new("stdunknown");
+    c.write(
+        "main.wlel",
+        "use std;\nfn main() -> int { return std::no_such_fn(); }\n",
+    );
+    let (out, code) = c.check("main.wlel");
+    assert_ne!(code, Some(0), "{out}");
+    assert!(out.contains("no_such_fn"), "{out}");
+}

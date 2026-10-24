@@ -309,6 +309,31 @@ struct VarInfo {
     span: Span,
 }
 
+/// `std::` names handled by the runtime rather than by Wlel source: the
+/// embedded library defines everything else (`str_trim`, `vec_new`, ...), so
+/// those are reached through their plain name.
+const STD_RUNTIME_BUILTINS: &[&str] = &[
+    "print_int",
+    "println_int",
+    "print_float",
+    "println_float",
+    "print_str",
+    "println_str",
+    "print_bool",
+    "println_bool",
+    "strlen",
+    "streq",
+    "float_to_str",
+    "parse_float",
+    "len",
+    "abs",
+    "min",
+    "max",
+    "checked_add",
+    "checked_sub",
+    "checked_mul",
+];
+
 #[derive(Debug)]
 pub struct CheckError {
     pub msg: String,
@@ -366,9 +391,13 @@ pub struct Checker {
     /// type name -> files that referenced it (same rule as called_from:
     /// a reference inside the defining file does not use the import)
     used_type_from: FMap<String, FSet<String>>,
-    /// variant name -> owning enum's source name ("Circle" -> "Shape";
-    /// for generics the TEMPLATE name: "Ok" -> "Result")
+    /// canonical variant name `Enum::Variant` -> owning enum ("Circle" ->
+    /// "Shape"). Variants are namespaced by their enum, so `Tok::Eof` and
+    /// `Expr::Eof` are different things.
     variant_owner: FMap<String, String>,
+    /// short variant name -> the canonical names that claim it. A bare
+    /// `Ident(x)` resolves only when this has exactly one entry.
+    variant_short: FMap<String, Vec<String>>,
     /// module name -> its scope bindings; the namespace table
     module_table: FMap<String, Vec<ImportBinding>>,
     /// module name -> what it exports (source name -> qualified name)
@@ -453,6 +482,7 @@ impl Checker {
             used_enums: FSet::default(),
             used_type_from: FMap::default(),
             variant_owner: FMap::default(),
+            variant_short: FMap::default(),
             module_table: FMap::default(),
             module_exports: FMap::default(),
             def_module: FMap::default(),
@@ -874,25 +904,12 @@ impl Checker {
             }
             cx.enums.insert(e.name.clone(), variants);
         }
-        // variant namespace: globally unique, and distinct from struct and
-        // enum names — a bare `Circle(x)` call must be unambiguous
+        // variant namespace: every variant belongs to its enum, so two enums
+        // may both have `Ident`; a bare `Ident(x)` is kept working until it
+        // is genuinely ambiguous
         for e in &program.enums {
             for v in &e.variants {
-                if cx.variant_owner.insert(v.name.clone(), e.name.clone()).is_some() {
-                    return err_at(
-                        e.span,
-                        format!("duplicate variant '{}'", v.name),
-                    );
-                }
-                if cx.structs.contains_key(&v.name) {
-                    return err_at(
-                        e.span,
-                        format!(
-                            "variant '{}' collides with struct '{}' — rename one",
-                            v.name, v.name
-                        ),
-                    );
-                }
+                cx.register_variant(&e.name, &v.name, e.span)?;
             }
         }
 
@@ -1262,6 +1279,174 @@ impl Checker {
         Ok(())
     }
 
+    /// Record one variant under `Enum::Variant`.
+    ///
+    /// The canonical name is what resolution and the codegen use; the short
+    /// name is only an alias that keeps `Circle(x)` working while exactly one
+    /// enum claims it.
+    fn register_variant(&mut self, enum_name: &str, variant: &str, span: Span) -> CResult<()> {
+        if variant == "_" {
+            return err_at(span, "a variant cannot be named '_' (that is the wildcard)");
+        }
+        if c_reserved(variant) {
+            return err_at(
+                span,
+                format!("variant '{variant}' collides with a C keyword or type name"),
+            );
+        }
+        let canonical = format!("{enum_name}::{variant}");
+        if self
+            .variant_owner
+            .insert(canonical.clone(), enum_name.to_string())
+            .is_some()
+        {
+            return err_at(
+                span,
+                format!("duplicate variant '{variant}' in enum '{enum_name}'"),
+            );
+        }
+        // the short alias: several enums may claim the same one, which is
+        // exactly what `Enum::Variant` is for
+        let entry = self.variant_short.entry(variant.to_string()).or_default();
+        if !entry.contains(&canonical) {
+            entry.push(canonical);
+        }
+        Ok(())
+    }
+
+    /// Map a written path onto a canonical `Enum::Variant`.
+    ///
+    /// Handles `Enum::Variant`, `module::Enum::Variant`, and
+    /// `module::Variant` (where the module exports exactly one enum that has
+    /// that variant). Returns the input unchanged when nothing matches, so the
+    /// caller's "undefined" diagnostics stay in charge.
+    fn canonical_variant_path(&self, written: &str) -> String {
+        if self.variant_owner.contains_key(written) {
+            return written.to_string();
+        }
+        let parts: Vec<&str> = written.split("::").collect();
+        // module::Enum::Variant -> try the last two components
+        if parts.len() >= 2 {
+            let tail2 = format!("{}::{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+            if self.variant_owner.contains_key(&tail2) {
+                return tail2;
+            }
+        }
+        // module::Variant -> the module's enum that owns it
+        if parts.len() >= 2 {
+            let module = parts[0];
+            let variant = parts[parts.len() - 1];
+            let exported: Vec<&String> = self
+                .module_exports
+                .get(module)
+                .map(|list| {
+                    list.iter()
+                        .filter(|e| e.kind == ExportKind::Enum)
+                        .map(|e| &e.qualified)
+                        .collect()
+                })
+                .unwrap_or_default();
+            for enum_name in exported {
+                let candidate = format!("{enum_name}::{variant}");
+                if self.variant_owner.contains_key(&candidate) {
+                    return candidate;
+                }
+            }
+            // the module may be reached under an alias
+            if let Some(bindings) = self.module_table.get(&self.current_module) {
+                for b in bindings.iter().filter(|b| b.is_module && b.local == module) {
+                    for enum_name in self
+                        .module_exports
+                        .get(&b.target)
+                        .map(|list| {
+                            list.iter()
+                                .filter(|e| e.kind == ExportKind::Enum)
+                                .map(|e| &e.qualified)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                    {
+                        let candidate = format!("{enum_name}::{variant}");
+                        if self.variant_owner.contains_key(&candidate) {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+        }
+        written.to_string()
+    }
+
+    /// Is `written` a variant constructor (canonical, or an unambiguous
+    /// short name)? Used by the expected-type-hint checks, which only need a
+    /// yes/no answer.
+    fn is_variant_name(&self, written: &str) -> bool {
+        if self.variant_owner.contains_key(written) {
+            return true;
+        }
+        if written.contains("::") {
+            return false;
+        }
+        self.variant_short
+            .get(written)
+            .is_some_and(|list| list.len() == 1)
+    }
+
+    /// The canonical name for an unambiguous variant reference, without an
+    /// error channel (used by the type-hint helpers).
+    fn variant_canonical(&self, written: &str) -> Option<String> {
+        if self.variant_owner.contains_key(written) {
+            return Some(written.to_string());
+        }
+        if let Some((head, tail)) = written.rsplit_once("::") {
+            let canonical = format!("{head}::{tail}");
+            return self.variant_owner.contains_key(&canonical).then_some(canonical);
+        }
+        match self.variant_short.get(written) {
+            Some(list) if list.len() == 1 => Some(list[0].clone()),
+            _ => None,
+        }
+    }
+
+    /// Resolve a written variant reference to its canonical `Enum::Variant`.
+    ///
+    /// `Tok::Eof` and `geom::Tok::Eof` are explicit; a bare `Eof` is accepted
+    /// only while one enum claims it, otherwise the caller gets an ambiguity
+    /// error naming the candidates.
+    fn resolve_variant(&self, written: &str, sp: Span) -> CResult<Option<String>> {
+        if self.variant_owner.contains_key(written) {
+            return Ok(Some(written.to_string()));
+        }
+        // `geom::Tok::Eof` -> the module qualifier is already handled by the
+        // module resolver, so `Tok::Eof` is what arrives here
+        if let Some((head, tail)) = written.rsplit_once("::") {
+            let canonical = format!("{head}::{tail}");
+            if self.variant_owner.contains_key(&canonical) {
+                return Ok(Some(canonical));
+            }
+            return Ok(None);
+        }
+        match self.variant_short.get(written) {
+            None => Ok(None),
+            Some(list) if list.len() == 1 => Ok(Some(list[0].clone())),
+            Some(list) => {
+                let mut names: Vec<String> = list.clone();
+                names.sort();
+                Err(CheckError {
+                    msg: format!(
+                        "variant '{written}' is ambiguous — it could be {}; write `Enum::{written}`",
+                        names
+                            .iter()
+                            .map(|n| format!("`{n}`"))
+                            .collect::<Vec<_>>()
+                            .join(" or ")
+                    ),
+                    span: sp,
+                })
+            }
+        }
+    }
+
     /// register an `enum Name[T, ...]` template; its variant names enter the
     /// global variant namespace immediately (construction resolves by name)
     fn register_generic_enum(&mut self, e: EnumDef) -> CResult<()> {
@@ -1295,18 +1480,7 @@ impl Checker {
                     ),
                 );
             }
-            if self.generic_funcs.contains_key(&v.name) {
-                return err_at(
-                    e.span,
-                    format!(
-                        "variant '{}' collides with generic function '{}' — rename one",
-                        v.name, v.name
-                    ),
-                );
-            }
-            if self.variant_owner.insert(v.name.clone(), e.name.clone()).is_some() {
-                return err_at(e.span, format!("duplicate variant '{}'", v.name));
-            }
+            self.register_variant(&e.name, &v.name, e.span)?;
         }
         let span = e.span;
         if self.generic_enums.contains_key(&e.name) {
@@ -2364,7 +2538,12 @@ impl Checker {
                 ExprKind::Call(_, ta, _) => ta,
                 _ => unreachable!(),
             };
-            if self.variant_owner.contains_key(name.as_str()) {
+            // `geom::Circle(1.0)` and `geom::Shape::Circle(1.0)` both name a
+            // variant through a module. The module resolver only knows
+            // `geom::Shape`, so map the written path onto the canonical
+            // `Enum::Variant` using the enum that module actually exports.
+            let variant_name = self.canonical_variant_path(name);
+            if let Some(canonical) = self.resolve_variant(&variant_name, sp)? {
                 if !ty_args.is_empty() {
                     return err_at(
                         sp,
@@ -2372,6 +2551,11 @@ impl Checker {
                             "type arguments are not valid on the enum constructor '{name}'"
                         ),
                     );
+                }
+                if canonical != *name {
+                    if let ExprKind::Call(n, _, _) = &mut e.node {
+                        *n = canonical;
+                    }
                 }
                 return self.check_variant_construct(e, sp);
             }
@@ -2387,9 +2571,16 @@ impl Checker {
                 // becomes its qualified form before anything else looks at it
                 if self.lookup(n).is_none() {
                     let resolved = self.resolve_ref(n, sp)?;
-                    if resolved != *n && self.variant_owner.contains_key(&resolved) {
-                        *e = Spanned::new(ExprKind::Ident(resolved.clone()), sp);
-                        return self.check_variant_construct(e, sp);
+                    let canonical = if resolved != *n {
+                        self.resolve_variant(&resolved, sp)?
+                    } else {
+                        self.resolve_variant(n, sp)?
+                    };
+                    if let Some(canonical) = canonical {
+                        if self.variant_owner.contains_key(&canonical) {
+                            *e = Spanned::new(ExprKind::Ident(canonical.clone()), sp);
+                            return self.check_variant_construct(e, sp);
+                        }
                     }
                 }
                 // locals shadow variant names; a bare zero-payload variant
@@ -3540,9 +3731,214 @@ impl Checker {
                             }
                             return Ok(Type::Void);
                         }
+                        // ---- host process + filesystem ------------------
+                        // `sys::getenv(name) -> string` ("" when unset)
+                        "getenv" => {
+                            if args.len() != 1 {
+                                return err_at(sp, "sys::getenv(name) takes 1 argument");
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Str {
+                                return err_at(sp, "sys::getenv: name must be string");
+                            }
+                            let a = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call("_wlel_getenv".into(), vec![], vec![a]),
+                                sp,
+                            );
+                            return Ok(Type::Str);
+                        }
+                        // `sys::run(cmd) -> int` — shell exit status (no capture)
+                        "run" => {
+                            if args.len() != 1 {
+                                return err_at(sp, "sys::run(cmd) takes 1 argument");
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Str {
+                                return err_at(sp, "sys::run: cmd must be string");
+                            }
+                            let a = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call("_wlel_run".into(), vec![], vec![a]),
+                                sp,
+                            );
+                            return Ok(Type::Int(IntW::I64));
+                        }
+                        // `sys::spawn(cmd, &out) -> int` — run through the
+                        // shell, capture stdout into `out`, return the status
+                        "spawn" => {
+                            if args.len() != 2 {
+                                return err_at(sp, "sys::spawn(cmd, &out) takes 2 arguments");
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Str {
+                                return err_at(sp, "sys::spawn: cmd must be string");
+                            }
+                            let ot = self.expr_ty(&mut args[1])?;
+                            if ot != Type::Ptr(Box::new(Type::Str)) {
+                                return err_at(sp, "sys::spawn: out must be *string");
+                            }
+                            let mut taken = std::mem::take(args);
+                            let out = taken.pop().unwrap();
+                            let cmd = taken.pop().unwrap();
+                            *e = Spanned::new(
+                                ExprKind::Call("_wlel_spawn".into(), vec![], vec![cmd, out]),
+                                sp,
+                            );
+                            return Ok(Type::Int(IntW::I64));
+                        }
+                        // `sys::read_dir(path) -> string` — entry names,
+                        // newline-separated ("" when unreadable)
+                        "read_dir" => {
+                            if args.len() != 1 {
+                                return err_at(sp, "sys::read_dir(path) takes 1 argument");
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Str {
+                                return err_at(sp, "sys::read_dir: path must be string");
+                            }
+                            let a = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call("_wlel_readdir".into(), vec![], vec![a]),
+                                sp,
+                            );
+                            return Ok(Type::Str);
+                        }
+                        // `sys::read_line() -> string` — stdin, newline removed
+                        "read_line" => {
+                            if !args.is_empty() {
+                                return err_at(sp, "sys::read_line() takes no arguments");
+                            }
+                            *e = Spanned::new(
+                                ExprKind::Call("_wlel_read_line".into(), vec![], vec![]),
+                                sp,
+                            );
+                            return Ok(Type::Str);
+                        }
+                        // `sys::read_stdin() -> string` — the whole stream
+                        "read_stdin" => {
+                            if !args.is_empty() {
+                                return err_at(sp, "sys::read_stdin() takes no arguments");
+                            }
+                            *e = Spanned::new(
+                                ExprKind::Call("_wlel_read_all_stdin".into(), vec![], vec![]),
+                                sp,
+                            );
+                            return Ok(Type::Str);
+                        }
+                        // stderr: diagnostics belong there, not on stdout
+                        "eprint" | "eprintln" | "eprint_int" | "eprintln_int"
+                        | "eprint_float" | "eprintln_float" => {
+                            if args.len() != 1 {
+                                return err_at(sp, format!("sys::{rest}(x) takes 1 argument"));
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            let want = if rest.contains("_int") {
+                                Type::Int(IntW::I64)
+                            } else if rest.contains("_float") {
+                                Type::Float(FloatW::F64)
+                            } else {
+                                Type::Str
+                            };
+                            if !assignable_checked(&want, &args[0], &t, sp)? {
+                                return err_at(
+                                    sp,
+                                    format!("sys::{rest} expects {}, got {}", want.name(), t.name()),
+                                );
+                            }
+                            let helper = match rest {
+                                "eprint" | "eprintln" => "_wlel_eprint_str",
+                                "eprint_int" | "eprintln_int" => "_wlel_eprint_int",
+                                _ => "_wlel_eprint_float",
+                            };
+                            let a = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            let call = Spanned::new(
+                                ExprKind::Call(helper.into(), vec![], vec![a]),
+                                sp,
+                            );
+                            if rest.starts_with("eprintln") {
+                                *e = Spanned::new(
+                                    ExprKind::Call(
+                                        "_wlel_eprintln".into(),
+                                        vec![],
+                                        vec![call],
+                                    ),
+                                    sp,
+                                );
+                            } else {
+                                *e = call;
+                            }
+                            return Ok(Type::Void);
+                        }
+                        // filesystem mutations
+                        "mkdir" | "remove" => {
+                            if args.len() != 1 {
+                                return err_at(sp, format!("sys::{rest}(path) takes 1 argument"));
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Str {
+                                return err_at(sp, format!("sys::{rest}: path must be string"));
+                            }
+                            let helper =
+                                if rest == "mkdir" { "_wlel_mkdir" } else { "_wlel_remove" };
+                            let a = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call(helper.into(), vec![], vec![a]),
+                                sp,
+                            );
+                            return Ok(Type::Bool);
+                        }
+                        "rename" => {
+                            if args.len() != 2 {
+                                return err_at(sp, "sys::rename(from, to) takes 2 arguments");
+                            }
+                            for a in args.iter_mut() {
+                                let t = self.expr_ty(a)?;
+                                if t != Type::Str {
+                                    return err_at(sp, "sys::rename: paths must be strings");
+                                }
+                            }
+                            let mut taken = std::mem::take(args);
+                            let to = taken.pop().unwrap();
+                            let from = taken.pop().unwrap();
+                            *e = Spanned::new(
+                                ExprKind::Call("_wlel_rename".into(), vec![], vec![from, to]),
+                                sp,
+                            );
+                            return Ok(Type::Bool);
+                        }
+                        "exists" => {
+                            if args.len() != 1 {
+                                return err_at(sp, "sys::exists(path) takes 1 argument");
+                            }
+                            let t = self.expr_ty(&mut args[0])?;
+                            if t != Type::Str {
+                                return err_at(sp, "sys::exists: path must be string");
+                            }
+                            let a = std::mem::replace(&mut args[0], dummy_expr(sp));
+                            *e = Spanned::new(
+                                ExprKind::Call("_wlel_exists".into(), vec![], vec![a]),
+                                sp,
+                            );
+                            return Ok(Type::Bool);
+                        }
                         other => {
                             return err_at(sp, format!("unknown sys function 'sys::{other}'"))
                         }
+                    }
+                }
+                // `std::str_trim`, `std::vec_new`, ... are Wlel source in the
+                // embedded library, so they are spliced under their plain
+                // names; `std::` is just an alias for them. The runtime
+                // builtins keep the prefix (the arm below owns them), and
+                // `std::fs::`/`std::math::` keep theirs too.
+                if let Some(rest) = name.strip_prefix("std::") {
+                    let special = matches!(rest, "format" | "sort" | "binary_search");
+                    if !rest.contains("::")
+                        && !special
+                        && !STD_RUNTIME_BUILTINS.contains(&rest)
+                    {
+                        *name = rest.to_string();
                     }
                 }
                 // std module
@@ -4565,11 +4961,10 @@ impl Checker {
                                 // must not leak it into the inner arguments
                                 let direct = match &a.node {
                                     ExprKind::Call(n, ta, _) => {
-                                        ta.is_empty() && self.variant_owner.contains_key(n)
+                                        ta.is_empty() && self.is_variant_name(n)
                                     }
                                     ExprKind::Ident(n) => {
-                                        self.variant_owner.contains_key(n)
-                                            && self.lookup(n).is_none()
+                                        self.is_variant_name(n) && self.lookup(n).is_none()
                                     }
                                     _ => false,
                                 };
@@ -5271,6 +5666,9 @@ impl Checker {
             _ => unreachable!("check_variant_construct on a non-call"),
         };
         let owner = self.variant_owner.get(&variant).cloned().unwrap();
+        // the canonical name is `Enum::Variant`; the enum's own tables are
+        // keyed by the short name
+        let variant = variant.rsplit("::").next().unwrap_or(&variant).to_string();
         if self.generic_enums.contains_key(&owner) {
             // infer bindings from the payload argument types
             let gen = self
@@ -5442,7 +5840,16 @@ impl Checker {
         // same way construction sites are
         for arm in m.arms.iter_mut() {
             if let Pattern::Variant { name, .. } = &mut arm.pattern {
-                *name = self.resolve_ref(&name.clone(), arm.span)?;
+                let written = self.resolve_ref(&name.clone(), arm.span)?;
+                let written = self.canonical_variant_path(&written);
+                // the pattern names a variant of the scrutinee's enum: keep
+                // the short name, since `variants` below is keyed by it
+                match self.resolve_variant(&written, arm.span)? {
+                    Some(canonical) => {
+                        *name = canonical.rsplit("::").next().unwrap_or(&canonical).to_string();
+                    }
+                    None => *name = written,
+                }
             }
         }
         let mut covered = vec![false; variants.len()];
@@ -5615,7 +6022,8 @@ impl Checker {
             ExprKind::Ident(n) => n.clone(),
             _ => return None,
         };
-        let owner = self.variant_owner.get(&cname)?.clone();
+        let canonical = self.variant_canonical(&cname)?;
+        let owner = self.variant_owner.get(&canonical)?.clone();
         if !self.generic_enums.contains_key(&owner) {
             return None;
         }
@@ -5640,7 +6048,8 @@ impl Checker {
             ExprKind::Ident(n) => n.clone(),
             _ => return None,
         };
-        let owner = self.variant_owner.get(&cname)?.clone();
+        let canonical = self.variant_canonical(&cname)?;
+        let owner = self.variant_owner.get(&canonical)?.clone();
         if !self.generic_enums.contains_key(&owner) {
             return None;
         }

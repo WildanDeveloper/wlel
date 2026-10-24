@@ -79,10 +79,9 @@ pub fn qualify(program: &mut Program, module: &str, is_root: bool) {
         s.name = q(&s.name);
     }
     for e in program.enums.iter_mut() {
+        // the enum is module-qualified; its variants stay short and are
+        // namespaced by the enum (`geom::Shape::Circle`, not `geom::Circle`)
         e.name = q(&e.name);
-        for v in e.variants.iter_mut() {
-            v.name = q(&v.name);
-        }
     }
     for i in program.impls.iter_mut() {
         i.type_name = q(&i.type_name);
@@ -130,14 +129,21 @@ pub fn exports_of(program: &Program) -> Vec<Export> {
         for v in &e.variants {
             out.push(Export {
                 name: unq(&v.name),
-                qualified: v.name.clone(),
+                qualified: format!("{}::{}", e.name, v.name),
                 kind: ExportKind::Variant,
                 owner: e.name.clone(),
             });
         }
     }
-    out.sort_by(|a, b| a.name.cmp(&b.name).then(a.kind.cmp(&b.kind)));
-    out.dedup_by(|a, b| a.name == b.name && a.kind == b.kind);
+    // dedup by the *qualified* name: two enums may both export a variant
+    // called `Same`, and collapsing them would silently pick one
+    out.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then(a.kind.cmp(&b.kind))
+            .then(a.qualified.cmp(&b.qualified))
+    });
+    out.dedup_by(|a, b| a.name == b.name && a.kind == b.kind && a.qualified == b.qualified);
     out
 }
 
@@ -197,10 +203,18 @@ pub fn resolve<S: std::hash::BuildHasher>(
         return Ok(Resolved::Unknown);
     }
 
-    // 1. the module's own items
+    // 1. the module's own items. Two enums may share a variant name, so a
+    //    name can match more than once — that is an ambiguity, not a pick.
     if let Some(list) = exports.get(current_module) {
-        if let Some(e) = list.iter().find(|e| e.name == name) {
-            return Ok(Resolved::Item(e.qualified.clone()));
+        let mut own: Vec<&Export> = list.iter().filter(|e| e.name == name).collect();
+        match own.len() {
+            0 => {}
+            1 => return Ok(Resolved::Item(own[0].qualified.clone())),
+            _ => {
+                own.sort_by(|a, b| a.qualified.cmp(&b.qualified));
+                let from: Vec<String> = own.iter().map(|e| e.qualified.clone()).collect();
+                return Err(Ambiguity { name: name.to_string(), from });
+            }
         }
     }
     let Some(bindings) = table.get(current_module) else {

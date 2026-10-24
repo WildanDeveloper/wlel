@@ -251,6 +251,8 @@ pub fn gen_program(p: &Program) -> String {
         used_divovf: false,
         used_shift: false,
         used_conc: false,
+        used_sys: false,
+        sys_at: 0,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
         bsearches: Vec::new(),
@@ -292,6 +294,8 @@ pub fn gen_program_safe(p: &Program) -> String {
         used_divovf: false,
         used_shift: false,
         used_conc: false,
+        used_sys: false,
+        sys_at: 0,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
         bsearches: Vec::new(),
@@ -332,6 +336,8 @@ pub fn gen_program_tests(p: &Program) -> String {
         used_divovf: false,
         used_shift: false,
         used_conc: false,
+        used_sys: false,
+        sys_at: 0,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
         bsearches: Vec::new(),
@@ -370,6 +376,8 @@ pub fn gen_program_tests_safe(p: &Program) -> String {
         used_divovf: false,
         used_shift: false,
         used_conc: false,
+        used_sys: false,
+        sys_at: 0,
         format_sigs: Vec::new(),
         sorts: Vec::new(),
         bsearches: Vec::new(),
@@ -431,6 +439,9 @@ struct Cg {
     /// concurrency layer (threads/mutexes/channels) in use; the whole
     /// runtime is spliced only when the program actually touches it
     used_conc: bool,
+    /// process/filesystem runtime (spawn, getenv, readdir, stdin, stderr,
+    /// mkdir/rename/remove) in use; spliced only when touched
+    used_sys: bool,
     /// `std::format` call signatures seen while generating ("iis" = int,
     /// int, string); one tiny C wrapper per distinct signature is spliced
     /// into the prelude after generation, only for signatures in use
@@ -457,6 +468,9 @@ struct Cg {
     /// forward typedefs, before the type definitions — user structs may
     /// carry *Thread/*Mutex/*Chan fields
     conc_early_at: usize,
+    /// where the process/filesystem runtime goes when it is used (after the
+    /// type definitions, same boundary as the fs helpers)
+    sys_at: usize,
     /// fs Result helpers actually called by the generated code; their
     /// definitions (and only those) are spliced in after generation
     fs_helpers: Vec<&'static str>,
@@ -810,6 +824,7 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
     // *Mutex / *Chan / *Thread parameters
     cg.fs_helpers_at = cg.out.len();
     cg.conc_at = cg.out.len();
+    cg.sys_at = cg.out.len();
 
     // prototypes so forward references link correctly; extern declarations
     // are plain (non-static) prototypes — they resolve to external C symbols
@@ -909,6 +924,12 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
             h.push_str(&bsearch_helper_c(i, elem, cmp));
         }
         cg.out.insert_str(cg.sort_helpers_at, &h);
+    }
+
+    // process/filesystem runtime: last splice, so its (smallest) offset is
+    // still valid after every insert above it
+    if cg.used_sys {
+        cg.out.insert_str(cg.sys_at, &sys_runtime_c());
     }
 
     // thread trampolines: one boxed-argument entry per (worker, arg type)
@@ -1280,6 +1301,151 @@ fn format_sig_wrapper(sig: &str) -> String {
     }
     out.push_str("}\n");
     out
+}
+
+/// Process and filesystem helpers: what a compiler (or any tool that drives
+/// one) needs from the host — run a program and capture its output, read the
+/// environment, list a directory, read stdin, write stderr, and change the
+/// filesystem. Spliced only when the program calls one of them.
+fn sys_runtime_c() -> String {
+    let mut c = String::new();
+    c.push_str("/* ---- process + filesystem runtime (sys::spawn/getenv/...) ---- */\n");
+    c.push_str("#ifndef _WIN32\n#include <sys/wait.h>\n#include <sys/stat.h>\n#include <dirent.h>\n#include <unistd.h>\n#endif\n");
+    // stderr: the diagnostic channel a compiler needs
+    c.push_str("static void _wlel_eprint_str(const char* s) { fputs(s, stderr); fflush(stderr); }\n");
+    c.push_str("static void _wlel_eprint_int(long long v) { fprintf(stderr, \"%lld\", v); fflush(stderr); }\n");
+    c.push_str("static void _wlel_eprint_float(double v) { fprintf(stderr, \"%g\", v); fflush(stderr); }\n");
+    c.push_str("static void _wlel_eprint_nl(void) { fputc('\\n', stderr); fflush(stderr); }\n");
+    // stdin: one line without the newline; "" at EOF
+    c.push_str("static char* _wlel_read_line(void) {\n");
+    c.push_str("    size_t cap = 128, n = 0;\n");
+    c.push_str("    char* buf = _wlel_alloc_str(cap);\n");
+    c.push_str("    int ch;\n");
+    c.push_str("    while ((ch = fgetc(stdin)) != EOF && ch != '\\n') {\n");
+    c.push_str("        if (n + 1 >= cap) {\n");
+    c.push_str("            size_t ncap = cap * 2;\n");
+    c.push_str("            char* nb = _wlel_alloc_str(ncap);\n");
+    c.push_str("            memcpy(nb, buf, n);\n");
+    c.push_str("            buf = nb; cap = ncap;\n");
+    c.push_str("        }\n");
+    c.push_str("        buf[n++] = (char)ch;\n");
+    c.push_str("    }\n");
+    c.push_str("    if (ch == EOF && n == 0) { buf[0] = 0; return buf; }\n");
+    c.push_str("    buf[n] = 0;\n");
+    c.push_str("    return buf;\n");
+    c.push_str("}\n");
+    // stdin fully drained (a filter reading a pipe)
+    c.push_str("static char* _wlel_read_all_stdin(void) {\n");
+    c.push_str("    size_t cap = 4096, n = 0;\n");
+    c.push_str("    char* buf = _wlel_alloc_str(cap);\n");
+    c.push_str("    size_t got;\n");
+    c.push_str("    while ((got = fread(buf + n, 1, cap - n - 1, stdin)) > 0) {\n");
+    c.push_str("        n += got;\n");
+    c.push_str("        if (n + 1 >= cap) {\n");
+    c.push_str("            size_t ncap = cap * 2;\n");
+    c.push_str("            char* nb = _wlel_alloc_str(ncap);\n");
+    c.push_str("            memcpy(nb, buf, n);\n");
+    c.push_str("            buf = nb; cap = ncap;\n");
+    c.push_str("        }\n");
+    c.push_str("    }\n");
+    c.push_str("    buf[n] = 0;\n");
+    c.push_str("    return buf;\n");
+    c.push_str("}\n");
+    // environment
+    c.push_str("static char* _wlel_getenv(const char* name) {\n");
+    c.push_str("    const char* v = getenv(name);\n");
+    c.push_str("    return (char*)(v ? v : \"\");\n");
+    c.push_str("}\n");
+    // spawn: run a command line through the shell, capture stdout, return
+    // its exit status. `out` receives the output (empty when the command
+    // could not run). -1 when the process could not be started at all.
+    c.push_str("static long long _wlel_spawn(const char* cmd, const char** out) {\n");
+    c.push_str("    *out = _wlel_alloc_str(1);\n");
+    c.push_str("#ifdef _WIN32\n");
+    c.push_str("    FILE* p = _popen(cmd, \"r\");\n");
+    c.push_str("#else\n");
+    c.push_str("    FILE* p = popen(cmd, \"r\");\n");
+    c.push_str("#endif\n");
+    c.push_str("    if (!p) return -1;\n");
+    c.push_str("    size_t cap = 4096, n = 0;\n");
+    c.push_str("    char* buf = _wlel_alloc_str(cap);\n");
+    c.push_str("    size_t got;\n");
+    c.push_str("    while ((got = fread(buf + n, 1, cap - n - 1, p)) > 0) {\n");
+    c.push_str("        n += got;\n");
+    c.push_str("        if (n + 1 >= cap) {\n");
+    c.push_str("            size_t ncap = cap * 2;\n");
+    c.push_str("            char* nb = _wlel_alloc_str(ncap);\n");
+    c.push_str("            memcpy(nb, buf, n);\n");
+    c.push_str("            buf = nb; cap = ncap;\n");
+    c.push_str("        }\n");
+    c.push_str("    }\n");
+    c.push_str("    buf[n] = 0;\n");
+    c.push_str("#ifdef _WIN32\n");
+    c.push_str("    int rc = _pclose(p);\n");
+    c.push_str("#else\n");
+    c.push_str("    int status = pclose(p);\n");
+    c.push_str("    int rc = (status == -1) ? -1 : (WIFEXITED(status) ? WEXITSTATUS(status) : -1);\n");
+    c.push_str("#endif\n");
+    c.push_str("    *out = buf;\n");
+    c.push_str("    return (long long)rc;\n");
+    c.push_str("}\n");
+    // run without capturing: the shell's exit status, or -1
+    c.push_str("static long long _wlel_run(const char* cmd) {\n");
+    c.push_str("    int rc = system(cmd);\n");
+    c.push_str("#ifdef _WIN32\n");
+    c.push_str("    return (long long)rc;\n");
+    c.push_str("#else\n");
+    c.push_str("    return (rc == -1) ? -1 : (WIFEXITED(rc) ? WEXITSTATUS(rc) : -1);\n");
+    c.push_str("#endif\n");
+    c.push_str("}\n");
+    // directory listing: newline-separated names, "" when unreadable
+    c.push_str("static char* _wlel_readdir(const char* path) {\n");
+    c.push_str("#ifdef _WIN32\n");
+    c.push_str("    (void)path;\n");
+    c.push_str("    return _wlel_alloc_str(1);\n");
+    c.push_str("#else\n");
+    c.push_str("    DIR* d = opendir(path);\n");
+    c.push_str("    if (!d) return _wlel_alloc_str(1);\n");
+    c.push_str("    size_t cap = 1024, n = 0;\n");
+    c.push_str("    char* buf = _wlel_alloc_str(cap);\n");
+    c.push_str("    struct dirent* e;\n");
+    c.push_str("    while ((e = readdir(d)) != 0) {\n");
+    c.push_str("        if (strcmp(e->d_name, \".\") == 0 || strcmp(e->d_name, \"..\") == 0) continue;\n");
+    c.push_str("        size_t len = strlen(e->d_name);\n");
+    c.push_str("        if (n + len + 2 >= cap) {\n");
+    c.push_str("            size_t ncap = cap * 2;\n");
+    c.push_str("            while (n + len + 2 >= ncap) ncap *= 2;\n");
+    c.push_str("            char* nb = _wlel_alloc_str(ncap);\n");
+    c.push_str("            memcpy(nb, buf, n);\n");
+    c.push_str("            buf = nb; cap = ncap;\n");
+    c.push_str("        }\n");
+    c.push_str("        memcpy(buf + n, e->d_name, len);\n");
+    c.push_str("        n += len;\n");
+    c.push_str("        buf[n++] = '\\n';\n");
+    c.push_str("    }\n");
+    c.push_str("    closedir(d);\n");
+    c.push_str("    buf[n] = 0;\n");
+    c.push_str("    return buf;\n");
+    c.push_str("#endif\n");
+    c.push_str("}\n");
+    // filesystem mutations
+    c.push_str("static _Bool _wlel_mkdir(const char* path) {\n");
+    c.push_str("#ifdef _WIN32\n");
+    c.push_str("    return _mkdir(path) == 0;\n");
+    c.push_str("#else\n");
+    c.push_str("    return mkdir(path, 0777) == 0;\n");
+    c.push_str("#endif\n");
+    c.push_str("}\n");
+    c.push_str("static _Bool _wlel_rename(const char* from, const char* to) { return rename(from, to) == 0; }\n");
+    c.push_str("static _Bool _wlel_remove(const char* path) { return remove(path) == 0; }\n");
+    c.push_str("static _Bool _wlel_exists(const char* path) {\n");
+    c.push_str("#ifdef _WIN32\n");
+    c.push_str("    return _access(path, 0) == 0;\n");
+    c.push_str("#else\n");
+    c.push_str("    return access(path, F_OK) == 0;\n");
+    c.push_str("#endif\n");
+    c.push_str("}\n");
+    c
 }
 
 /// The concurrency runtime: a thin portable layer over pthreads (POSIX) and
@@ -2598,6 +2764,31 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
                 || f == "sys::mutex_unlock" || f == "sys::mutex_free" || f == "sys::sleep_ms"
             {
                 cg.used_conc = true;
+            }
+            // host process/filesystem helpers rewritten by the checker
+            if matches!(
+                f.as_str(),
+                "_wlel_getenv"
+                    | "_wlel_run"
+                    | "_wlel_spawn"
+                    | "_wlel_readdir"
+                    | "_wlel_read_line"
+                    | "_wlel_read_all_stdin"
+                    | "_wlel_eprint_str"
+                    | "_wlel_eprint_int"
+                    | "_wlel_eprint_float"
+                    | "_wlel_eprintln"
+                    | "_wlel_mkdir"
+                    | "_wlel_remove"
+                    | "_wlel_rename"
+                    | "_wlel_exists"
+            ) {
+                cg.used_sys = true;
+            }
+            // `sys::eprintln` is two calls: the writer, then the newline
+            if f == "_wlel_eprintln" {
+                let inner = gen_expr(cg, &args[0]);
+                return format!("({}, _wlel_eprint_nl(), (void)0)", inner);
             }
             let a: Vec<String> = args.iter().map(|x| gen_expr(cg, x)).collect();
             format!("{}({})", f.replace("::", "__"), a.join(", "))

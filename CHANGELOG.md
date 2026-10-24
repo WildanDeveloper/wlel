@@ -6,6 +6,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.5.0] — 2026-10-24
+
+Two gaps that blocked self-hosting: enum variants were one flat global
+namespace, and a Wlel program could not talk to the host beyond files.
+
+### Added
+
+- **Host integration (`sys::`)** — a program can now drive a toolchain:
+  - `sys::spawn(cmd, &out) -> int` runs a shell command line, captures stdout
+    into `out`, and returns the exit status (`-1` when it cannot start);
+    `sys::run(cmd)` is the no-capture form. This is the capability `wlel
+    build` itself needs to invoke `cc`.
+  - `sys::getenv(name) -> string`, `sys::read_dir(path) -> string`
+    (newline-separated entries), `sys::read_line()` / `sys::read_stdin()` for
+    stdin, and `sys::eprint/eprintln` for stderr — diagnostics no longer have
+    to go to stdout.
+  - `sys::mkdir/remove/rename/exists` for filesystem changes.
+  - The runtime is spliced into the generated C only when a program calls one
+    of them (a test asserts the unused case stays clean), and the API is
+    total: failures return `false`/`""`/`-1` rather than trapping. Verified
+    end to end by a Wlel program that writes C, invokes `cc`, runs the binary
+    and cleans up.
+- **Enum variants are namespaced by their enum** — `Tok::Ident(x)` and
+  `Expr::Ident(x)` are different constructors, in patterns and in expressions,
+  and two enums in one file may now share a variant name. A bare `Ident` still
+  works while exactly one enum claims it; once two do, the error names both
+  and shows the qualified form. `module::Variant` also resolves (the enum is
+  looked up through the module's exports).
+- **`std::` reaches the whole library** — `std::str_trim`, `std::vec_new`,
+  `std::int_to_str`, `std::str_split`, ... now work, not just the handful of
+  runtime builtins. `std::name` and the plain `name` are the same function, so
+  both spellings are valid after `use std;`.
+- **`tests/host_tests.rs`** — 9 end-to-end tests: spawn capture + status, run
+  status, driving `cc` from Wlel, `getenv`, mkdir/exists/rename/remove,
+  `read_dir`, stdin line/whole, stderr routing, and "the runtime is only
+  spliced when used".
+
+### Changed
+
+- The spec gained §9.5 (host integration), the variant namespace rules in
+  §8.2, and the grammar note; the sys table in README documents the new
+  functions.
+- Version 1.4.0 -> 1.5.0 (additive; no existing program changes meaning).
+
 ## [1.4.0] — 2026-10-24
 
 Module namespaces: a program is no longer one flat scope. Two files may define

@@ -98,7 +98,8 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Methods: `impl Pt { fn len(self) -> float { ... } }` + `p.len()` — desugared to plain functions, generic impls monomorphize per receiver; std collections/Result/Option carry a method layer (see [Methods](#methods))
 - [x] Stdlib: `std::print*`/`println*`, `strlen`, `streq`, `abs`, `min`, `max`, `len`, `checked_add/sub/mul`, `format`, `parse_float`, `float_to_str`; collections `Vec[T]`, `HashMap[K,V]` + `for x in coll`; string library `str_find/sub/trim/split/parse_int`, `int_to_str`, `str_cmp`; sort & search `std::sort`, `std::binary_search`; file I/O `sys::read_file/write_file` + the Result layer `std::fs::open/read_all/write_all/read/write/close`; `sys::argc/arg/exit`
 - [x] Concurrency: `sys::thread/join` (name-resolved workers, per-thread arenas), `sys::mutex_new/lock/unlock/free`, `sys::chan_new[T]/send/recv/close/free`, `sys::sleep_ms` — data races are user discipline, like C (see [Concurrency](#concurrency))
-- [x] Tagged enums + exhaustive `match`, `std::Result[T,E]` / `std::Option[T]`, the `?` try operator and the `result_*`/`option_*` helpers, `panic(msg)` (see [Tagged enums](#tagged-enums--match) and [File I/O](#file-io))
+- [x] Tagged enums + exhaustive `match`, `std::Result[T,E]` / `std::Option[T]`, the `?` try operator and the `result_*`/`option_*` helpers, `panic(msg)`; variants are namespaced (`Tok::Ident`, two enums may share a name) (see [Tagged enums](#tagged-enums--match) and [File I/O](#file-io))
+- [x] Host integration: `sys::spawn/run` (drive a compiler), `getenv`, `read_dir`, `read_line`/`read_stdin`, `eprintln`, `mkdir/remove/rename/exists` — everything a tool that shells out needs (see [Host integration](#host-integration))
 - [x] Projects: `wlel new` / `init`, `wlel.toml` manifests, path + git dependencies (auto-cloned, revision-pinned by `wlel.lock`), nested deps, `wlel add/remove/update/tree/clean`, `wlel run/build/check/test` in project mode; the scaffold ships a README and a CI workflow that installs the matching release (see [Projects](#projects))
 - [x] Package registry v0: `wlel add github:user/repo[@x.y.z]` — no central server, git tags are the registry; caret version requirements verified against each tag's own manifest, offline-friendly resolution (see [Projects](#projects))
 - [x] Formatter: `wlel fmt` — canonical, idempotent, comment-preserving; `wlel fmt` in a project formats every `.wlel`; `-check` mode for CI (see [Formatting](#formatting))
@@ -688,6 +689,57 @@ Names are mangled to `geom__add` in the generated C, so the two modules never
 collide at link time. A single-file program is unaffected: with no `use` and
 no `module` line, everything behaves exactly as before.
 
+## Host integration
+
+`sys::` is the compiler-provided module for talking to the host, and it needs
+no import. Every function is total: a failure returns `false`, `""` or `-1`
+instead of trapping. This is what makes a Wlel program able to drive a
+toolchain — `wlel build` itself is a program that writes C and calls `cc`:
+
+```wlel
+use std;
+
+fn main() -> int {
+    cfile := "/tmp/hello.c";
+    exe := "/tmp/hello";
+    src := "#include <stdio.h>\nint main(void) { printf(\"hi\\n\"); return 0; }\n";
+    if !sys::write_file(cfile, src) {
+        sys::eprintln("cannot write the C file");
+        return 1;
+    }
+    log := "";
+    if sys::spawn("cc -O1 -o " + exe + " " + cfile + " 2>&1", &log) != 0 {
+        sys::eprintln(log);          // cc's diagnostics, on stderr
+        return 1;
+    }
+    out := "";
+    sys::spawn(exe, &out);           // the compiled program's stdout
+    std::print_str(out);
+    sys::remove(cfile);
+    sys::remove(exe);
+    return 0;
+}
+```
+
+| Function | Result |
+|---|---|
+| `sys::spawn(cmd, &out)` | run a shell command line, capture stdout, return the exit status (-1 if it could not start) |
+| `sys::run(cmd)` | run it, discard output, return the status |
+| `sys::getenv(name)` | environment variable (`""` when unset) |
+| `sys::read_dir(path)` | entry names, newline-separated (`""` when unreadable) |
+| `sys::read_line()` / `sys::read_stdin()` | stdin, one line / all of it |
+| `sys::eprint(s)` / `sys::eprintln(s)` | stderr — diagnostics belong here, not on stdout |
+| `sys::mkdir/remove/rename/exists` | filesystem changes |
+| `sys::read_file/write_file` | whole-file I/O |
+| `sys::argc()` / `sys::arg(i)` / `sys::exit(code)` | command line and termination |
+
+The runtime for these is spliced into the generated C **only when a program
+calls one**, so a program that never shells out carries none of it.
+
+`std::` works the other way round: `std::str_trim`, `std::vec_new`,
+`std::int_to_str` and the plain names are the same function, so either
+spelling works once `use std;` is present.
+
 ## Projects
 
 A project is a directory with a `wlel.toml`. Scaffold one and run it:
@@ -882,7 +934,7 @@ highlighting and the language client together:
 
 ```bash
 git clone https://github.com/WildanDeveloper/wlel
-cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.4.0
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.5.0
 # reload the window, then open any .wlel file
 ```
 
