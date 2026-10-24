@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792800796338,
+  "lastUpdate": 1792803216294,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -873,6 +873,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.8,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "0d349820f50d5e435f16991005c98fb04fb6e131",
+          "message": "self-hosting prep: host integration and namespaced enum variants — a Wlel program can now drive a toolchain, and two enums can both have an `Ident` variant; before this, `sys::spawn` did not exist (so a self-hosted `wlel build` could never invoke `cc`), `sys::getenv`/`read_dir`/`read_line`/stderr were missing, and variants shared one flat global namespace (a compiler's Token/Expr/Type enums all want `Ident`, `Num`, `Error`, which was a `duplicate variant` error); host integration (`sys::`): `spawn(cmd, &out) -> int` runs a command line through the shell, captures stdout and returns the exit status (-1 if it cannot start), `run(cmd)` is the no-capture form, plus `getenv`, `read_dir` (newline-separated entries), `read_line`/`read_stdin`, `eprint/eprintln/eprint_int/...` to stderr, `mkdir/remove/rename/exists`; the runtime is spliced into the generated C only when a call is present (asserted by a test that a plain program's C does not contain `_wlel_readdir`), every function is total (failure returns false/\"\"/-1, never traps), and the whole path is verified end to end by a Wlel program that writes a C file, spawns `cc -O1`, captures cc's diagnostics, runs the produced binary, prints its output and removes both files — the exact shape of `wlel build`; enum variants are now namespaced by their enum: `Tok::Ident(x)` and `Expr::Ident(x)` are distinct in expressions and patterns, `module::Variant` resolves through the module's enum exports, and a bare `Ident` keeps working until two enums claim it, at which point the error names both (`'Ident' is ambiguous — it could be A::Ident or B::Ident`) instead of silently picking one — the bug that made the old table collapse two variants with the same short name was `exports_of` deduping by (name, kind) instead of the qualified name; `std::` now reaches the whole library rather than only the runtime builtins (`std::str_trim`, `std::vec_new`, `std::int_to_str`, `std::str_split`, ... are aliases for the spliced plain names, while `format`/`sort`/`binary_search`/`fs::`/`math::` keep their special paths); spec §9.5 documents the host functions, §8.2 the variant rules, and README has a Host integration section with the write-C-and-call-cc program; 634 cargo tests green (9 new host tests: spawn capture+status, run status, driving cc from Wlel, getenv, mkdir/exists/rename/remove, read_dir, stdin line/whole, stderr routing, runtime-not-spliced-when-unused), clippy -D warnings clean, wlel fmt canonical, docs site renders; version 1.4.0 -> 1.5.0",
+          "timestamp": "2026-10-24T00:52:19Z",
+          "tree_id": "67fad880266e446fa06e314cb819225b6c662055",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/0d349820f50d5e435f16991005c98fb04fb6e131"
+        },
+        "date": 1792803215207,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 15.3,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 58,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 7,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.3,
             "unit": "ms"
           }
         ]
