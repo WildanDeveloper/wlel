@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792810038784,
+  "lastUpdate": 1792817619212,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1225,6 +1225,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.3,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "38212b1c31c348e9118fecb9be6ff4c809bcec12",
+          "message": "self-hosting: the parser's names are source slices, not copies — the first version copied every identifier, parameter, field and variant into a `String`, which cost 2 MB/s on the Windows runner against 37 MB/s on Linux (a 17x gap that the throughput guard caught); a `Node` now carries `slice_start`/`slice_len` alongside its text (`-1` means a synthesized string), so `set_slice` points a node at its token and `text_of` slices the source only when the dump actually needs the bytes — names are copied only when they are built (`geom::Vec2`, a joined type list); the three special call forms (`wlel_sizeof`, `new`, `wlel_arena`) and the qualified-name check compare source slices instead of materialising a string, which also fixed a regression where `map_new[string, Jval]` stopped parsing because the plain-name path was left empty; measured 53 MB/s on `flagship/json.wlel` (79 300 nodes, 14 ms for 20 passes); one self-inflicted bug worth recording: a blanket `n.text` -> `text_of(p, i)` rewrite also hit the `return n.text` inside `text_of` itself, so `dump` recursed forever and every file hung — found by bisecting which construct hung (`fn f() { }` fine, `return 0;` not); 657 cargo tests green, parser parity 41/41 files, clippy -D warnings clean, wlel fmt canonical",
+          "timestamp": "2026-10-24T04:52:53Z",
+          "tree_id": "3cbfb5287706e79fc31bfd87cc1436aff0a6f78c",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/38212b1c31c348e9118fecb9be6ff4c809bcec12"
+        },
+        "date": 1792817618331,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.8,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 66,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 4.1,
             "unit": "ms"
           }
         ]
