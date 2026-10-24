@@ -108,7 +108,10 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Documentation: `wlel doc` — markdown pages from `///` doc comments, one per module plus an index; the embedded stdlib documents itself (see [Documentation](#documentation))
 
 ### Not yet (planned, in order)
-- [ ] Self-hosting
+- [ ] Self-hosting — in progress: `selfhost/lexer.wlel` is a complete lexer
+  written in Wlel, verified token-for-token against the Rust one on every
+  source in the repository and running at 116 MB/s (see
+  [selfhost/README.md](selfhost/README.md))
 
 ### Experimental
 - [x] QBE backend (`--backend qbe`): transpiles the arena-free core of the language straight to QBE IL — 75x faster builds on a 2k-function file (78 ms vs 5.9 s for gcc -O2 on generated C), runtime parity on straight-line/loop code, ~3x slower on gcc-transformed patterns like deep recursion (see [QBE backend](#qbe-backend-experimental))
@@ -987,7 +990,7 @@ highlighting and the language client together:
 
 ```bash
 git clone https://github.com/WildanDeveloper/wlel
-cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.6.0
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.7.0
 # reload the window, then open any .wlel file
 ```
 
@@ -1189,7 +1192,10 @@ Shipped:
    access (`geom::add`), import lists/aliases, and deliberate ambiguity
    errors instead of a flat global scope. Two files may now define the same
    name.
-8. **Self-hosting** — the only unchecked milestone left.
+8. **Self-hosting** — started in 1.7.0: the lexer is written in Wlel
+   (`selfhost/lexer.wlel`) with zero-copy tokens and a token-for-token parity
+   gate against the Rust lexer over the whole repository. Parser, checker and
+   codegen follow the same pattern (write, then prove parity, then move on).
 9. **Runtime/compile performance** — incremental per-file compilation for
    the LSP, arena memory reclamation for parse-heavy programs, collection
    and sort hot paths.

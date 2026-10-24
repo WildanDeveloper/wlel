@@ -6,6 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.7.0] — 2026-10-24
+
+Self-hosting begins: the lexer is now written in Wlel, and it is proven
+identical to the Rust one before any other stage is started.
+
+### Added
+
+- **`selfhost/lexer.wlel`** — a complete Wlel lexer: trivia and `//` comments,
+  every literal form (decimal, hex, binary, octal, `_` separators, fractions,
+  exponents, width suffixes), string escapes, every operator including the
+  multi-character ones, all keywords including `module` and `const`, and error
+  positions for invalid tokens, bad radix digits, unterminated strings and
+  unknown suffixes. Two design choices make it fast: tokens are **zero-copy**
+  (`{ kind, start, end, line, col }` — byte offsets, no per-token `String`),
+  and token kinds are `const` integers rather than an enum with payloads.
+- **`tests/selfhost_tests.rs`** — the parity gate, 6 tests: the Wlel lexer is
+  built and run over **every** `.wlel` file in the repository (40 today) and
+  compared token-for-token against `wlel::lexer` (boundaries, line/column,
+  class and text); a token-count check; a set of tricky cases (radix and
+  suffixed literals, escapes, `a::b::c`, `x..y`, `<<=`, comments, `match`
+  arms, `const`/`module`, every operator); rejection of an invalid token; and
+  a throughput guard.
+- **`wlex <file> [dump|bench [n]]`** — the lexer's CLI: token count, the
+  `line|col|start|end|class|text` dump the parity test consumes, and an
+  in-process benchmark.
+- **`selfhost/README.md`** — the staging plan (lexer → parser → checker →
+  codegen, each gated by parity) and the measurements.
+
+### Performance
+
+100 passes over `flagship/json.wlel` (7 257 tokens each) in 32 ms: **116 MB/s**
+with one allocation per pass, because nothing is copied per token. A guard
+test fails if throughput drops below 10 MB/s, so a regression to per-token
+allocation or quadratic trivia scanning is caught.
+
+### Changed
+
+- Version 1.6.0 -> 1.7.0 (additive; the Rust compiler is unchanged and still
+  the one that ships).
+
 ## [1.6.0] — 2026-10-24
 
 The last three language gaps on the self-hosting checklist: compile-time

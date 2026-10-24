@@ -754,6 +754,8 @@ impl Checker {
         );
         // concurrency handles are fully opaque: registering them with no
         // fields makes every field access / struct literal a type error
+        // opaque string-builder handle (std::str_buf_*)
+        cx.structs.insert("StrBuf".into(), Vec::new());
         cx.structs.insert("Thread".into(), Vec::new());
         cx.structs.insert("Mutex".into(), Vec::new());
         for st in &program.structs {
@@ -783,6 +785,12 @@ impl Checker {
                     return err_at(
                         st.span,
                         "struct 'Thread' is reserved (built-in handle type of sys::thread())",
+                    );
+                }
+                if st.name == "StrBuf" {
+                    return err_at(
+                        st.span,
+                        "struct 'StrBuf' is reserved (built-in handle of std::str_buf_*)",
                     );
                 }
                 if st.name == "Mutex" {
@@ -1219,7 +1227,11 @@ impl Checker {
     fn register_generic_fn(&mut self, f: FuncDef) -> CResult<()> {
         self.check_reserved_decl_name(&f.name, f.span)?;
         for tp in &f.type_params {
-            if Type::from_builtin(tp).is_some() || tp == "ArenaStats" || tp == "File" {
+            if Type::from_builtin(tp).is_some()
+                || tp == "ArenaStats"
+                || tp == "File"
+                || tp == "StrBuf"
+            {
                 return err_at(
                     f.span,
                     format!("type parameter '{tp}' shadows a built-in type"),
@@ -1276,7 +1288,11 @@ impl Checker {
             );
         }
         for tp in &s.type_params {
-            if Type::from_builtin(tp).is_some() || tp == "ArenaStats" || tp == "File" {
+            if Type::from_builtin(tp).is_some()
+                || tp == "ArenaStats"
+                || tp == "File"
+                || tp == "StrBuf"
+            {
                 return err_at(s.span, format!("type parameter '{tp}' shadows a built-in type"));
             }
         }
@@ -1662,7 +1678,11 @@ impl Checker {
             );
         }
         for tp in &e.type_params {
-            if Type::from_builtin(tp).is_some() || tp == "ArenaStats" || tp == "File" {
+            if Type::from_builtin(tp).is_some()
+                || tp == "ArenaStats"
+                || tp == "File"
+                || tp == "StrBuf"
+            {
                 return err_at(e.span, format!("type parameter '{tp}' shadows a built-in type"));
             }
         }

@@ -1,0 +1,721 @@
+// lexer.wlel — the Wlel lexer, written in Wlel.
+//
+// This is the first piece of the self-hosted compiler. It is also the place
+// where performance matters most: every later stage sees the token stream, so
+// the lexer takes two deliberate shortcuts the Rust one cannot:
+//
+//   * tokens are *zero-copy*: a token stores (start, end) byte offsets into
+//     the source instead of an owned String, so lexing a 1 MiB file allocates
+//     one Vec and nothing per token;
+//   * the token kind is an integer constant (see the `const` block), so the
+//     scanner compares numbers instead of matching enum values through a
+//     heap-allocated representation.
+//
+// The scanner is a single pass over bytes with no backtracking: each token is
+// recognised from its first byte, and multi-character operators look at most
+// two bytes ahead.
+//
+// Usage:
+//   lexer <file>          check the file lexes; prints the token count
+//   lexer <file> dump     print `line:col:start:end:class:text` per token
+//                         (the format the parity test compares against the
+//                         Rust lexer)
+use std;
+
+// ---- token kinds ----------------------------------------------------------
+const T_EOF: int = 0;
+const T_IDENT: int = 1;
+const T_INT: int = 2;
+const T_INT_SUF: int = 3;
+const T_FLOAT: int = 4;
+const T_FLOAT_SUF: int = 5;
+const T_STR: int = 6;
+const T_FN: int = 10;
+const T_EXTERN: int = 11;
+const T_STRUCT: int = 12;
+const T_ENUM: int = 13;
+const T_IMPL: int = 14;
+const T_MATCH: int = 15;
+const T_DEFER: int = 16;
+const T_ARENA: int = 17;
+const T_USE: int = 18;
+const T_TEST: int = 19;
+const T_MODULE: int = 20;
+const T_CONST: int = 21;
+const T_AS: int = 22;
+const T_LET: int = 23;
+const T_RETURN: int = 24;
+const T_IF: int = 25;
+const T_ELSE: int = 26;
+const T_WHILE: int = 27;
+const T_FOR: int = 28;
+const T_IN: int = 29;
+const T_BREAK: int = 30;
+const T_CONTINUE: int = 31;
+const T_TRUE: int = 32;
+const T_FALSE: int = 33;
+const T_LPAREN: int = 40;
+const T_RPAREN: int = 41;
+const T_LBRACE: int = 42;
+const T_RBRACE: int = 43;
+const T_COMMA: int = 44;
+const T_DOT: int = 45;
+const T_DOTDOT: int = 46;
+const T_LBRACKET: int = 47;
+const T_RBRACKET: int = 48;
+const T_DOUBLECOLON: int = 49;
+const T_SEMICOLON: int = 50;
+const T_COLON: int = 51;
+const T_ASSIGN: int = 52;
+const T_DEFINE: int = 53;
+const T_PLUS: int = 54;
+const T_MINUS: int = 55;
+const T_STAR: int = 56;
+const T_SLASH: int = 57;
+const T_PERCENT: int = 58;
+const T_BANG: int = 59;
+const T_PLUSEQ: int = 60;
+const T_MINUSEQ: int = 61;
+const T_STAREQ: int = 62;
+const T_SLASHEQ: int = 63;
+const T_PERCENTEQ: int = 64;
+const T_BITOR: int = 65;
+const T_BITXOR: int = 66;
+const T_BITNOT: int = 67;
+const T_SHL: int = 68;
+const T_SHR: int = 69;
+const T_EQ: int = 70;
+const T_NEQ: int = 71;
+const T_LT: int = 72;
+const T_GT: int = 73;
+const T_LTEQ: int = 74;
+const T_GTEQ: int = 75;
+const T_AMP: int = 76;
+const T_ANDAND: int = 77;
+const T_OROR: int = 78;
+const T_ARROW: int = 79;
+const T_FATARROW: int = 80;
+const T_QUESTION: int = 81;
+const T_ERR: int = 99;
+
+// ---- token + scanner ------------------------------------------------------
+struct Tok {
+    kind: int,
+    start: int,
+    end: int,
+    line: int,
+    col: int
+} /// byte offset of the first character /// byte offset one past the last character
+
+struct Lexer {
+    src: string,
+    len: int,
+    pos: int,
+    line: int,
+    col: int
+}
+
+fn is_ident_start(c: int) -> bool {
+    return c >= 65 && c <= 90 || c >= 97 && c <= 122 || c == 95;
+}
+
+fn is_ident_cont(c: int) -> bool {
+    return c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c == 95;
+}
+
+fn is_digit(c: int) -> bool {
+    return c >= 48 && c <= 57;
+}
+
+fn is_hex(c: int) -> bool {
+    return is_digit(c) || c >= 65 && c <= 70 || c >= 97 && c <= 102;
+}
+
+impl Lexer {
+
+    fn byte(self: *Lexer, at: int) -> int {
+        if at < 0 || at >= self.len {
+            return 0;
+        }
+        return self.src[at] as int;
+    }
+
+    fn bump(self: *Lexer) {
+        if self.pos >= self.len {
+            return;
+        }
+        if self.src[self.pos] == 10 {
+            self.line += 1;
+            self.col = 1;
+        } else {
+            self.col += 1;
+        }
+        self.pos += 1;
+    }
+
+    fn eat(self: *Lexer, c: int) -> bool {
+        if self.pos < self.len && self.src[self.pos] as int == c {
+            self.bump();
+            return true;
+        }
+        return false;
+    }
+
+    fn at(self: *Lexer, c: int) -> bool {
+        return self.pos < self.len && self.src[self.pos] as int == c;
+    }
+
+    fn at2(self: *Lexer, c: int) -> bool {
+        return self.pos + 1 < self.len && self.src[self.pos + 1] as int == c;
+    }
+
+    fn skip_trivia(self: *Lexer) {
+        /// spaces, tabs, CR, LF and `//` comments
+        while self.pos < self.len {
+            c := self.byte(self.pos);
+            if c == 32 || c == 9 || c == 13 || c == 10 {
+                self.bump();
+                continue;
+            }
+            if c == 47 && self.byte(self.pos + 1) == 47 {
+                self.bump();
+                self.bump();
+                while self.pos < self.len && self.byte(self.pos) != 10 {
+                    self.bump();
+                }
+                continue;
+            }
+            break;
+        }
+    }
+
+    fn make(self: *Lexer, kind: int, start: int, line: int, col: int) -> Tok {
+        return Tok { kind: kind, start: start, end: self.pos, line: line, col: col };
+    }
+
+    fn ident_kind(self: *Lexer, start: int) -> int {
+        // the identifier text is a zero-copy slice of the source
+        n := self.pos - start;
+        if n == 2 {
+            if slice_is(self.src, start, "fn") {
+                return T_FN;
+            }
+            if slice_is(self.src, start, "if") {
+                return T_IF;
+            }
+            if slice_is(self.src, start, "in") {
+                return T_IN;
+            }
+            if slice_is(self.src, start, "as") {
+                return T_AS;
+            }
+        } else if n == 3 {
+            if slice_is(self.src, start, "let") {
+                return T_LET;
+            }
+            if slice_is(self.src, start, "for") {
+                return T_FOR;
+            }
+            if slice_is(self.src, start, "use") {
+                return T_USE;
+            }
+        } else if n == 4 {
+            if slice_is(self.src, start, "enum") {
+                return T_ENUM;
+            }
+            if slice_is(self.src, start, "impl") {
+                return T_IMPL;
+            }
+            if slice_is(self.src, start, "test") {
+                return T_TEST;
+            }
+            if slice_is(self.src, start, "else") {
+                return T_ELSE;
+            }
+            if slice_is(self.src, start, "true") {
+                return T_TRUE;
+            }
+        } else if n == 5 {
+            if slice_is(self.src, start, "match") {
+                return T_MATCH;
+            }
+            if slice_is(self.src, start, "defer") {
+                return T_DEFER;
+            }
+            if slice_is(self.src, start, "arena") {
+                return T_ARENA;
+            }
+            if slice_is(self.src, start, "const") {
+                return T_CONST;
+            }
+            if slice_is(self.src, start, "while") {
+                return T_WHILE;
+            }
+            if slice_is(self.src, start, "break") {
+                return T_BREAK;
+            }
+            if slice_is(self.src, start, "false") {
+                return T_FALSE;
+            }
+        } else if n == 6 {
+            if slice_is(self.src, start, "extern") {
+                return T_EXTERN;
+            }
+            if slice_is(self.src, start, "struct") {
+                return T_STRUCT;
+            }
+            if slice_is(self.src, start, "module") {
+                return T_MODULE;
+            }
+            if slice_is(self.src, start, "return") {
+                return T_RETURN;
+            }
+        } else if n == 8 {
+            if slice_is(self.src, start, "continue") {
+                return T_CONTINUE;
+            }
+        }
+        return T_IDENT;
+    }
+
+    fn scan_ident(self: *Lexer) {
+        while self.pos < self.len && is_ident_cont(self.byte(self.pos)) {
+            self.bump();
+        }
+    }
+
+    fn scan_number(self: *Lexer, start: int, line: int, col: int) -> Tok {
+        /// a numeric literal: radix prefix, digits with `_`, fraction, exponent and
+        /// a width suffix. Returns T_ERR when a radix digit is invalid.
+        first := self.byte(start);
+        if first == 48 {
+            p := self.byte(self.pos);
+            radix := 0;
+            if p == 120 || p == 88 {
+                radix = 16;
+            } else if p == 98 || p == 66 {
+                radix = 2;
+            } else if p == 111 || p == 79 {
+                radix = 8;
+            }
+            if radix != 0 {
+                self.bump();
+                digits_start := self.pos;
+                while self.pos < self.len {
+                    c := self.byte(self.pos);
+                    ok := false;
+                    if radix == 16 {
+                        ok = is_hex(c);
+                    } else if radix == 2 {
+                        ok = c == 48 || c == 49;
+                    } else {
+                        ok = c >= 48 && c <= 55;
+                    }
+                    if ok || c == 95 {
+                        self.bump();
+                    } else if is_ident_start(c) {
+
+                        // a suffix (`0xFFi32`) — letters are part of it
+                        self.scan_ident();
+                        break;
+                    } else {
+                        break;
+                    }
+                }
+                if self.pos == digits_start {
+                    return self.make(T_ERR, start, line, col);
+                }
+                // `0b102`: a digit outside the radix followed by more digits
+                c := self.byte(self.pos);
+                if is_digit(c) || is_ident_start(c) {
+                    self.scan_ident();
+                    return self.make(T_ERR, start, line, col);
+                }
+                return self.make(T_INT_SUF, start, line, col);
+            }
+        }
+        // decimal / float
+        is_float := false;
+        has_exp := false;
+        while self.pos < self.len {
+            c := self.byte(self.pos);
+            if is_digit(c) || c == 95 {
+                self.bump();
+                continue;
+            }
+            if c == 46 && !is_float && !has_exp && is_digit(self.byte(self.pos + 1)) {
+                is_float = true;
+                self.bump();
+                continue;
+            }
+            if (c == 101 || c == 69) && !has_exp {
+                n := self.byte(self.pos + 1);
+                if is_digit(n) || (n == 43 || n == 45) && is_digit(self.byte(self.pos + 2)) {
+                    is_float = true;
+                    has_exp = true;
+                    self.bump();
+                    if self.byte(self.pos) == 43 || self.byte(self.pos) == 45 {
+                        self.bump();
+                    }
+                    continue;
+                }
+                break;
+            }
+            break;
+        }
+        // width suffix
+        if is_ident_start(self.byte(self.pos)) {
+            suf_start := self.pos;
+            self.scan_ident();
+            n := self.pos - suf_start;
+            f32suf := n == 3 && slice_is(self.src, suf_start, "f32");
+            f64suf := n == 3 && slice_is(self.src, suf_start, "f64");
+            if is_float && !f32suf && !f64suf {
+                return self.make(T_ERR, start, line, col);
+            }
+            if is_float {
+                return self.make(T_FLOAT_SUF, start, line, col);
+            }
+            if f32suf || f64suf {
+                return self.make(T_FLOAT_SUF, start, line, col);
+            }
+            return self.make(T_INT_SUF, start, line, col);
+        }
+        if is_float {
+            return self.make(T_FLOAT, start, line, col);
+        }
+        return self.make(T_INT, start, line, col);
+    }
+
+    fn scan_string(self: *Lexer, start: int, line: int, col: int) -> Tok {
+        /// a `"string"`: escapes are validated, unterminated strings are errors
+        while self.pos < self.len {
+            c := self.byte(self.pos);
+            if c == 34 {
+                self.bump();
+                return self.make(T_STR, start, line, col);
+            }
+            if c == 10 {
+                return self.make(T_ERR, start, line, col);
+            }
+            if c == 92 {
+                self.bump();
+                e := self.byte(self.pos);
+                if e == 110 || e == 116 || e == 114 || e == 34 || e == 92 || e == 48 {
+                    self.bump();
+                    continue;
+                }
+                return self.make(T_ERR, start, line, col);
+            }
+            self.bump();
+        }
+        return self.make(T_ERR, start, line, col);
+    }
+
+    fn next(self: *Lexer) -> Tok {
+        /// one token, skipping trivia first
+        self.skip_trivia();
+        start := self.pos;
+        line := self.line;
+        col := self.col;
+        if self.pos >= self.len {
+            return Tok { kind: T_EOF, start: start, end: start, line: line, col: col };
+        }
+        c := self.byte(self.pos);
+        self.bump();
+        if c >= 48 && c <= 57 {
+            return self.scan_number(start, line, col);
+        }
+        if is_ident_start(c) {
+            self.scan_ident();
+            return self.make(self.ident_kind(start), start, line, col);
+        }
+        if c == 34 {
+            return self.scan_string(start, line, col);
+        }
+        if c == 40 {
+            return self.make(T_LPAREN, start, line, col);
+        }
+        if c == 41 {
+            return self.make(T_RPAREN, start, line, col);
+        }
+        if c == 123 {
+            return self.make(T_LBRACE, start, line, col);
+        }
+        if c == 125 {
+            return self.make(T_RBRACE, start, line, col);
+        }
+        if c == 44 {
+            return self.make(T_COMMA, start, line, col);
+        }
+        if c == 46 {
+            if self.eat(46) {
+                return self.make(T_DOTDOT, start, line, col);
+            }
+            return self.make(T_DOT, start, line, col);
+        }
+        if c == 91 {
+            return self.make(T_LBRACKET, start, line, col);
+        }
+        if c == 93 {
+            return self.make(T_RBRACKET, start, line, col);
+        }
+        if c == 58 {
+            if self.eat(58) {
+                return self.make(T_DOUBLECOLON, start, line, col);
+            }
+            if self.eat(61) {
+                return self.make(T_DEFINE, start, line, col);
+            }
+            return self.make(T_COLON, start, line, col);
+        }
+        if c == 59 {
+            return self.make(T_SEMICOLON, start, line, col);
+        }
+        if c == 43 {
+            if self.eat(61) {
+                return self.make(T_PLUSEQ, start, line, col);
+            }
+            return self.make(T_PLUS, start, line, col);
+        }
+        if c == 42 {
+            if self.eat(61) {
+                return self.make(T_STAREQ, start, line, col);
+            }
+            return self.make(T_STAR, start, line, col);
+        }
+        if c == 37 {
+            if self.eat(61) {
+                return self.make(T_PERCENTEQ, start, line, col);
+            }
+            return self.make(T_PERCENT, start, line, col);
+        }
+        if c == 45 {
+            if self.eat(62) {
+                return self.make(T_ARROW, start, line, col);
+            }
+            if self.eat(61) {
+                return self.make(T_MINUSEQ, start, line, col);
+            }
+            return self.make(T_MINUS, start, line, col);
+        }
+        if c == 47 {
+            if self.eat(61) {
+                return self.make(T_SLASHEQ, start, line, col);
+            }
+            return self.make(T_SLASH, start, line, col);
+        }
+        if c == 61 {
+            if self.eat(61) {
+                return self.make(T_EQ, start, line, col);
+            }
+            if self.eat(62) {
+                return self.make(T_FATARROW, start, line, col);
+            }
+            return self.make(T_ASSIGN, start, line, col);
+        }
+        if c == 33 {
+            if self.eat(61) {
+                return self.make(T_NEQ, start, line, col);
+            }
+            return self.make(T_BANG, start, line, col);
+        }
+        if c == 124 {
+            if self.eat(124) {
+                return self.make(T_OROR, start, line, col);
+            }
+            return self.make(T_BITOR, start, line, col);
+        }
+        if c == 94 {
+            return self.make(T_BITXOR, start, line, col);
+        }
+        if c == 126 {
+            return self.make(T_BITNOT, start, line, col);
+        }
+        if c == 60 {
+            if self.eat(60) {
+                return self.make(T_SHL, start, line, col);
+            }
+            if self.eat(61) {
+                return self.make(T_LTEQ, start, line, col);
+            }
+            return self.make(T_LT, start, line, col);
+        }
+        if c == 62 {
+            if self.eat(62) {
+                return self.make(T_SHR, start, line, col);
+            }
+            if self.eat(61) {
+                return self.make(T_GTEQ, start, line, col);
+            }
+            return self.make(T_GT, start, line, col);
+        }
+        if c == 38 {
+            if self.eat(38) {
+                return self.make(T_ANDAND, start, line, col);
+            }
+            return self.make(T_AMP, start, line, col);
+        }
+        if c == 63 {
+            return self.make(T_QUESTION, start, line, col);
+        }
+        return self.make(T_ERR, start, line, col);
+    }
+}
+
+/// does `s[start..start+n]` equal `want`?
+fn slice_is(s: string, start: int, want: string) -> bool {
+    n := std::strlen(want);
+    i := 0;
+    while i < n {
+        if s[start + i] != want[i] {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+/// the coarse class the parity test compares: keyword, identifier, number,
+/// float, string, punctuation, eof
+fn kind_class(kind: int) -> string {
+    if kind == T_EOF {
+        return "E";
+    }
+    if kind == T_IDENT {
+        return "I";
+    }
+    if kind == T_INT || kind == T_INT_SUF {
+        return "N";
+    }
+    if kind == T_FLOAT || kind == T_FLOAT_SUF {
+        return "F";
+    }
+    if kind == T_STR {
+        return "S";
+    }
+    if kind >= T_FN && kind <= T_FALSE {
+        return "K";
+    }
+    if kind == T_ERR {
+        return "X";
+    }
+    return "P";
+}
+
+/// `\n`, `\t`, `\\` and `|` escaped so one token is one output line
+fn escape_field(b: *StrBuf, text: string) {
+    i := 0;
+    n := std::strlen(text);
+    while i < n {
+        c := text[i];
+        if c == 92 {
+            std::str_buf_push(b, "\\\\");
+        } else if c == 10 {
+            std::str_buf_push(b, "\\n");
+        } else if c == 13 {
+            std::str_buf_push(b, "\\r");
+        } else if c == 9 {
+            std::str_buf_push(b, "\\t");
+        } else if c == 124 {
+            std::str_buf_push(b, "\\|");
+        } else {
+            std::str_buf_push_char(b, c);
+        }
+        i += 1;
+    }
+}
+
+fn main() -> int {
+    if sys::argc() < 2 {
+        sys::eprintln("usage: lexer <file> [dump]");
+        return 2;
+    }
+    path := sys::arg(1);
+    src := "";
+    if !sys::read_file(path, &src) {
+        sys::eprintln("lexer: cannot read " + path);
+        return 1;
+    }
+    dump := sys::argc() >= 3 && sys::arg(2) == "dump";
+    bench := sys::argc() >= 3 && sys::arg(2) == "bench";
+    if bench {
+        iters := 50;
+        if sys::argc() >= 4 {
+            n := 0;
+            if std::str_parse_int(sys::arg(3), &n) {
+                iters = n;
+            }
+        }
+        if iters < 1 {
+            iters = 1;
+        }
+        t0 := sys::mono_ms();
+        total := 0;
+        k := 0;
+        while k < iters {
+            ts := vec_new[Tok]();
+            lx2 := Lexer { src: src, len: std::strlen(src), pos: 0, line: 1, col: 1 };
+            while true {
+                t2 := lx2.next();
+                if t2.kind == T_ERR {
+                    sys::eprintln("lexer: invalid token while benchmarking");
+                    return 1;
+                }
+                ts.push(t2);
+                if t2.kind == T_EOF {
+                    break;
+                }
+            }
+            total = total + ts.len();
+            k += 1;
+        }
+        elapsed := sys::mono_ms() - t0;
+        bytes := std::strlen(src) * iters;
+        // MB/s with one decimal place, without floating point formatting pain
+        mbps := 0;
+        if elapsed > 0 {
+            mbps = bytes / (elapsed * 1000);
+        }
+        std::println_str(std::int_to_str(iters) + " passes, " + std::int_to_str(total) + " tokens, " + std::int_to_str(elapsed) + " ms, " + std::int_to_str(mbps) + " MB/s");
+        return 0;
+    }
+    toks := vec_new[Tok]();
+    lx := Lexer { src: src, len: std::strlen(src), pos: 0, line: 1, col: 1 };
+    while true {
+        t := lx.next();
+        if t.kind == T_ERR {
+            msg := "lexer: " + std::int_to_str(t.line) + ":" + std::int_to_str(t.col) + ": invalid token near '" + std::str_sub(src, t.start, t.end - t.start) + "'";
+            sys::eprintln(msg);
+            return 1;
+        }
+        toks.push(t);
+        if t.kind == T_EOF {
+            break;
+        }
+    }
+    if !dump {
+        std::println_int(toks.len() - 1);
+        return 0;
+    }
+    out := std::str_buf_new();
+    i := 0;
+    while i < toks.len() {
+        t := toks.get(i);
+        std::str_buf_push(out, std::int_to_str(t.line));
+        std::str_buf_push_char(out, 124);
+        std::str_buf_push(out, std::int_to_str(t.col));
+        std::str_buf_push_char(out, 124);
+        std::str_buf_push(out, std::int_to_str(t.start));
+        std::str_buf_push_char(out, 124);
+        std::str_buf_push(out, std::int_to_str(t.end));
+        std::str_buf_push_char(out, 124);
+        std::str_buf_push(out, kind_class(t.kind));
+        std::str_buf_push_char(out, 124);
+        escape_field(out, std::str_sub(src, t.start, t.end - t.start));
+        std::str_buf_push_char(out, 10);
+        i += 1;
+    }
+    std::print_str(std::str_buf_finish(out));
+    return 0;
+}
