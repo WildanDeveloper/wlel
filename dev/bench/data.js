@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792796529623,
+  "lastUpdate": 1792800796338,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -829,6 +829,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.5,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "5c4c4a7f92c8e8f1f8846742172d9255e263d0e8",
+          "message": "modules: every file is a module, so two files can define the same name — `module geom;` names a file's namespace and a file without the declaration takes its stem (`lib/geom.wlel` -> `geom`), while the file you run/check/build is the root module whose items stay unqualified, so `fn main` is still the C entry point and a single-file program is untouched; a module's items are reached through it — `geom::add(...)`, `geom::Vec2 { ... }`, `geom::Vec2` in an annotation, `impl geom::Vec2`, and `geom::Circle(1.0)` / `geom::Circle(r) => ...` for enum variants — with declarations mangled to `geom__add` / `geom__Vec2` in one pass at the end of the pipeline (`::` is not a valid C identifier character, and doing it once means it cannot be forgotten), which is what makes `examples/lib/shapes.wlel` and `examples/lib/units.wlel` both define `helper` without colliding; imports gained the forms the design needs (`use \"lib/geom.wlel\";` binds the module, `as g` renames it, `{ add, Vec2 }` also brings names into scope, `{ add as plus }` renames one, `{ * }` imports every export, `use geom;` names a module or a package dependency) while staying recursive and diamond-deduplicated — one module merged once however many files import it; collisions are deliberate rather than silent: a bare name resolves to the current module first and then to imports, two imported modules providing it is an error naming both candidates and the fix (`'helper' is ambiguous — it could be `geom::helper` or `text::helper`; qualify it, or import the one you want with `use \"…\" { helper };``), an explicit `{ … }` import beats a name another module merely makes available, a name from a module that was never imported names that module (`'hi' is in module 'greetx'; write greetx::hi or add `use greetx;``), and a module reaching into another module's items without importing them is rejected — the visibility rule that makes the namespace real; the loader builds the table in one place (`src/modules.rs`: exports before qualification so `add` maps to `geom::add`, `qualify_program_types` for annotations/literals/impl targets, `check_unique` for duplicate and reserved `std`/`sys` names) and the checker resolves through it in exactly the places a name can appear (calls, identifiers, struct literals, type strings, patterns, `sys::thread` workers, sort comparators), so the LSP, `wlel fmt`, `wlel doc` and the QBE path all see the same resolved program; project dependencies are now modules named by their package (`use geom;` then `geom::mk(...)`) instead of being flattened, which is the change self-hosting needed; three real bugs the work surfaced: method tables were keyed by the qualified type but looked up by the short method name, `canon_type` split `geom::Vec2` at the `::` and emitted two broken identifiers, and a diamond import returned an empty program so the second `use` of one file could not see its exports; tree-sitter gained `module_declaration`, named/qualified imports, qualified types and qualified struct-literal names, with a corpus case and highlight queries, and all 34 `.wlel` files in the repo parse with zero ERROR/MISSING; spec §9 rewritten (files and modules, resolution order, the import table) and §16's grammar extended; version 1.3.0 -> 1.4.0; 619 cargo tests green (29 new module tests: same name in two modules, ambiguity, qualified access, import lists/aliases/globs, module-local visibility, nested and diamond imports, enums/methods/generics, tests in imported modules, project dependencies, reserved and duplicate names, fmt round-trip, C mangling, and the pre-existing examples), clippy -D warnings clean, wlel fmt canonical, docs site renders",
+          "timestamp": "2026-10-24T00:12:32Z",
+          "tree_id": "1c0c0ebc51d7304c3ba54fbe06f12869772b0075",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/5c4c4a7f92c8e8f1f8846742172d9255e263d0e8"
+        },
+        "date": 1792800796018,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.6,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 67,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.8,
             "unit": "ms"
           }
         ]
