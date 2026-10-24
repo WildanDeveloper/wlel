@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792806738626,
+  "lastUpdate": 1792808034316,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1093,6 +1093,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "76b7966c76b836bdc3204a5d1e5ce86a942e24d8",
+          "message": "self-hosting: the lexer is now written in Wlel and proven identical to the Rust one — `selfhost/lexer.wlel` is a complete lexer (trivia and `//` comments, decimal/hex/binary/octal literals with `_` separators, fractions and exponents, width suffixes, string escapes, every operator including the multi-character ones, all keywords including `module` and `const`, and errors with line:col for a bad token, a bad radix digit, an unterminated string and an unknown suffix); the design is a deliberate departure from the Rust lexer for speed — tokens are zero-copy (`{ kind, start, end, line, col }`, byte offsets into the source, so nothing is allocated per token and the text is sliced on demand; lexing allocates one `Vec[Tok]`), and kinds are `const` integers instead of an enum with payloads, which is exactly what `const` and the amortized builder were added for; measured 100 passes over the 37 KB `flagship/json.wlel` (7 257 tokens each) in 29 ms = 128 MB/s, with a guard test that fails below 10 MB/s so a regression to per-token allocation or quadratic trivia scanning is caught; `tests/selfhost_tests.rs` is the parity gate (6 tests): it builds the Wlel lexer, runs it with `dump` over every `.wlel` file in the repository (40 today — examples, flagships, fuzz corpus, selfhost) and compares token-for-token against `wlel::lexer` on boundaries, line/column, class (K/I/N/F/S/P/E) and text, plus a token-count check, ten tricky cases (radix and suffixed literals, escapes, `a::b::c`, `x..y`, `<<=`, comments, match arms, `const`/`module`, every operator), invalid-token rejection, and throughput; `selfhost/README.md` documents the staging plan (lexer -> parser -> checker -> codegen, each gated by parity before the next starts) and `wlex <file> [dump|bench [n]]` is the lexer's CLI; the Rust compiler is unchanged and still the one that ships; 655 cargo tests green (6 new), clippy -D warnings clean, wlel fmt canonical, docs site renders; version 1.6.0 -> 1.7.0",
+          "timestamp": "2026-10-24T02:12:31Z",
+          "tree_id": "495d06acc9c0514c3ba218e33d048f9fa0b2e25c",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/76b7966c76b836bdc3204a5d1e5ce86a942e24d8"
+        },
+        "date": 1792808033425,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.6,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 67,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.9,
             "unit": "ms"
           }
         ]
