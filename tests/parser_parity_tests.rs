@@ -490,53 +490,50 @@ fn rust_dump(src: &str) -> Result<String, String> {
 
 // ---- tests ----------------------------------------------------------------
 
-struct Case {
-    dir: PathBuf,
+/// Build the self-hosted parser once for the whole test binary: building it
+/// per file turned the parity gate into 41 compiler invocations.
+fn parser_binary() -> Option<&'static Path> {
+    static BINARY: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    BINARY
+        .get_or_init(|| {
+            if !have("cc") && !have("gcc") && !have("clang") {
+                eprintln!("skipping: no C compiler on PATH");
+                return None;
+            }
+            let out = std::env::temp_dir().join(format!(
+                "wlel_selfhost_parser_{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_file(&out);
+            let build = Command::new(env!("CARGO_BIN_EXE_wlel"))
+                .args(["build", "selfhost/parser.wlel", "-O2", "-o"])
+                .arg(&out)
+                .current_dir(root())
+                .output()
+                .expect("spawn wlel build");
+            assert!(
+                build.status.success(),
+                "the self-hosted parser does not build:\n{}{}",
+                String::from_utf8_lossy(&build.stdout),
+                String::from_utf8_lossy(&build.stderr)
+            );
+            Some(out)
+        })
+        .as_deref()
 }
 
-impl Case {
-    fn new(name: &str) -> Case {
-        let dir = std::env::temp_dir().join(format!(
-            "wlel_parse_{}_{}",
-            std::process::id(),
-            name.replace(' ', "_")
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("create temp dir");
-        Case { dir }
-    }
-
-    fn dump(&self, name: &str) -> String {
-        let out = Command::new(env!("CARGO_BIN_EXE_wlel"))
-            .args(["build", "selfhost/parser.wlel", "-O2", "-o"])
-            .arg(self.dir.join("wparse"))
-            .current_dir(root())
-            .output()
-            .expect("build the self-hosted parser");
-        assert!(
-            out.status.success(),
-            "build failed:\n{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let run = Command::new(self.dir.join("wparse"))
-            .arg(name)
-            .arg("dump")
-            .output()
-            .expect("run the self-hosted parser");
-        assert!(
-            run.status.success(),
-            "parse failed:\n{}",
-            String::from_utf8_lossy(&run.stderr)
-        );
-        String::from_utf8_lossy(&run.stdout).into_owned()
-    }
-}
-
-impl Drop for Case {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
-    }
+fn wlel_dump(bin: &Path, file: &str) -> String {
+    let run = Command::new(bin)
+        .arg(file)
+        .arg("dump")
+        .output()
+        .expect("run the self-hosted parser");
+    assert!(
+        run.status.success(),
+        "the self-hosted parser rejected {file}:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    String::from_utf8_lossy(&run.stdout).into_owned()
 }
 
 fn first_difference(wlel: &str, rust: &str) -> String {
@@ -565,7 +562,7 @@ fn the_self_hosted_parser_matches_the_rust_one() {
         eprintln!("skipping: no C compiler on PATH");
         return;
     }
-    let c = Case::new("parity");
+    let Some(bin) = parser_binary() else { return };
     let files = sources();
     let mut failures = Vec::new();
     for file in &files {
@@ -574,7 +571,7 @@ fn the_self_hosted_parser_matches_the_rust_one() {
             Ok(d) => d,
             Err(_) => continue, // files the Rust parser itself rejects
         };
-        let actual = c.dump(file.to_str().unwrap());
+        let actual = wlel_dump(bin, file.to_str().unwrap());
         if actual != expected {
             failures.push(format!("{}: {}", file.display(), first_difference(&actual, &expected)));
         }
@@ -594,15 +591,8 @@ fn the_self_hosted_parser_reports_throughput() {
         eprintln!("skipping: no C compiler on PATH");
         return;
     }
-    let c = Case::new("bench");
-    let out = Command::new(env!("CARGO_BIN_EXE_wlel"))
-        .args(["build", "selfhost/parser.wlel", "-O2", "-o"])
-        .arg(c.dir.join("wparse"))
-        .current_dir(root())
-        .output()
-        .expect("build");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let run = Command::new(c.dir.join("wparse"))
+    let Some(bin) = parser_binary() else { return };
+    let run = Command::new(bin)
         .args([root().join("flagship/json.wlel").to_str().unwrap(), "bench", "20"])
         .output()
         .expect("run");
