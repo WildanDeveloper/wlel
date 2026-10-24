@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792804867600,
+  "lastUpdate": 1792806738626,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1049,6 +1049,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 2.9,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "6bff295eafbe0277123208e24b153336bad5ffa3",
+          "message": "self-hosting prep: constants, function pointers and a linear string builder — the last three gaps the audit found; `const NAME: type = expr;` is folded at compile time and substituted at every use (a lookup table costs nothing at runtime), may be defined from earlier constants (`const DOUBLE: int = LIMIT * 2;`) and crossed modules (`limits::MAX`, or the bare name when imported), is printed by `wlel fmt`, and rejects a cycle, a type mismatch and a non-foldable value (a call/index) with specific messages instead of failing later; function pointers (`fn(int, string) -> float`) are values from top-level function names (`f := inc;`, `apply(inc, 10)`), calls through them are indirect (`f(x)`), they work as parameters, locals, struct fields and return types, a function-pointer field is callable with dot syntax (`obj.cb(x)`) through a new `CallExpr` node, the emitted C gets the declarator right (`long long (*pick(long long))(long long)` — the trailing parameter list was the bug), calling a non-function and a wrong arity are compile errors, and a function pointer as a generic argument is rejected with the wrapper-struct form and the reason (`Vec[T]` stores `T*`, and `*fn(...)` is a pointer to a function pointer); `std::str_buf_*` (new, push, push_int, push_float, push_char, len, finish) is the amortized append path — 20 000 appends take milliseconds where `s = s + piece` copied the whole buffer each time and took seconds, with `finish` freeing the builder; the tree-sitter grammar gained `const_declaration` and `function_type` and all 34 `.wlel` files still parse with zero ERROR/MISSING; spec §6.11 documents constants and §16's type grammar the function type and its restriction, README has a Constants-and-function-pointers section, and `examples/constants.wlel` + `examples/function_pointers.wlel` ship as runnable examples; 649 cargo tests green (15 new lang_ext tests: const folding/chains/modules/cycles/type mismatch/non-foldable, fn pointers as values/params/returns/fields/dot-calls plus the two error cases, and the builder's output/length/linearity), clippy -D warnings clean, wlel fmt canonical, docs site renders; version 1.5.1 -> 1.6.0",
+          "timestamp": "2026-10-24T01:50:57Z",
+          "tree_id": "a78ae4ce1974e066757c39cd6f8175fe1f229756",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/6bff295eafbe0277123208e24b153336bad5ffa3"
+        },
+        "date": 1792806737857,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 12.8,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 56,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 5,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3,
             "unit": "ms"
           }
         ]
