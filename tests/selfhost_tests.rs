@@ -138,36 +138,45 @@ fn rust_dump(src: &str) -> Vec<String> {
         .collect()
 }
 
-fn build_lexer(tag: &str) -> Option<PathBuf> {
-    if !have("cc") && !have("gcc") && !have("clang") {
-        eprintln!("skipping: no C compiler on PATH");
-        return None;
-    }
-    // one binary per test: the tests run in parallel and each deletes its own
-    let out = std::env::temp_dir().join(format!(
-        "wlel_selfhost_lexer_{}_{}",
-        std::process::id(),
-        tag
-    ));
-    let _ = fs::remove_file(&out);
-    let build = Command::new(env!("CARGO_BIN_EXE_wlel"))
-        .args(["build", "selfhost/lexer.wlel", "-O2", "-o"])
-        .arg(&out)
-        .current_dir(root())
-        .output()
-        .expect("spawn wlel build");
-    assert!(
-        build.status.success(),
-        "the self-hosted lexer does not build:\n{}{}",
-        String::from_utf8_lossy(&build.stdout),
-        String::from_utf8_lossy(&build.stderr)
-    );
-    Some(out)
+/// Build the self-hosted lexer once for the whole test binary.
+///
+/// Building it per test would compile the compiler and the generated C four
+/// times, which is slow on a cold CI runner (and macOS process spawn is not
+/// cheap either). The binary lives in the temp directory for the process's
+/// lifetime.
+fn lexer_binary() -> Option<&'static Path> {
+    static BINARY: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    BINARY
+        .get_or_init(|| {
+            if !have("cc") && !have("gcc") && !have("clang") {
+                eprintln!("skipping: no C compiler on PATH");
+                return None;
+            }
+            let out = std::env::temp_dir().join(format!(
+                "wlel_selfhost_lexer_{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_file(&out);
+            let build = Command::new(env!("CARGO_BIN_EXE_wlel"))
+                .args(["build", "selfhost/lexer.wlel", "-O2", "-o"])
+                .arg(&out)
+                .current_dir(root())
+                .output()
+                .expect("spawn wlel build");
+            assert!(
+                build.status.success(),
+                "the self-hosted lexer does not build:\n{}{}",
+                String::from_utf8_lossy(&build.stdout),
+                String::from_utf8_lossy(&build.stderr)
+            );
+            Some(out)
+        })
+        .as_deref()
 }
 
 #[test]
 fn the_self_hosted_lexer_matches_the_rust_one() {
-    let Some(binary) = build_lexer("parity") else {
+    let Some(binary) = lexer_binary() else {
         return;
     };
     let files = sources();
@@ -177,7 +186,7 @@ fn the_self_hosted_lexer_matches_the_rust_one() {
     for file in &files {
         let src = fs::read_to_string(file).expect("read source");
         let expected = rust_dump(&src);
-        let out = Command::new(&binary)
+        let out = Command::new(binary)
             .arg(file)
             .arg("dump")
             .output()
@@ -214,7 +223,6 @@ fn the_self_hosted_lexer_matches_the_rust_one() {
             failures.push(format!("{}: {detail}", file.display()));
         }
     }
-    let _ = fs::remove_file(&binary);
     assert!(
         failures.is_empty(),
         "the self-hosted lexer disagrees with the Rust lexer on {} of {} files:\n{}",
@@ -226,11 +234,11 @@ fn the_self_hosted_lexer_matches_the_rust_one() {
 
 #[test]
 fn the_self_hosted_lexer_reports_the_token_count() {
-    let Some(binary) = build_lexer("count") else {
+    let Some(binary) = lexer_binary() else {
         return;
     };
     let file = root().join("examples/kitchen.wlel");
-    let out = Command::new(&binary)
+    let out = Command::new(binary)
         .arg(&file)
         .output()
         .expect("run the self-hosted lexer");
@@ -246,14 +254,14 @@ fn the_self_hosted_lexer_reports_the_token_count() {
 
 #[test]
 fn the_self_hosted_lexer_rejects_a_bad_token() {
-    let Some(binary) = build_lexer("bad") else {
+    let Some(binary) = lexer_binary() else {
         return;
     };
     let dir = std::env::temp_dir().join(format!("wlel_selfhost_bad_{}", std::process::id()));
     let _ = fs::create_dir_all(&dir);
     let file = dir.join("bad.wlel");
     fs::write(&file, "fn main() -> int { ` }\n").expect("write");
-    let out = Command::new(&binary)
+    let out = Command::new(binary)
         .arg(&file)
         .output()
         .expect("run the self-hosted lexer");
@@ -272,33 +280,36 @@ fn the_self_hosted_lexer_is_fast_enough() {
     // something quadratic. The flagship JSON source is the largest file in
     // the repository; lexing it 20 times must stay well under a second of
     // wall clock on any machine.
-    let Some(binary) = build_lexer("perf") else {
+    let Some(binary) = lexer_binary() else {
         return;
     };
     let file = root().join("flagship/json.wlel");
-    let start = std::time::Instant::now();
-    for _ in 0..20 {
-        let out = Command::new(&binary)
-            .arg(&file)
-            .output()
-            .expect("run the self-hosted lexer");
-        assert!(out.status.success());
-    }
-    let elapsed = start.elapsed();
-    let _ = fs::remove_file(&binary);
+    // in-process benchmark: process spawn dominates on some hosts, so the
+    // lexer reports its own timing and the guard reads that
+    let out = Command::new(binary)
+        .args([file.to_str().unwrap(), "bench", "50"])
+        .output()
+        .expect("run the self-hosted lexer");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    let elapsed_ms: u64 = text
+        .split(", ")
+        .find_map(|part| part.strip_suffix(" ms"))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(u64::MAX);
     assert!(
-        elapsed.as_secs() < 20,
-        "lexing flagship/json.wlel 20 times took {elapsed:?} — the lexer regressed"
+        elapsed_ms < 5_000,
+        "lexing flagship/json.wlel 50 times took {elapsed_ms} ms — the lexer regressed: {text}"
     );
 }
 
 #[test]
 fn the_self_hosted_lexer_reports_throughput() {
-    let Some(binary) = build_lexer("bench") else {
+    let Some(binary) = lexer_binary() else {
         return;
     };
     let file = root().join("flagship/json.wlel");
-    let out = Command::new(&binary)
+    let out = Command::new(binary)
         .args([file.to_str().unwrap(), "bench", "20"])
         .output()
         .expect("run the self-hosted lexer");
@@ -315,7 +326,7 @@ fn the_self_hosted_lexer_reports_throughput() {
 
 #[test]
 fn the_self_hosted_lexer_agrees_on_the_tricky_cases() {
-    let Some(binary) = build_lexer("tricky") else {
+    let Some(binary) = lexer_binary() else {
         return;
     };
     let cases = [
@@ -337,7 +348,7 @@ fn the_self_hosted_lexer_agrees_on_the_tricky_cases() {
         let file = dir.join(format!("case{i}.wlel"));
         fs::write(&file, src).expect("write");
         let expected = rust_dump(src);
-        let out = Command::new(&binary)
+        let out = Command::new(binary)
             .arg(&file)
             .arg("dump")
             .output()
@@ -355,6 +366,5 @@ fn the_self_hosted_lexer_agrees_on_the_tricky_cases() {
         }
     }
     let _ = fs::remove_dir_all(&dir);
-    let _ = fs::remove_file(&binary);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
