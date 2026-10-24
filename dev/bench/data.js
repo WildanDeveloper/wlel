@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792808034316,
+  "lastUpdate": 1792808475632,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1137,6 +1137,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.9,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "742b5f5101da770e2403d2fffbc8ec69b6e876c3",
+          "message": "self-hosting: build the lexer once per test binary and measure throughput in-process — the macOS runner failed the perf guard because each of the four tests rebuilt the compiler + generated C and macOS process spawn is not cheap, so the binary is now built once behind a `OnceLock` for the whole test binary, and the guard reads the lexer's own `bench` output (50 passes, milliseconds) instead of wall-clocking 20 spawns; the borrows clippy flagged while doing it are fixed; 655 cargo tests green, clippy -D warnings clean",
+          "timestamp": "2026-10-24T02:20:40Z",
+          "tree_id": "3f4adaabf651f2e386809abca4ad470fd2782c60",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/742b5f5101da770e2403d2fffbc8ec69b6e876c3"
+        },
+        "date": 1792808474917,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 11.3,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 57,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 5,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.1,
             "unit": "ms"
           }
         ]
