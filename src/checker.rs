@@ -1339,6 +1339,12 @@ impl Checker {
         if consts.is_empty() {
             return Ok(());
         }
+        let mut seen: FSet<String> = FSet::default();
+        for c in consts {
+            if !seen.insert(c.name.clone()) {
+                return err_at(c.span, format!("duplicate const '{}'", c.name));
+            }
+        }
         let names: FSet<String> = consts
             .iter()
             .flat_map(|c| {

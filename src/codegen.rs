@@ -157,10 +157,16 @@ fn mangle_expr(e: &mut Expr) {
             for a in args.iter_mut() {
                 mangle_expr(a);
             }
-            // internal helpers carry type/function *names* as string
+            // A few internal helpers carry type/function *names* as string
             // arguments (`_wlel_sort_<elem>`, thread entry points, channel
-            // element types); they become C identifiers, so they mangle too
-            if n.starts_with("_wlel_") {
+            // element types); they become C identifiers, so they mangle too.
+            // This must be a whitelist: `_wlel_strcat` takes ordinary strings,
+            // and mangling those would rewrite `"::"` to `"__"` in user data.
+            let meta_args = matches!(
+                n.as_str(),
+                "_wlel_sort" | "_wlel_bsearch" | "_wlel_thread_spawn" | "_wlel_chan_new"
+            );
+            if meta_args {
                 for a in args.iter_mut() {
                     if let ExprKind::Str(s) = &mut a.node {
                         *s = mt(s);

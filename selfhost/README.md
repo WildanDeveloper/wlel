@@ -7,7 +7,7 @@ implementation before the next one starts.
 | Stage | Source | Gate |
 |---|---|---|
 | lexer | `lexer.wlel` | `tests/selfhost_tests.rs` — token-for-token parity on every `.wlel` file in the repository |
-| parser | planned | same shape: AST dump parity |
+| parser | `parser.wlel` | `tests/parser_parity_tests.rs` — AST dump parity on every `.wlel` file |
 | checker | planned | diagnostics parity |
 | codegen | planned | generated C diff parity |
 
@@ -57,6 +57,39 @@ wlex <file> bench [n]    # n passes in-process, prints MB/s
 (punctuation), `E` (eof). The test builds the Wlel lexer, runs it over every
 source in the repository, and compares boundaries, line/column, class and
 text against `wlel::lexer` — 40 files today.
+
+## The parser
+
+`parser.wlel` is a complete recursive-descent parser for the language: items
+(`module`, `use` with aliases and import lists, `const`, `struct`, `enum`,
+`impl`, `extern`, `fn`, `test`), statements, all expression forms with the
+reference precedence table, `match`, patterns, struct literals, generic
+calls, `new`/`wlel_sizeof`/`wlel_arena`, function-pointer types, and the
+suffixed-literal rewrite (`10u8` becomes a cast, exactly as the Rust parser
+records it).
+
+It is a **flat arena**: one `Vec[Node]`, children are indices, `next` links
+siblings, and text is a slice of the source. No node is heap-allocated
+individually, which is what makes the tree cheap to build and cheap for the
+checker to walk later.
+
+```
+$ ./wparse flagship/json.wlel bench 50
+20 passes, 79300 nodes, 20 ms, 37 MB/s
+```
+
+The parity gate builds the parser, dumps the tree for every source in the
+repository, and compares it line for line against a Rust-side dumper of
+`wlel::ast` — 41 files, item order, node shapes, operator codes, type
+spellings and literal spellings included.
+
+### Usage
+
+```sh
+wparse <file>            # node count (or the parse error, with line:col)
+wparse <file> dump       # canonical AST, one node per line
+wparse <file> bench [n]  # n in-process passes, prints MB/s
+```
 
 ## Why parity first
 

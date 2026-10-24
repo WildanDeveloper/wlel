@@ -6,6 +6,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.8.0] — 2026-10-24
+
+The parser joins the lexer: the front end of the compiler is now written in
+Wlel and proven identical to the Rust one, file by file.
+
+### Added
+
+- **`selfhost/parser.wlel`** — a complete recursive-descent parser: items
+  (`module`, `use` with `as` and import lists, `const`, `struct`, `enum`,
+  `impl`, `extern`, `fn`, `test`), every statement form, all expression forms
+  with the reference precedence table, `match` and patterns, struct literals,
+  generic calls, `new`/`wlel_sizeof`/`wlel_arena`, function-pointer types, and
+  the suffixed-literal rewrite (`10u8` parses as a cast, as the Rust AST
+  records it). It reuses `selfhost/lexer.wlel` as a module, so the whole front
+  end is Wlel.
+- **Flat node arena** — the tree is one `Vec[Node]` with index children and
+  `next` sibling links, and token text is a slice of the source. No per-node
+  allocation; 79 300 nodes for `flagship/json.wlel` in one vector.
+- **`tests/parser_parity_tests.rs`** — builds the Wlel parser, dumps the tree
+  for **every** `.wlel` file in the repository (41 today) and compares it line
+  for line against a Rust-side dumper of `wlel::ast`: item order, node shapes,
+  operator codes, type spellings and literal spellings. Plus a throughput
+  guard (`37 MB/s`, fails below 3).
+- **`wparse <file> [dump|bench [n]]`** — node count, canonical AST dump, and an
+  in-process benchmark.
+
+### Fixed
+
+- **Codegen mangled user strings.** The module-name mangling pass rewrote
+  `"::"` to `"__"` inside *any* string argument of an `_wlel_*` helper, so
+  `_wlel_strcat(a, "::")` silently produced `"__"` in the user's data. It now
+  applies only to the helpers that really carry symbol names (`_wlel_sort`,
+  `_wlel_bsearch`, `_wlel_thread_spawn`, `_wlel_chan_new`). Found by the parser
+  parity dump.
+- **Duplicate `const` names were accepted.** Two `const X` declarations in one
+  module silently kept the last value; the checker now reports
+  `duplicate const 'X'`. Found while the self-hosted parser had two constants
+  with the same name.
+
+### Changed
+
+- Version 1.7.0 -> 1.8.0 (additive; the Rust compiler is still the one that
+  ships).
+
 ## [1.7.0] — 2026-10-24
 
 Self-hosting begins: the lexer is now written in Wlel, and it is proven
