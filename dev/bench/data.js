@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792803216294,
+  "lastUpdate": 1792803794539,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -917,6 +917,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.3,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "00548d4de31205f604f1103e47dd87fb52a4e6a4",
+          "message": "host runtime: fix the Windows build of the new sys:: layer — MinGW's `_mkdir` lives in `<direct.h>` and `_access` in `<io.h>`, neither of which was included, so every program that touched `sys::mkdir` failed to compile on Windows (\"implicit declaration of function '_mkdir'\") and took six host tests down with it; the runtime now includes the right headers per platform (`direct.h`/`io.h` on Windows, `sys/wait.h`/`sys/stat.h`/`dirent.h`/`unistd.h` elsewhere), and the `a_program_can_drive_the_c_compiler` test picks the host's C compiler (`gcc` on Windows, `cc` elsewhere) and skips cleanly when neither is on PATH instead of hardcoding `cc`; 634 cargo tests green, clippy -D warnings clean",
+          "timestamp": "2026-10-24T01:02:39Z",
+          "tree_id": "95b7a9ae5abbea7d235f5c4bf5a11a564961d35a",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/00548d4de31205f604f1103e47dd87fb52a4e6a4"
+        },
+        "date": 1792803793800,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 10.5,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 58,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 4,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3,
             "unit": "ms"
           }
         ]
