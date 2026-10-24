@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792818692589,
+  "lastUpdate": 1792820387517,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1357,6 +1357,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.1,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "9e1a3ee43fa7e9161b2eb4471dae74428f7f36d8",
+          "message": "self-hosting: the checker is now written in Wlel and proven against the Rust one — `selfhost/checker.wlel` walks the parser's flat node arena and decides well-typedness: scopes and shadowing, literal widths and suffixes, arithmetic and comparison with the mixed-width rules (`wider`), bitwise and unary operators, casts, calls and arity (with `-1` for variadic runtime builtins), struct fields including `p.x` on a `*S`, indexing where a string indexes to a byte, `let`/assignment/`return` compatibility, `if`/`while` conditions, function signatures, `match` arms with pattern binding (`_` discards, a bare variant name is a payload-less pattern), enum construction, generic signatures with `T` substitution (`id[int](x)`, `Box[T]` -> `Box[int]`), and the `std::`/`sys::` prelude; it reads `lib/std.wlel` the way the Rust checker splices it, so `std::` names come from real declarations rather than a hand-written list; `tests/checker_parity_tests.rs` asks both checkers about every `.wlel` file in the repository and compares their first diagnostic `file:line:col: message` exactly, pins twenty broken programs against the same output, carries a `KNOWN_GAPS` ratchet (twenty constructs the stage does not cover yet, each with a reason — the test fails when one starts agreeing so a fixed gap cannot be forgotten), and guards throughput; 24 MB/s over `flagship/json.wlel` (79 300 nodes, 20 full checks in 30 ms); `lib/std.wlel` is now a real file included with `include_str!` (same bytes compiled, but the self-hosted stages and the editor tooling can read it); three real bugs fell out of the work and are fixed: types were compared by index so two occurrences of `int` were unequal (`expected int, found int`), `match` was never typed at all, and `arg_types` returned a pointer to a local (stack-use-after-return, found with ASan); diagnostics now match the Rust checker down to the span, which meant learning that the Rust AST spans a binary expression from its left operand and a field expression from its receiver; 660 cargo tests green (3 new), clippy -D warnings clean, wlel fmt canonical, docs site renders; version 1.8.1 -> 1.9.0",
+          "timestamp": "2026-10-24T05:38:15Z",
+          "tree_id": "096bcdd3c83fda13592d96b9f8deb041e3f68cc7",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/9e1a3ee43fa7e9161b2eb4471dae74428f7f36d8"
+        },
+        "date": 1792820386320,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 17.1,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 76,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.8,
             "unit": "ms"
           }
         ]
