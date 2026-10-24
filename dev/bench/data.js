@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792817619212,
+  "lastUpdate": 1792818505725,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1269,6 +1269,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 4.1,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "e5c06f671ebe99389eca001a6f8c1d90c27854f5",
+          "message": "release: v1.8.1 — v1.8.0 was tagged before the parser performance fix, so its archives shipped the parser that copied every name into a `String` (2 MB/s on the Windows runner against 37 MB/s on Linux); this tag carries the source-slice version (53 MB/s on flagship/json.wlel) plus the version bump and the changelog entry; 657 cargo tests green, clippy -D warnings clean",
+          "timestamp": "2026-10-24T05:07:39Z",
+          "tree_id": "192f607bf75790b5b1169b0d560e6892c90d8cc7",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/e5c06f671ebe99389eca001a6f8c1d90c27854f5"
+        },
+        "date": 1792818504505,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 18.1,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 69,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 8,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.3,
             "unit": "ms"
           }
         ]
