@@ -132,56 +132,56 @@ fn option_unwrap_or[T](o: Option[T], fallback: T) -> T {
 // internals and existing programs call them directly.
 impl Result[T, E] {
 
+    /// true when this Result is `Ok`
     fn is_ok(self) -> bool {
-        /// true when this Result is `Ok`
         return result_is_ok(self);
     }
 
+    /// true when this Result is `Err`
     fn is_err(self) -> bool {
-        /// true when this Result is `Err`
         return result_is_err(self);
     }
 
+    /// the success payload; panics when this is an `Err`
     fn unwrap(self) -> T {
-        /// the success payload; panics when this is an `Err`
         return result_unwrap(self);
     }
 
+    /// the success payload, or `fallback` when this is an `Err`
     fn unwrap_or(self, fallback: T) -> T {
-        /// the success payload, or `fallback` when this is an `Err`
         return result_unwrap_or(self, fallback);
     }
 
+    /// the success payload as an Option (None on `Err`)
     fn ok(self) -> Option[T] {
-        /// the success payload as an Option (None on `Err`)
         return result_ok(self);
     }
 
+    /// the error payload as an Option (None on `Ok`)
     fn err(self) -> Option[E] {
-        /// the error payload as an Option (None on `Ok`)
         return result_err(self);
     }
 }
 
 impl Option[T] {
 
+    /// true when this Option is `Some`
     fn is_some(self) -> bool {
-        /// true when this Option is `Some`
         return option_is_some(self);
     }
 
+    /// true when this Option is `None`
     fn is_none(self) -> bool {
-        /// true when this Option is `None`
         return option_is_none(self);
     }
 
+    /// the payload; panics when this is `None`
     fn unwrap(self) -> T {
-        /// the payload; panics when this is `None`
         return option_unwrap(self);
     }
 
+    /// the payload, or `fallback` when this is `None`
     fn unwrap_or(self, fallback: T) -> T {
-        /// the payload, or `fallback` when this is `None`
         return option_unwrap_or(self, fallback);
     }
 }
@@ -275,33 +275,33 @@ fn vec_clear[T](v: *Vec[T]) {
 
 impl Vec[T] {
 
+    /// append `x` to the end
     fn push(self: *Vec[T], x: T) {
-        /// append `x` to the end
         vec_push(self, x);
     }
 
+    /// remove and return the last element (asserts when empty)
     fn pop(self: *Vec[T]) -> T {
-        /// remove and return the last element (asserts when empty)
         return vec_pop(self);
     }
 
+    /// element at index `i` (asserts on out-of-bounds)
     fn get(self: *Vec[T], i: int) -> T {
-        /// element at index `i` (asserts on out-of-bounds)
         return vec_get(self, i);
     }
 
+    /// overwrite the element at index `i` (asserts on out-of-bounds)
     fn set(self: *Vec[T], i: int, x: T) {
-        /// overwrite the element at index `i` (asserts on out-of-bounds)
         vec_set(self, i, x);
     }
 
+    /// number of elements
     fn len(self: *Vec[T]) -> int {
-        /// number of elements
         return vec_len(self);
     }
 
+    /// drop all elements (capacity is kept)
     fn clear(self: *Vec[T]) {
-        /// drop all elements (capacity is kept)
         vec_clear(self);
     }
 }
@@ -499,38 +499,38 @@ fn map_clear[K, V](m: *HashMap[K, V]) {
 
 impl HashMap[K, V] {
 
+    /// insert or overwrite `key -> val`
     fn set(self: *HashMap[K, V], key: K, val: V) {
-        /// insert or overwrite `key -> val`
         map_set(self, key, val);
     }
 
+    /// value stored under `key` (asserts when the key is absent)
     fn get(self: *HashMap[K, V], key: K) -> V {
-        /// value stored under `key` (asserts when the key is absent)
         return map_get(self, key);
     }
 
+    /// value stored under `key`, or `fallback` when absent
     fn get_or(self: *HashMap[K, V], key: K, fallback: V) -> V {
-        /// value stored under `key`, or `fallback` when absent
         return map_get_or(self, key, fallback);
     }
 
+    /// true when `key` is present
     fn has(self: *HashMap[K, V], key: K) -> bool {
-        /// true when `key` is present
         return map_has(self, key);
     }
 
+    /// remove `key`; true when it was present
     fn del(self: *HashMap[K, V], key: K) -> bool {
-        /// remove `key`; true when it was present
         return map_del(self, key);
     }
 
+    /// all live keys in table order (unspecified)
     fn keys(self: *HashMap[K, V]) -> Vec[K] {
-        /// all live keys in table order (unspecified)
         return map_keys(self);
     }
 
+    /// drop all entries (capacity is kept)
     fn clear(self: *HashMap[K, V]) {
-        /// drop all entries (capacity is kept)
         map_clear(self);
     }
 }

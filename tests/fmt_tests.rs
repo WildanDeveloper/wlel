@@ -417,6 +417,12 @@ fn field_doc_comments_stay_inside_the_type_body() {
     assert!(out.contains("    /// first\n    A(int),"), "{out}");
     assert!(out.contains("    /// second\n    B\n"), "{out}");
 
+    // a `///` above a method in an `impl` must stay above the method: before
+    // the fix it was flushed by the body's `return` and landed inside it
+    let src = "impl E {\n    /// the payload\n    fn unwrap(self) -> T {\n        return option_unwrap(self);\n    }\n}\n";
+    let out = fmt_idempotent(src);
+    assert!(out.contains("    /// the payload\n    fn unwrap"), "{out}");
+
     // and the struct still parses back to the same fields
     let prog = wlel::parser::Parser::new(
         &wlel::lexer::Lexer::new(&out_struct).tokenize().expect("lex"),

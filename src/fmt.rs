@@ -392,7 +392,10 @@ impl Printer {
         self.last_src = i.span.start.line;
         self.indent += 1;
         for m in &i.methods {
+            // a `///` written above the method stays above the method; without
+            // this it was flushed by the body's `return` and landed inside it
             self.blank();
+            self.flush_upto(m.span.start.line);
             self.func_def(m);
         }
         self.indent -= 1;
