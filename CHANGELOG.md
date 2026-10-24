@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.8.1] — 2026-10-24
+
+Patch release: v1.8.0 was tagged before the parser performance fix, so its
+binaries shipped the slower parser.
+
+### Fixed
+
+- The self-hosted parser no longer copies every name into a `String`: a node
+  stores a source slice (`slice_start`/`slice_len`) and only materialises text
+  when the dump needs it. That was 2 MB/s on Windows against 37 MB/s on Linux;
+  it is now 53 MB/s on the same file. `wlel build` output is unchanged — the
+  fix is inside `selfhost/`, which the compiler does not use at runtime — but
+  the release archives now contain the version the repository documents.
+
 ## [1.8.0] — 2026-10-24
 
 The parser joins the lexer: the front end of the compiler is now written in
