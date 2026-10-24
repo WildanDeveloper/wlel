@@ -291,3 +291,29 @@ fn the_gap_list_matches_on_every_platform() {
         );
     }
 }
+
+/// Codegen reads types from the arena instead of re-deriving them from source
+/// text, so the checker has to leave them there. `-v` prints them.
+#[test]
+fn the_checker_annotates_the_arena_with_types() {
+    let Some(bin) = checker_binary() else { return };
+    let out = Command::new(bin)
+        .args([root().join("examples/fib.wlel").to_str().unwrap(), "-v"])
+        .output()
+        .expect("run the checker");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    let typed: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.starts_with("fn ") && !l.starts_with("ok:"))
+        .collect();
+    assert!(
+        typed.len() > 10,
+        "the checker annotated only {} nodes:\n{text}",
+        typed.len()
+    );
+    // `n < 2` is a bool, `fib(n - 1)` is an int, and the call is void
+    assert!(typed.iter().any(|l| l.ends_with(" bool")), "{text}");
+    assert!(typed.iter().any(|l| l.ends_with(" int")), "{text}");
+    assert!(typed.iter().any(|l| l.ends_with(" void")), "{text}");
+}

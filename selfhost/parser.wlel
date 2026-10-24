@@ -110,8 +110,9 @@ struct Node {
     next: int,
     num: int,
     line: int,
-    col: int
-} /// a source slice when `slice_len >= 0`, otherwise a synthesized string
+    col: int,
+    ty: int
+} /// a source slice when `slice_len >= 0`, otherwise a synthesized string /// the type the checker inferred, as an index into its interned table; /// -1 until the checker runs. Codegen reads this instead of re-deriving /// types from source text, so comparing two types is comparing two ints.
 
 struct P {
     src: string,
@@ -125,7 +126,7 @@ struct P {
 }
 
 fn new_node(p: *P, kind: int, line: int, col: int) -> int {
-    n := Node { kind: kind, text: "", slice_start: 0, slice_len: -1, a: -1, b: -1, c: -1, d: -1, next: -1, num: 0, line: line, col: col };
+    n := Node { kind: kind, text: "", slice_start: 0, slice_len: -1, a: -1, b: -1, c: -1, d: -1, next: -1, num: 0, line: line, col: col, ty: -1 };
     p.nodes.push(n);
     return p.nodes.len() - 1;
 }
@@ -186,6 +187,21 @@ fn set_text(p: *P, i: int, text: string) {
     n.text = text;
     n.slice_len = -1;
     p.nodes.set(i, n);
+}
+
+/// Record the inferred type on a node. The checker owns the type table, so it
+/// passes the index in; the parser only stores it.
+fn set_ty(nodes: *Vec[Node], i: int, ty: int) {
+    n := nodes.get(i);
+    n.ty = ty;
+    nodes.set(i, n);
+}
+
+fn get_ty(nodes: *Vec[Node], i: int) -> int {
+    if i < 0 || i >= nodes.len() {
+        return -1;
+    }
+    return nodes.get(i).ty;
 }
 
 fn set_num(p: *P, i: int, num: int) {

@@ -45,12 +45,7 @@ struct Ty {
 } /// element type for pointers and arrays, return type for functions /// the source spelling, which is also the printed name
 
 struct TyTab {
-    all: *Vec[Ty]
-}
-
-/// wrap a vector so it can be passed as a `*TyTab`
-fn tytab(v: *Vec[Ty]) -> TyTab {
-    return TyTab { all: v };
+    all: Vec[Ty]
 }
 
 /// Intern a type: the same tag and spelling always yields the same index, so
@@ -149,30 +144,32 @@ struct Ck {
     src: string,
     nodes: *Vec[ps::Node],
     use_std: bool,
-    types: *TyTab,
-    vars: *Vec[Var],
-    marks: *Vec[int],
-    funcs: *Vec[Sym],
-    sigs: *Vec[FnSig],
-    fields: *Vec[Sym],
-    consts: *Vec[Sym],
-    methods: *Vec[Sym],
-    variant_of: *Vec[Sym],
-    vpayload: *Vec[Sym],
+    types: TyTab,
+    vars: Vec[Var],
+    marks: Vec[int],
+    funcs: Vec[Sym],
+    sigs: Vec[FnSig],
+    fields: Vec[Sym],
+    consts: Vec[Sym],
+    methods: Vec[Sym],
+    variant_of: Vec[Sym],
+    vpayload: Vec[Sym],
     ret: int,
-    tparams: *Vec[string],
-    no_tparams: *Vec[string],
-    generic_structs: *Vec[Sym],
-    args_buf: *Vec[int],
-    tps_buf: *Vec[string],
-    segs: *Vec[Seg],
+    tparams: Vec[string],
+    generic_structs: Vec[Sym],
+    args_buf: Vec[int],
+    tps_buf: Vec[string],
+    segs: Vec[Seg],
     failed: bool,
     err_line: int,
     err_col: int,
     err_msg: string,
-    depth: int
-} /// did the program write `use std;`? /// where each open scope began in `vars` /// every declared function's full signature, by name /// "Struct.field" -> field type /// constants and payload-less enum variants, by written name /// "Type.method" -> the method's signature /// enum variant -> its enum name /// "Enum::Variant:i" -> the type of the i-th payload /// the return type of the function being checked /// the type parameters of the function being checked; `no_tparams` is an /// always-empty buffer, so this never points at a dead frame /// which structs and enums are generic /// scratch buffers, so helpers never return a pointer to a local /// the source each range of the node arena came from
+    depth: int,
+    prog: int
+} /// did the program write `use std;`? /// The tables are owned here, not pointed at: a struct that held /// `&local` would dangle the moment it was returned. /// where each open scope began in `vars` /// every declared function's full signature, by name /// "Struct.field" -> field type /// constants and payload-less enum variants, by written name /// "Type.method" -> the method's signature /// enum variant -> its enum name /// "Enum::Variant:i" -> the type of the i-th payload /// the return type of the function being checked /// the type parameters of the function being checked /// which structs and enums are generic /// scratch buffers, so helpers never return a pointer to a local /// the source each range of the node arena came from /// the program node the analysis produced
 
+/// Record the first diagnostic. The checker stops at the first error, which is
+/// what the Rust checker does too.
 fn fail(c: *Ck, line: int, col: int, msg: string) {
     if c.failed {
         return;
@@ -199,10 +196,10 @@ fn text(c: *Ck, i: int) -> string {
 /// share one arena, so a node's byte offsets only make sense against the
 /// source it was lexed from.
 fn seg_src(c: *Ck, i: int) -> string {
-    j := c.segs.len() - 1;
+    j := (&c.segs).len() - 1;
     while j >= 0 {
-        if c.segs.get(j).start <= i {
-            return c.segs.get(j).src;
+        if (&c.segs).get(j).start <= i {
+            return (&c.segs).get(j).src;
         }
         j -= 1;
     }
@@ -211,16 +208,16 @@ fn seg_src(c: *Ck, i: int) -> string {
 
 // ---- scopes ---------------------------------------------------------------
 fn push_scope(c: *Ck) {
-    c.marks.push(c.vars.len());
+    (&c.marks).push((&c.vars).len());
 }
 
 fn pop_scope(c: *Ck) {
-    if c.marks.len() == 0 {
+    if (&c.marks).len() == 0 {
         return;
     }
-    m := c.marks.pop();
-    while c.vars.len() > m {
-        c.vars.pop();
+    m := (&c.marks).pop();
+    while (&c.vars).len() > m {
+        (&c.vars).pop();
     }
 }
 
@@ -228,23 +225,23 @@ fn declare(c: *Ck, name: string, ty: int, line: int, col: int) {
     if c.failed {
         return;
     }
-    m := c.marks.get(c.marks.len() - 1);
+    m := (&c.marks).get((&c.marks).len() - 1);
     i := m;
-    while i < c.vars.len() {
-        if c.vars.get(i).name == name {
+    while i < (&c.vars).len() {
+        if (&c.vars).get(i).name == name {
             fail(c, line, col, "let: variable '" + name + "' already declared in this scope");
             return;
         }
         i += 1;
     }
-    c.vars.push(Var { name: name, ty: ty, line: line, col: col });
+    (&c.vars).push(Var { name: name, ty: ty, line: line, col: col });
 }
 
 /// the innermost declaration of `name`, or -1
 fn lookup(c: *Ck, name: string) -> int {
-    i := c.vars.len() - 1;
+    i := (&c.vars).len() - 1;
     while i >= 0 {
-        if c.vars.get(i).name == name {
+        if (&c.vars).get(i).name == name {
             return i;
         }
         i -= 1;
@@ -267,14 +264,14 @@ fn find_sym(list: *Vec[Sym], name: string) -> int {
 // `std` and `sys` are compiler-provided. Stage 1 declares the functions the
 // corpus calls, with the arity and result type a call site checks against.
 fn declare_fn(c: *Ck, name: string, arity: int, ret: int) {
-    t := ty_new_elem(c.types, TY_FN, name, ret);
-    c.funcs.push(Sym { name: name, ty: t, arity: arity });
+    t := ty_new_elem(&c.types, TY_FN, name, ret);
+    (&c.funcs).push(Sym { name: name, ty: t, arity: arity });
 }
 
 fn find_sig(c: *Ck, name: string) -> int {
     i := 0;
-    while i < c.sigs.len() {
-        if c.sigs.get(i).name == name {
+    while i < (&c.sigs).len() {
+        if (&c.sigs).get(i).name == name {
             return i;
         }
         i += 1;
@@ -283,15 +280,15 @@ fn find_sig(c: *Ck, name: string) -> int {
 }
 
 fn record_sig(c: *Ck, name: string, params: *Vec[int], ret: int, tps: *Vec[string]) {
-    c.sigs.push(FnSig { name: name, params: params, ret: ret, tps: tps });
+    (&c.sigs).push(FnSig { name: name, params: params, ret: ret, tps: tps });
 }
 
 fn prelude(c: *Ck) {
-    ti := builtin(c.types, "int");
-    tb := builtin(c.types, "bool");
-    ts := builtin(c.types, "string");
-    tv := builtin(c.types, "void");
-    t64 := builtin(c.types, "i64");
+    ti := builtin(&c.types, "int");
+    tb := builtin(&c.types, "bool");
+    ts := builtin(&c.types, "string");
+    tv := builtin(&c.types, "void");
+    t64 := builtin(&c.types, "i64");
     declare_fn(c, "std::println_str", 1, tv);
     declare_fn(c, "std::println_int", 1, tv);
     declare_fn(c, "std::println_float", 1, tv);
@@ -331,7 +328,7 @@ fn prelude(c: *Ck) {
 
     // the `std::` names the runtime implements instead of Wlel source
     declare_fn(c, "std::streq", 2, tb);
-    declare_fn(c, "std::parse_float", 1, builtin(c.types, "float"));
+    declare_fn(c, "std::parse_float", 1, builtin(&c.types, "float"));
     declare_fn(c, "std::checked_add", -1, ti);
     declare_fn(c, "std::checked_sub", -1, ti);
     declare_fn(c, "std::checked_mul", -1, ti);
@@ -339,13 +336,13 @@ fn prelude(c: *Ck) {
     declare_fn(c, "std::sort", 2, tv);
     declare_fn(c, "std::binary_search", 3, ti);
     declare_fn(c, "std::read_all", 1, ts);
-    pv := ty_new_elem(c.types, TY_PTR, "*void", builtin(c.types, "void"));
+    pv := ty_new_elem(&c.types, TY_PTR, "*void", builtin(&c.types, "void"));
     declare_fn(c, "wlel_alloc", 1, pv);
     declare_fn(c, "wlel_arena_new", 1, pv);
     declare_fn(c, "wlel_arena_alloc", -1, pv);
-    declare_fn(c, "std::math::sqrt", -1, builtin(c.types, "float"));
-    declare_fn(c, "std::math::floor", -1, builtin(c.types, "float"));
-    declare_fn(c, "std::math::ceil", -1, builtin(c.types, "float"));
+    declare_fn(c, "std::math::sqrt", -1, builtin(&c.types, "float"));
+    declare_fn(c, "std::math::floor", -1, builtin(&c.types, "float"));
+    declare_fn(c, "std::math::ceil", -1, builtin(&c.types, "float"));
     declare_fn(c, "wlel_arena_reset", 1, tv);
     declare_fn(c, "sys::exit", 1, tv);
     declare_fn(c, "sys::unix_ms", 0, t64);
@@ -418,8 +415,8 @@ fn is_unsigned(name: string) -> bool {
 
 fn is_tparam(c: *Ck, name: string) -> bool {
     i := 0;
-    while i < c.tparams.len() {
-        if c.tparams.get(i) == name {
+    while i < (&c.tparams).len() {
+        if (&c.tparams).get(i) == name {
             return true;
         }
         i += 1;
@@ -433,16 +430,16 @@ fn resolve_ty(c: *Ck, spelling: string) -> int {
     }
     // a type parameter is opaque here: two occurrences unify by name
     if is_tparam(c, spelling) {
-        return ty_new(c.types, TY_STRUCT, spelling);
+        return ty_new(&c.types, TY_STRUCT, spelling);
     }
-    b := builtin(c.types, spelling);
+    b := builtin(&c.types, spelling);
     if b >= 0 {
         return b;
     }
     if spelling[0] == 42 {
         // `*T`
         inner := resolve_ty(c, std::str_sub(spelling, 1, std::strlen(spelling) - 1));
-        return ty_new_elem(c.types, TY_PTR, spelling, inner);
+        return ty_new_elem(&c.types, TY_PTR, spelling, inner);
     }
     if spelling[0] == 91 {
         // `[T; N]`
@@ -460,15 +457,15 @@ fn resolve_ty(c: *Ck, spelling: string) -> int {
             inner_spelling = std::str_sub(spelling, 1, semi - 1);
         }
         inner := resolve_ty(c, inner_spelling);
-        return ty_new_elem(c.types, TY_ARRAY, spelling, inner);
+        return ty_new_elem(&c.types, TY_ARRAY, spelling, inner);
     }
     // a struct, an enum, or an instantiated generic: the spelling is the name
-    return ty_new(c.types, TY_STRUCT, spelling);
+    return ty_new(&c.types, TY_STRUCT, spelling);
 }
 
 // ---- expression types -----------------------------------------------------
 fn ty_of_name(c: *Ck, name: string) -> int {
-    return builtin(c.types, name);
+    return builtin(&c.types, name);
 }
 
 fn join_names(v: *Vec[string]) -> string {
@@ -601,8 +598,8 @@ fn op_name(op: int) -> string {
 /// the wider of two int types: a plain `int` yields to a typed operand,
 /// and unsigned wins at equal width
 fn wider(c: *Ck, a: int, b: int) -> int {
-    an := ty_name(c.types, a);
-    bn := ty_name(c.types, b);
+    an := ty_name(&c.types, a);
+    bn := ty_name(&c.types, b);
     aw := int_width(an);
     bw := int_width(bn);
     if aw == W_DEFAULT {
@@ -629,34 +626,34 @@ fn unary_ty(c: *Ck, n: ps::Node) -> int {
         return x;
     }
     if n.num == 0 {
-        if ty_is_num(c.types, x) {
+        if ty_is_num(&c.types, x) {
             return x;
         }
-        fail(c, n.line, n.col, "'-' needs a number, got " + ty_name(c.types, x));
+        fail(c, n.line, n.col, "'-' needs a number, got " + ty_name(&c.types, x));
         return x;
     }
     if n.num == 1 {
-        if ty_tag(c.types, x) == TY_BOOL {
+        if ty_tag(&c.types, x) == TY_BOOL {
             return x;
         }
-        fail(c, n.line, n.col, "'!' needs bool, got " + ty_name(c.types, x));
+        fail(c, n.line, n.col, "'!' needs bool, got " + ty_name(&c.types, x));
         return x;
     }
     if n.num == 2 {
-        if ty_is_int(c.types, x) {
+        if ty_is_int(&c.types, x) {
             return x;
         }
-        fail(c, n.line, n.col, "'~' needs int, got " + ty_name(c.types, x));
+        fail(c, n.line, n.col, "'~' needs int, got " + ty_name(&c.types, x));
         return x;
     }
     if n.num == 3 {
-        return ty_new_elem(c.types, TY_PTR, "&" + ty_name(c.types, x), x);
+        return ty_new_elem(&c.types, TY_PTR, "&" + ty_name(&c.types, x), x);
     }
-    if ty_tag(c.types, x) != TY_PTR {
-        fail(c, n.line, n.col, "cannot dereference non-pointer " + ty_name(c.types, x));
+    if ty_tag(&c.types, x) != TY_PTR {
+        fail(c, n.line, n.col, "cannot dereference non-pointer " + ty_name(&c.types, x));
         return x;
     }
-    return ty_elem(c.types, x);
+    return ty_elem(&c.types, x);
 }
 
 /// The Rust AST spans a binary expression from its left operand, and the
@@ -681,17 +678,17 @@ fn binary_ty(c: *Ck, n: ps::Node) -> int {
     op := n.num;
     // comparison
     if op >= 7 && op <= 12 {
-        if lt == rt || ty_is_num(c.types, lt) && ty_is_num(c.types, rt) {
+        if lt == rt || ty_is_num(&c.types, lt) && ty_is_num(&c.types, rt) {
             return ty_of_name(c, "bool");
         }
         ol := op_line(c, n);
         oc := op_col(c, n);
-        fail(c, ol, oc, "comparison between " + ty_name(c.types, lt) + " and " + ty_name(c.types, rt));
+        fail(c, ol, oc, "comparison between " + ty_name(&c.types, lt) + " and " + ty_name(&c.types, rt));
         return ty_of_name(c, "bool");
     }
     // logic
     if op == 0 || op == 1 {
-        if ty_tag(c.types, lt) == TY_BOOL && ty_tag(c.types, rt) == TY_BOOL {
+        if ty_tag(&c.types, lt) == TY_BOOL && ty_tag(&c.types, rt) == TY_BOOL {
             return ty_of_name(c, "bool");
         }
         ol := op_line(c, n);
@@ -700,34 +697,34 @@ fn binary_ty(c: *Ck, n: ps::Node) -> int {
         return ty_of_name(c, "bool");
     }
     // string concatenation
-    if op == 13 && ty_tag(c.types, lt) == TY_STR && ty_tag(c.types, rt) == TY_STR {
+    if op == 13 && ty_tag(&c.types, lt) == TY_STR && ty_tag(&c.types, rt) == TY_STR {
         return ty_of_name(c, "string");
     }
     // bitwise
     if op >= 2 && op <= 6 {
-        if ty_is_int(c.types, lt) && ty_is_int(c.types, rt) {
+        if ty_is_int(&c.types, lt) && ty_is_int(&c.types, rt) {
             return wider(c, lt, rt);
         }
         ol := op_line(c, n);
         oc := op_col(c, n);
-        fail(c, ol, oc, "bitwise '" + op_name(op) + "' needs int operands, got " + ty_name(c.types, lt) + " and " + ty_name(c.types, rt));
+        fail(c, ol, oc, "bitwise '" + op_name(op) + "' needs int operands, got " + ty_name(&c.types, lt) + " and " + ty_name(&c.types, rt));
         return ty_of_name(c, "int");
     }
     // arithmetic
-    if ty_is_int(c.types, lt) && ty_is_int(c.types, rt) {
+    if ty_is_int(&c.types, lt) && ty_is_int(&c.types, rt) {
         return wider(c, lt, rt);
     }
-    if ty_is_num(c.types, lt) && ty_is_num(c.types, rt) && op != 17 {
+    if ty_is_num(&c.types, lt) && ty_is_num(&c.types, rt) && op != 17 {
         return ty_of_name(c, "float");
     }
     ol := op_line(c, n);
     oc := op_col(c, n);
-    fail(c, ol, oc, "operator '" + op_name(op) + "' cannot apply to " + ty_name(c.types, lt) + " and " + ty_name(c.types, rt));
+    fail(c, ol, oc, "operator '" + op_name(op) + "' cannot apply to " + ty_name(&c.types, lt) + " and " + ty_name(&c.types, rt));
     return ty_of_name(c, "int");
 }
 
 fn arg_types(c: *Ck, first: int) -> *Vec[int] {
-    out := c.args_buf;
+    out := &c.args_buf;
     out.clear();
     a := first;
     while a >= 0 {
@@ -751,7 +748,7 @@ fn instantiate(c: *Ck, sg: FnSig, args: *Vec[int]) -> int {
     while i < sg.tps.len() {
         j := 0;
         while j < sg.params.len() && j < args.len() {
-            if ty_name(c.types, sg.params.get(j)) == sg.tps.get(i) {
+            if ty_name(&c.types, sg.params.get(j)) == sg.tps.get(i) {
                 binds.set(i, args.get(j));
             }
             j += 1;
@@ -759,7 +756,7 @@ fn instantiate(c: *Ck, sg: FnSig, args: *Vec[int]) -> int {
         i += 1;
     }
     // `ret` may be a type parameter, or a struct instantiated with one
-    rn := ty_name(c.types, sg.ret);
+    rn := ty_name(&c.types, sg.ret);
     i = 0;
     while i < sg.tps.len() {
         if binds.get(i) >= 0 {
@@ -768,7 +765,7 @@ fn instantiate(c: *Ck, sg: FnSig, args: *Vec[int]) -> int {
             }
             if starts_with(rn, sg.tps.get(i) + "[") {
                 // `Box[T]` -> `Box[int]`
-                return ty_new(c.types, TY_STRUCT, subst_name(rn, sg.tps.get(i), ty_name(c.types, binds.get(i))));
+                return ty_new(&c.types, TY_STRUCT, subst_name(rn, sg.tps.get(i), ty_name(&c.types, binds.get(i))));
             }
         }
         i += 1;
@@ -831,15 +828,15 @@ fn method_ty(c: *Ck, i: int, n: ps::Node) -> int {
         }
         a = get(c, a).next;
     }
-    owner := ty_name(c.types, recv);
-    if ty_tag(c.types, recv) == TY_PTR {
-        owner = ty_name(c.types, ty_elem(c.types, recv));
+    owner := ty_name(&c.types, recv);
+    if ty_tag(&c.types, recv) == TY_PTR {
+        owner = ty_name(&c.types, ty_elem(&c.types, recv));
     }
     // a collection method: Vec[T] -> the collection's own methods
     mname := text(c, i);
-    fi := find_sym(c.methods, owner + "." + mname);
+    fi := find_sym(&c.methods, owner + "." + mname);
     if fi >= 0 {
-        return ty_elem(c.types, c.methods.get(fi).ty);
+        return ty_elem(&c.types, (&c.methods).get(fi).ty);
     }
     if mname == "get_or" || mname == "find" {
         return ty_of_name(c, "int");
@@ -862,7 +859,7 @@ fn method_ty(c: *Ck, i: int, n: ps::Node) -> int {
 
 /// The written type arguments of a call (`id[int](x)`), as a flat list.
 fn type_args(c: *Ck, n: ps::Node) -> *Vec[int] {
-    out := c.args_buf;
+    out := &c.args_buf;
     out.clear();
     targs := n.a;
     if targs < 0 {
@@ -897,9 +894,9 @@ fn call_ty(c: *Ck, i: int, n: ps::Node) -> int {
         return ty_of_name(c, "int");
     }
     // a variant used as a constructor: `Some(x)`, `Tok::Ident(s)`
-    vi := find_sym(c.variant_of, name);
+    vi := find_sym(&c.variant_of, name);
     if vi >= 0 {
-        return c.variant_of.get(vi).ty;
+        return (&c.variant_of).get(vi).ty;
     }
     // the collections name their element type in brackets
     if name == "vec_new" || name == "vec_with_cap" || name == "map_new" || name == "chan_new" || name == "set_new" {
@@ -908,14 +905,14 @@ fn call_ty(c: *Ck, i: int, n: ps::Node) -> int {
             fail(c, n.line, n.col, "cannot infer type parameter of '" + name + "'");
             return ty_of_name(c, "int");
         }
-        return ty_new_elem(c.types, TY_STRUCT, name, et);
+        return ty_new_elem(&c.types, TY_STRUCT, name, et);
     }
-    fi := find_sym(c.funcs, name);
+    fi := find_sym(&c.funcs, name);
     if fi < 0 {
         fail(c, n.line, n.col, "call to undefined function '" + name + "'");
         return ty_of_name(c, "int");
     }
-    f := c.funcs.get(fi);
+    f := (&c.funcs).get(fi);
     got := count_args(c, n.b);
     if f.arity >= 0 && got != f.arity {
         fail(c, n.line, n.col, "'" + name + "' takes " + std::int_to_str(f.arity) + " argument(s), got " + std::int_to_str(got));
@@ -923,12 +920,12 @@ fn call_ty(c: *Ck, i: int, n: ps::Node) -> int {
     }
     si := find_sig(c, name);
     if si >= 0 {
-        sg := c.sigs.get(si);
+        sg := (&c.sigs).get(si);
         if sg.tps.len() > 0 {
             return instantiate(c, sg, arg_types(c, n.b));
         }
     }
-    return ty_elem(c.types, f.ty);
+    return ty_elem(&c.types, f.ty);
 }
 
 /// `match` types its arms: the first arm's body gives the result type and
@@ -956,7 +953,7 @@ fn match_ty(c: *Ck, n: ps::Node) -> int {
             if result < 0 {
                 result = bt;
             } else if !compatible(c, result, bt) {
-                fail(c, body.line, body.col, "match arms disagree: " + ty_name(c.types, result) + " and " + ty_name(c.types, bt));
+                fail(c, body.line, body.col, "match arms disagree: " + ty_name(&c.types, result) + " and " + ty_name(&c.types, bt));
             }
         }
         a = arm.next;
@@ -975,9 +972,9 @@ fn bind_pattern(c: *Ck, p: int, scrut: int) {
     }
     if n.kind == ps::N_VARIANT_PAT {
         vname := text(c, p);
-        owner := ty_name(c.types, scrut);
+        owner := ty_name(&c.types, scrut);
         key := owner + "::" + vname;
-        if find_sym(c.variant_of, key) < 0 {
+        if find_sym(&c.variant_of, key) < 0 {
             fail(c, n.line, n.col, "enum '" + owner + "' has no variant '" + vname + "'");
             return;
         }
@@ -985,10 +982,10 @@ fn bind_pattern(c: *Ck, p: int, scrut: int) {
         pi := 0;
         while b >= 0 && !c.failed {
             bk := key + ":" + std::int_to_str(pi);
-            fi := find_sym(c.vpayload, bk);
+            fi := find_sym(&c.vpayload, bk);
             // `_` discards its payload instead of naming it
             if fi >= 0 && text(c, b) != "_" {
-                declare(c, text(c, b), c.vpayload.get(fi).ty, get(c, b).line, get(c, b).col);
+                declare(c, text(c, b), (&c.vpayload).get(fi).ty, get(c, b).line, get(c, b).col);
             }
             pi += 1;
             b = get(c, b).next;
@@ -998,8 +995,8 @@ fn bind_pattern(c: *Ck, p: int, scrut: int) {
     if n.kind == ps::N_IDENT {
         name := text(c, p);
         // a bare variant name (`Point`) is a payload-less pattern
-        owner := ty_name(c.types, scrut);
-        if find_sym(c.variant_of, owner + "::" + name) >= 0 {
+        owner := ty_name(&c.types, scrut);
+        if find_sym(&c.variant_of, owner + "::" + name) >= 0 {
             return;
         }
         // otherwise it binds the whole value
@@ -1023,7 +1020,7 @@ fn expr_ty(c: *Ck, i: int) -> int {
     if k == ps::N_INT {
         sfx := lit_suffix(text(c, i));
         if sfx != "" {
-            b := builtin(c.types, sfx);
+            b := builtin(&c.types, sfx);
             if b >= 0 {
                 t = b;
             }
@@ -1038,19 +1035,19 @@ fn expr_ty(c: *Ck, i: int) -> int {
         name := text(c, i);
         v := lookup(c, name);
         if v >= 0 {
-            t = c.vars.get(v).ty;
+            t = (&c.vars).get(v).ty;
         } else {
-            ci := find_sym(c.consts, name);
+            ci := find_sym(&c.consts, name);
             if ci >= 0 {
-                t = c.consts.get(ci).ty;
+                t = (&c.consts).get(ci).ty;
             } else {
-                fi := find_sym(c.funcs, name);
+                fi := find_sym(&c.funcs, name);
                 if fi >= 0 {
-                    t = c.funcs.get(fi).ty;
+                    t = (&c.funcs).get(fi).ty;
                 } else {
-                    vi := find_sym(c.variant_of, name);
+                    vi := find_sym(&c.variant_of, name);
                     if vi >= 0 {
-                        t = c.variant_of.get(vi).ty;
+                        t = (&c.variant_of).get(vi).ty;
                     } else {
                         fail(c, n.line, n.col, "undefined variable '" + name + "'");
                     }
@@ -1078,17 +1075,17 @@ fn expr_ty(c: *Ck, i: int) -> int {
         recv := expr_ty(c, n.a);
         if !c.failed {
             // `p.x` on a `*S` is `(*p).x`: the checker follows the pointer
-            if ty_tag(c.types, recv) == TY_PTR {
-                recv = ty_elem(c.types, recv);
+            if ty_tag(&c.types, recv) == TY_PTR {
+                recv = ty_elem(&c.types, recv);
             }
-            rn := ty_name(c.types, recv);
+            rn := ty_name(&c.types, recv);
             fname := text(c, i);
             // the Rust AST spans a field expression from its receiver
             rnode := get(c, n.a);
-            if ty_tag(c.types, recv) != TY_STRUCT && ty_tag(c.types, recv) != TY_ENUM {
+            if ty_tag(&c.types, recv) != TY_STRUCT && ty_tag(&c.types, recv) != TY_ENUM {
                 fail(c, rnode.line, rnode.col, "field access '" + fname + "' on non-struct " + rn);
             } else {
-                fi := find_sym(c.fields, rn + "." + fname);
+                fi := find_sym(&c.fields, rn + "." + fname);
                 if fi < 0 {
                     // `Box[T].val` is declared once, on `Box`
                     base := rn;
@@ -1100,12 +1097,12 @@ fn expr_ty(c: *Ck, i: int) -> int {
                         }
                         b += 1;
                     }
-                    fi = find_sym(c.fields, base + "." + fname);
+                    fi = find_sym(&c.fields, base + "." + fname);
                 }
                 if fi < 0 {
                     fail(c, rnode.line, rnode.col, "struct '" + rn + "' has no field '" + fname + "'");
                 } else {
-                    t = c.fields.get(fi).ty;
+                    t = (&c.fields).get(fi).ty;
                 }
             }
         }
@@ -1115,16 +1112,16 @@ fn expr_ty(c: *Ck, i: int) -> int {
         if !c.failed {
             idx := expr_ty(c, n.b);
             if !c.failed {
-                if ty_tag(c.types, idx) != TY_INT && ty_tag(c.types, idx) != TY_UINT {
-                    fail(c, bn.line, bn.col, "index must be int, got " + ty_name(c.types, idx));
-                } else if ty_tag(c.types, base) == TY_ARRAY || ty_tag(c.types, base) == TY_PTR {
-                    t = ty_elem(c.types, base);
-                } else if ty_tag(c.types, base) == TY_STR {
+                if ty_tag(&c.types, idx) != TY_INT && ty_tag(&c.types, idx) != TY_UINT {
+                    fail(c, bn.line, bn.col, "index must be int, got " + ty_name(&c.types, idx));
+                } else if ty_tag(&c.types, base) == TY_ARRAY || ty_tag(&c.types, base) == TY_PTR {
+                    t = ty_elem(&c.types, base);
+                } else if ty_tag(&c.types, base) == TY_STR {
 
                     // indexing a string reads one byte
-                    t = builtin(c.types, "u8");
+                    t = builtin(&c.types, "u8");
                 } else {
-                    fail(c, bn.line, bn.col, "cannot index into " + ty_name(c.types, base));
+                    fail(c, bn.line, bn.col, "cannot index into " + ty_name(&c.types, base));
                 }
             }
         }
@@ -1142,20 +1139,20 @@ fn expr_ty(c: *Ck, i: int) -> int {
             }
             e = get(c, e).next;
         }
-        t = ty_new_elem(c.types, TY_ARRAY, "array", first);
+        t = ty_new_elem(&c.types, TY_ARRAY, "array", first);
     } else if k == ps::N_NEW {
         tt := resolve_ty(c, text(c, i));
         if n.a >= 0 {
             ct := expr_ty(c, n.a);
-            if !c.failed && ty_tag(c.types, ct) != TY_INT && ty_tag(c.types, ct) != TY_UINT {
-                fail(c, n.line, n.col, "new(T, n): count must be int, got " + ty_name(c.types, ct));
+            if !c.failed && ty_tag(&c.types, ct) != TY_INT && ty_tag(&c.types, ct) != TY_UINT {
+                fail(c, n.line, n.col, "new(T, n): count must be int, got " + ty_name(&c.types, ct));
             }
         }
-        t = ty_new_elem(c.types, TY_PTR, "*" + ty_name(c.types, tt), tt);
+        t = ty_new_elem(&c.types, TY_PTR, "*" + ty_name(&c.types, tt), tt);
     } else if k == ps::N_SIZEOF {
         t = ty_of_name(c, "int");
     } else if k == ps::N_CURRENT_ARENA {
-        t = ty_new_elem(c.types, TY_PTR, "*void", ty_of_name(c, "void"));
+        t = ty_new_elem(&c.types, TY_PTR, "*void", ty_of_name(c, "void"));
     } else if k == ps::N_TRY {
         t = expr_ty(c, n.a);
     } else if k == ps::N_METHOD {
@@ -1171,10 +1168,10 @@ fn expr_ty(c: *Ck, i: int) -> int {
             }
             a = get(c, a).next;
         }
-        if ty_tag(c.types, callee) == TY_FN {
-            t = ty_elem(c.types, callee);
+        if ty_tag(&c.types, callee) == TY_FN {
+            t = ty_elem(&c.types, callee);
         } else {
-            fail(c, n.line, n.col, "cannot call a value of type " + ty_name(c.types, callee));
+            fail(c, n.line, n.col, "cannot call a value of type " + ty_name(&c.types, callee));
         }
     } else if k == ps::N_BLOCK_EXPR {
         block(c, n.a);
@@ -1185,9 +1182,9 @@ fn expr_ty(c: *Ck, i: int) -> int {
 
         // the fields are checked against the struct's declarations
         sname := text(c, i);
-        if c.tparams.len() > 0 && find_sym(c.generic_structs, sname) >= 0 {
+        if (&c.tparams).len() > 0 && find_sym(&c.generic_structs, sname) >= 0 {
             // `Box { .. }` inside `fn f[T]` is `Box[T]`
-            sname = sname + "[" + join_names(c.tparams) + "]";
+            sname = sname + "[" + join_names(&c.tparams) + "]";
         }
         f := n.a;
         while f >= 0 {
@@ -1196,22 +1193,24 @@ fn expr_ty(c: *Ck, i: int) -> int {
                 c.depth -= 1;
                 return ty_of_name(c, "int");
             }
-            fi := find_sym(c.fields, sname + "." + text(c, f));
+            fi := find_sym(&c.fields, sname + "." + text(c, f));
             if fi < 0 {
                 fail(c, n.line, n.col, "struct '" + sname + "' has no field '" + text(c, f) + "'");
                 c.depth -= 1;
                 return ty_of_name(c, "int");
             }
-            want := c.fields.get(fi).ty;
+            want := (&c.fields).get(fi).ty;
             if !compatible(c, want, vt) {
-                fail(c, n.line, n.col, "cannot assign " + ty_name(c.types, vt) + " to " + ty_name(c.types, want));
+                fail(c, n.line, n.col, "cannot assign " + ty_name(&c.types, vt) + " to " + ty_name(&c.types, want));
                 c.depth -= 1;
                 return ty_of_name(c, "int");
             }
             f = get(c, f).next;
         }
-        t = ty_new(c.types, TY_STRUCT, sname);
+        t = ty_new(&c.types, TY_STRUCT, sname);
     }
+    // codegen reads this instead of re-deriving the type from source text
+    ps::set_ty(c.nodes, i, t);
     c.depth -= 1;
     return t;
 }
@@ -1231,7 +1230,7 @@ fn compatible(c: *Ck, want: int, got: int) -> bool {
     if want == got {
         return true;
     }
-    return ty_is_num(c.types, want) && ty_is_num(c.types, got);
+    return ty_is_num(&c.types, want) && ty_is_num(&c.types, got);
 }
 
 fn stmt(c: *Ck, i: int) {
@@ -1250,13 +1249,13 @@ fn stmt(c: *Ck, i: int) {
             return;
         }
         if ty < 0 {
-            if ty_tag(c.types, vt) == TY_VOID {
+            if ty_tag(&c.types, vt) == TY_VOID {
                 fail(c, n.line, n.col, "cannot infer type of '" + text(c, i) + "' from void expression");
                 return;
             }
             ty = vt;
         }
-        if ty_tag(c.types, ty) == TY_VOID {
+        if ty_tag(&c.types, ty) == TY_VOID {
             fail(c, n.line, n.col, "'" + text(c, i) + "' cannot be void");
             return;
         }
@@ -1273,7 +1272,7 @@ fn stmt(c: *Ck, i: int) {
             return;
         }
         if !compatible(c, tt, vt) {
-            fail(c, n.line, n.col, "cannot assign " + ty_name(c.types, vt) + " to " + ty_name(c.types, tt));
+            fail(c, n.line, n.col, "cannot assign " + ty_name(&c.types, vt) + " to " + ty_name(&c.types, tt));
         }
         return;
     }
@@ -1284,7 +1283,7 @@ fn stmt(c: *Ck, i: int) {
                 return;
             }
             if !compatible(c, c.ret, vt) {
-                fail(c, n.line, n.col, "return type mismatch: expected " + ty_name(c.types, c.ret) + ", found " + ty_name(c.types, vt));
+                fail(c, n.line, n.col, "return type mismatch: expected " + ty_name(&c.types, c.ret) + ", found " + ty_name(&c.types, vt));
             }
         }
         return;
@@ -1294,9 +1293,9 @@ fn stmt(c: *Ck, i: int) {
         if c.failed {
             return;
         }
-        if ty_tag(c.types, ct) != TY_BOOL {
+        if ty_tag(&c.types, ct) != TY_BOOL {
             cn := get(c, n.a);
-            fail(c, cn.line, cn.col, "if condition must be bool, got " + ty_name(c.types, ct));
+            fail(c, cn.line, cn.col, "if condition must be bool, got " + ty_name(&c.types, ct));
             return;
         }
         block(c, n.b);
@@ -1314,8 +1313,8 @@ fn stmt(c: *Ck, i: int) {
         if c.failed {
             return;
         }
-        if ty_tag(c.types, ct) != TY_BOOL {
-            fail(c, n.line, n.col, "while condition must be bool, got " + ty_name(c.types, ct));
+        if ty_tag(&c.types, ct) != TY_BOOL {
+            fail(c, n.line, n.col, "while condition must be bool, got " + ty_name(&c.types, ct));
             return;
         }
         block(c, n.b);
@@ -1327,10 +1326,10 @@ fn stmt(c: *Ck, i: int) {
         a := expr_ty(c, n.a);
         z := expr_ty(c, n.b);
         if !c.failed {
-            if ty_tag(c.types, a) != TY_INT && ty_tag(c.types, a) != TY_UINT {
-                fail(c, n.line, n.col, "for range must be int, got " + ty_name(c.types, a));
-            } else if ty_tag(c.types, z) != TY_INT && ty_tag(c.types, z) != TY_UINT {
-                fail(c, n.line, n.col, "for range must be int, got " + ty_name(c.types, z));
+            if ty_tag(&c.types, a) != TY_INT && ty_tag(&c.types, a) != TY_UINT {
+                fail(c, n.line, n.col, "for range must be int, got " + ty_name(&c.types, a));
+            } else if ty_tag(&c.types, z) != TY_INT && ty_tag(&c.types, z) != TY_UINT {
+                fail(c, n.line, n.col, "for range must be int, got " + ty_name(&c.types, z));
             } else {
                 block(c, n.c);
             }
@@ -1343,8 +1342,8 @@ fn stmt(c: *Ck, i: int) {
         it := expr_ty(c, n.a);
         if !c.failed {
             elem := ty_of_name(c, "int");
-            if ty_tag(c.types, it) == TY_ARRAY || ty_tag(c.types, it) == TY_PTR {
-                elem = ty_elem(c.types, it);
+            if ty_tag(&c.types, it) == TY_ARRAY || ty_tag(&c.types, it) == TY_PTR {
+                elem = ty_elem(&c.types, it);
             }
             declare(c, text(c, i), elem, n.line, n.col);
             if !c.failed {
@@ -1367,8 +1366,8 @@ fn stmt(c: *Ck, i: int) {
             block(c, n.a);
         } else {
             vt := expr_ty(c, n.a);
-            if !c.failed && ty_tag(c.types, vt) != TY_VOID {
-                fail(c, n.line, n.col, "defer needs a void expression, got " + ty_name(c.types, vt));
+            if !c.failed && ty_tag(&c.types, vt) != TY_VOID {
+                fail(c, n.line, n.col, "defer needs a void expression, got " + ty_name(&c.types, vt));
             }
         }
         return;
@@ -1379,8 +1378,8 @@ fn stmt(c: *Ck, i: int) {
             if c.failed {
                 return;
             }
-            if ty_tag(c.types, at) != TY_INT && ty_tag(c.types, at) != TY_UINT {
-                fail(c, n.line, n.col, "arena capacity must be int, got " + ty_name(c.types, at));
+            if ty_tag(&c.types, at) != TY_INT && ty_tag(&c.types, at) != TY_UINT {
+                fail(c, n.line, n.col, "arena capacity must be int, got " + ty_name(&c.types, at));
                 return;
             }
         }
@@ -1396,7 +1395,7 @@ fn stmt(c: *Ck, i: int) {
 
 // ---- items ----------------------------------------------------------------
 fn fn_tparams(c: *Ck, n: ps::Node) -> *Vec[string] {
-    out := c.tps_buf;
+    out := &c.tps_buf;
     out.clear();
     tp := n.d;
     if tp < 0 {
@@ -1412,7 +1411,15 @@ fn fn_tparams(c: *Ck, n: ps::Node) -> *Vec[string] {
 
 fn check_fn(c: *Ck, i: int) {
     n := get(c, i);
-    c.tparams = fn_tparams(c, n);
+    // a fresh buffer per function: the previous one is not reused, so a
+    // nested generic call cannot clobber the caller's type parameters
+    c.tparams = vec_new[string]();
+    tp := fn_tparams(c, n);
+    i2 := 0;
+    while i2 < tp.len() {
+        c.tparams.push(tp.get(i2));
+        i2 += 1;
+    }
     ret := ty_of_name(c, "void");
     if n.b >= 0 {
         ret = resolve_ty(c, text(c, n.b));
@@ -1442,7 +1449,7 @@ fn check_fn(c: *Ck, i: int) {
         s = get(c, s).next;
     }
     pop_scope(c);
-    c.tparams = c.no_tparams;
+    c.tparams = vec_new[string]();
 }
 
 fn has_use_std(c: *Ck, prog: int) -> bool {
@@ -1470,12 +1477,12 @@ fn collect(c: *Ck, prog: int) {
             if it.a >= 0 {
                 t = resolve_ty(c, text(c, it.a));
             }
-            c.consts.push(Sym { name: text(c, i), ty: t, arity: 0 });
+            (&c.consts).push(Sym { name: text(c, i), ty: t, arity: 0 });
         }
         if it.kind == ps::N_STRUCT {
             sname := text(c, i);
             if it.d >= 0 {
-                c.generic_structs.push(Sym { name: sname, ty: 1, arity: 0 });
+                (&c.generic_structs).push(Sym { name: sname, ty: 1, arity: 0 });
             }
             f := it.a;
             while f >= 0 {
@@ -1484,34 +1491,34 @@ fn collect(c: *Ck, prog: int) {
                 if fld.a >= 0 {
                     ft = resolve_ty(c, text(c, fld.a));
                 }
-                c.fields.push(Sym { name: sname + "." + text(c, f), ty: ft, arity: 0 });
+                (&c.fields).push(Sym { name: sname + "." + text(c, f), ty: ft, arity: 0 });
                 f = fld.next;
             }
         }
         if it.kind == ps::N_ENUM {
             ename := text(c, i);
             if it.d >= 0 {
-                c.generic_structs.push(Sym { name: ename, ty: 1, arity: 0 });
+                (&c.generic_structs).push(Sym { name: ename, ty: 1, arity: 0 });
             }
-            et := ty_new(c.types, TY_ENUM, ename);
+            et := ty_new(&c.types, TY_ENUM, ename);
             v := it.a;
             while v >= 0 {
                 vn := text(c, v);
-                c.variant_of.push(Sym { name: ename + "::" + vn, ty: et, arity: 0 });
-                c.variant_of.push(Sym { name: vn, ty: et, arity: 0 });
+                (&c.variant_of).push(Sym { name: ename + "::" + vn, ty: et, arity: 0 });
+                (&c.variant_of).push(Sym { name: vn, ty: et, arity: 0 });
                 tys := get(c, v).a;
                 if tys >= 0 {
                     pi := 0;
                     pt := get(c, tys).a;
                     while pt >= 0 {
-                        c.vpayload.push(Sym { name: ename + "::" + vn + ":" + std::int_to_str(pi), ty: resolve_ty(c, text(c, pt)), arity: 0 });
+                        (&c.vpayload).push(Sym { name: ename + "::" + vn + ":" + std::int_to_str(pi), ty: resolve_ty(c, text(c, pt)), arity: 0 });
                         pi += 1;
                         pt = get(c, pt).next;
                     }
                 }
                 // a payload-less variant is a value of the enum type
                 if get(c, v).a < 0 {
-                    c.consts.push(Sym { name: ename + "::" + vn, ty: et, arity: 0 });
+                    (&c.consts).push(Sym { name: ename + "::" + vn, ty: et, arity: 0 });
                 }
                 v = get(c, v).next;
             }
@@ -1525,8 +1532,8 @@ fn collect(c: *Ck, prog: int) {
                 if mn.b >= 0 {
                     ret = resolve_ty(c, text(c, mn.b));
                 }
-                mt := ty_new_elem(c.types, TY_FN, owner + "." + text(c, m), ret);
-                c.methods.push(Sym { name: owner + "." + text(c, m), ty: mt, arity: count_args(c, mn.a) });
+                mt := ty_new_elem(&c.types, TY_FN, owner + "." + text(c, m), ret);
+                (&c.methods).push(Sym { name: owner + "." + text(c, m), ty: mt, arity: count_args(c, mn.a) });
                 m = mn.next;
             }
         }
@@ -1537,7 +1544,12 @@ fn collect(c: *Ck, prog: int) {
         it := get(c, i);
         if it.kind == ps::N_FN {
             tps := fn_tparams(c, it);
-            c.tparams = tps;
+            c.tparams = vec_new[string]();
+            k2 := 0;
+            while k2 < tps.len() {
+                c.tparams.push(tps.get(k2));
+                k2 += 1;
+            }
             ret := ty_of_name(c, "void");
             if it.b >= 0 {
                 ret = resolve_ty(c, text(c, it.b));
@@ -1562,7 +1574,7 @@ fn collect(c: *Ck, prog: int) {
             }
             declare_fn(c, text(c, i), nparams, ret);
             record_sig(c, text(c, i), &kept, ret, tps);
-            c.tparams = c.no_tparams;
+            c.tparams = vec_new[string]();
         }
         i = it.next;
     }
@@ -1606,7 +1618,7 @@ fn parse_std(c: *Ck) -> int {
     if p.failed {
         return -1;
     }
-    c.segs.push(Seg { start: start, src: src });
+    (&c.segs).push(Seg { start: start, src: src });
     return prog;
 }
 
@@ -1614,71 +1626,89 @@ fn std_path() -> string {
     return "lib/std.wlel";
 }
 
-fn run(path: string, verbose: bool) -> int {
+/// The checker's whole working set: one allocation of every table, so
+/// `analyze` can be called from the CLI and from codegen with the same setup.
+/// The checker's whole working set. Everything is owned here, so `analyze`
+/// can be called by the CLI and by codegen with the same setup, and nothing
+/// points at a frame that has already returned.
+fn new_ck(nodes: *Vec[ps::Node]) -> Ck {
+    return Ck { src: "", nodes: nodes, use_std: false, types: TyTab { all: vec_new[Ty]() }, vars: vec_new[Var](), marks: vec_new[int](), funcs: vec_new[Sym](), sigs: vec_new[FnSig](), fields: vec_new[Sym](), consts: vec_new[Sym](), methods: vec_new[Sym](), variant_of: vec_new[Sym](), vpayload: vec_new[Sym](), ret: 0, tparams: vec_new[string](), generic_structs: vec_new[Sym](), args_buf: vec_new[int](), tps_buf: vec_new[string](), segs: vec_new[Seg](), failed: false, err_line: 0, err_col: 0, err_msg: "", depth: 0, prog: -1 };
+}
+
+/// Lex, parse and check `path` into the arena `c.nodes` points at. Returns
+/// false when the source is rejected; `c` then holds the first diagnostic and
+/// `c.prog` is the program node. Codegen calls this and reads the arena.
+fn analyze(c: *Ck, path: string) -> bool {
     src := "";
     if !sys::read_file(path, &src) {
-        sys::eprintln("wcheck: cannot read " + path);
-        return 1;
+        fail(c, 0, 0, "cannot read " + path);
+        return false;
     }
+    c.src = src;
     toks := vec_new[lx::Tok]();
     l := lx::Lexer { src: src, len: std::strlen(src), pos: 0, line: 1, col: 1 };
     while true {
         t := l.next();
         if t.kind == lx::T_ERR {
-            sys::eprintln("wcheck: " + std::int_to_str(t.line) + ":" + std::int_to_str(t.col) + ": invalid token");
-            return 1;
+            fail(c, t.line, t.col, "invalid token");
+            return false;
         }
         toks.push(t);
         if t.kind == lx::T_EOF {
             break;
         }
     }
-    nodes := vec_new[ps::Node]();
-    p := ps::P { src: src, toks: toks, pos: 0, nodes: &nodes, failed: false, err_line: 0, err_col: 0, err_msg: "" };
+    p := ps::P { src: src, toks: toks, pos: 0, nodes: c.nodes, failed: false, err_line: 0, err_col: 0, err_msg: "" };
     prog := ps::parse_program(&p);
     if p.failed {
-        sys::eprintln(path + ":" + std::int_to_str(p.err_line) + ":" + std::int_to_str(p.err_col) + ": " + p.err_msg);
-        return 1;
+        fail(c, p.err_line, p.err_col, p.err_msg);
+        return false;
     }
-    tyv := vec_new[Ty]();
-    types := tytab(&tyv);
-    vars := vec_new[Var]();
-    marks := vec_new[int]();
-    funcs := vec_new[Sym]();
-    fields := vec_new[Sym]();
-    consts := vec_new[Sym]();
-    methods := vec_new[Sym]();
-    variant_of := vec_new[Sym]();
-    vpayload := vec_new[Sym]();
-    sigs := vec_new[FnSig]();
-    generic_structs := vec_new[Sym]();
-    args_buf := vec_new[int]();
-    tps_buf := vec_new[string]();
-    segs := vec_new[Seg]();
-    no_tparams := vec_new[string]();
-    c := Ck { src: src, nodes: &nodes, use_std: false, types: &types, vars: &vars, marks: &marks, funcs: &funcs, sigs: &sigs, fields: &fields, consts: &consts, methods: &methods, variant_of: &variant_of, vpayload: &vpayload, ret: 0, tparams: &no_tparams, no_tparams: &no_tparams, generic_structs: &generic_structs, args_buf: &args_buf, tps_buf: &tps_buf, segs: &segs, failed: false, err_line: 0, err_col: 0, err_msg: "", depth: 0 };
-    prelude(&c);
-    c.use_std = has_use_std(&c, prog);
+    c.prog = prog;
+    c.use_std = has_use_std(c, prog);
     // std's declarations come first, exactly as `splice_std` splices them
     if c.use_std {
-        std_prog := parse_std(&c);
+        std_prog := parse_std(c);
         if std_prog >= 0 {
-            c.use_std = true;
-            collect(&c, std_prog);
-            c.use_std = true;
+            collect(c, std_prog);
         }
     }
-    collect(&c, prog);
-    bodies(&c, prog);
-    if c.failed {
-        sys::eprintln(path + ":" + std::int_to_str(c.err_line) + ":" + std::int_to_str(c.err_col) + ": " + c.err_msg);
+    collect(c, prog);
+    bodies(c, prog);
+    return !c.failed;
+}
+
+/// Print the type of every expression node that has one, one per line:
+/// `index:line:col kind ty`. This is the codegen input, made visible.
+fn dump_types(c: *Ck) {
+    i := 0;
+    while i < c.nodes.len() {
+        n := get(c, i);
+        if n.ty >= 0 {
+            std::println_str(std::int_to_str(i) + ":" + std::int_to_str(n.line) + ":" + std::int_to_str(n.col) + " " + std::int_to_str(n.kind) + " " + ty_name(&c.types, n.ty));
+        }
+        i += 1;
+    }
+}
+
+fn report(c: *Ck, path: string) {
+    sys::eprintln(path + ":" + std::int_to_str(c.err_line) + ":" + std::int_to_str(c.err_col) + ": " + c.err_msg);
+}
+
+fn run(path: string, verbose: bool) -> int {
+    nodes := vec_new[ps::Node]();
+    c := new_ck(&nodes);
+    prelude(&c);
+    if !analyze(&c, path) {
+        report(&c, path);
         return 1;
     }
     if verbose {
+        dump_types(&c);
         i := 0;
         while i < c.funcs.len() {
             f := c.funcs.get(i);
-            std::println_str("fn " + f.name + " -> " + ty_name(c.types, ty_elem(c.types, f.ty)));
+            std::println_str("fn " + f.name + " -> " + ty_name(&c.types, ty_elem(&c.types, f.ty)));
             i += 1;
         }
     }
@@ -1686,8 +1716,8 @@ fn run(path: string, verbose: bool) -> int {
     return 0;
 }
 
-/// `wcheck <file> bench [n]`: n in-process checks over the same tree, so the
-/// number is comparable between runs and between machines.
+/// `wcheck <file> bench [n]`: n full checks in process, so the number is
+/// comparable between runs and between machines.
 fn bench(path: string, iters: int) -> int {
     src := "";
     if !sys::read_file(path, &src) {
@@ -1710,25 +1740,11 @@ fn bench(path: string, iters: int) -> int {
         nodes := vec_new[ps::Node]();
         p := ps::P { src: src, toks: toks, pos: 0, nodes: &nodes, failed: false, err_line: 0, err_col: 0, err_msg: "" };
         prog := ps::parse_program(&p);
-        // the same passes the real run does, minus the diagnostics
-        tyv := vec_new[Ty]();
-        types := tytab(&tyv);
-        vars := vec_new[Var]();
-        marks := vec_new[int]();
-        funcs := vec_new[Sym]();
-        sigs := vec_new[FnSig]();
-        fields := vec_new[Sym]();
-        consts := vec_new[Sym]();
-        methods := vec_new[Sym]();
-        variant_of := vec_new[Sym]();
-        vpayload := vec_new[Sym]();
-        gs := vec_new[Sym]();
-        ab := vec_new[int]();
-        tb := vec_new[string]();
-        sg := vec_new[Seg]();
-        nt := vec_new[string]();
-        c := Ck { src: src, nodes: &nodes, use_std: true, types: &types, vars: &vars, marks: &marks, funcs: &funcs, sigs: &sigs, fields: &fields, consts: &consts, methods: &methods, variant_of: &variant_of, vpayload: &vpayload, ret: 0, tparams: &nt, no_tparams: &nt, generic_structs: &gs, args_buf: &ab, tps_buf: &tb, segs: &sg, failed: false, err_line: 0, err_col: 0, err_msg: "", depth: 0 };
+        c := new_ck(&nodes);
         prelude(&c);
+        c.src = src;
+        c.use_std = true;
+        (&c.segs).push(Seg { start: 0, src: src });
         collect(&c, prog);
         bodies(&c, prog);
         total = total + nodes.len();
