@@ -106,7 +106,7 @@ fn sources() -> Vec<String> {
                     continue;
                 }
                 walk(&path, out);
-            } else if name.ends_with(".wlel") && path.to_str() != Some("lib/std.wlel") {
+            } else if name.ends_with(".wlel") {
                 out.push(path.to_string_lossy().into_owned());
             }
         }
@@ -156,10 +156,12 @@ const KNOWN_GAPS: &[(&str, &str)] = &[
 ];
 
 
+/// Repository-relative path with forward slashes, so the gap list matches on
+/// every platform: Windows reports `D:\\a\\wlel\\wlel\\examples\\x.wlel`.
 fn relative(file: &str) -> String {
-    file.strip_prefix(&format!("{}/", root().display()))
-        .unwrap_or(file)
-        .replace('\\', "/")
+    let slashed = file.replace('\\', "/");
+    let base = format!("{}/", root().display().to_string().replace('\\', "/"));
+    slashed.strip_prefix(&base).unwrap_or(&slashed).to_string()
 }
 
 fn gap_for(file: &str) -> Option<&'static str> {
@@ -269,4 +271,23 @@ fn the_self_hosted_checker_reports_throughput() {
     assert!(text.contains("20 passes"), "{text}");
     let mbps: u64 = text.rsplit(' ').find_map(|w| w.parse().ok()).unwrap_or(0);
     assert!(mbps > 3, "checker throughput regressed: {text}");
+}
+
+#[test]
+fn the_gap_list_matches_on_every_platform() {
+    // Windows reports backslashes and a drive letter; the gap list is written
+    // with forward slashes relative to the repository root
+    let win = format!("{}\\examples\\modules.wlel", root().display());
+    assert_eq!(relative(&win), "examples/modules.wlel");
+    let unix = format!("{}/examples/modules.wlel", root().display());
+    assert_eq!(relative(&unix), "examples/modules.wlel");
+    // a file outside the repository keeps its name
+    assert_eq!(relative("/tmp/other.wlel"), "/tmp/other.wlel");
+    // every entry really exists, so a typo cannot silently disable a gap
+    for (file, why) in KNOWN_GAPS {
+        assert!(
+            root().join(file).is_file(),
+            "KNOWN_GAPS names {file} ({why}) but the file does not exist"
+        );
+    }
 }
