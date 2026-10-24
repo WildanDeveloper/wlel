@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792820387517,
+  "lastUpdate": 1792820806415,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1391,6 +1391,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "sort 1M ints",
             "value": 76,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.8,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "01f955a6c89b248b76f0c4f31b8dcb2390575b6f",
+          "message": "tests: the checker parity gate normalises paths before consulting the gap list — `relative()` stripped a `root()/` prefix that never matched on Windows, where the checker reports `D:\\a\\wlel\\wlel\\examples\\...`, so all twenty known gaps were treated as regressions and the Windows job failed; it now slashes both sides first, and a new `the_gap_list_matches_on_every_platform` test pins the Windows form, the Unix form and an out-of-tree path, and asserts every `KNOWN_GAPS` entry names a file that exists so a typo cannot silently disable a gap; the `lib/std.wlel` exclusion in `sources()` compared an absolute path against a relative string and so never excluded anything (harmless once the gap list works, removed); 661 cargo tests green, clippy -D warnings clean",
+          "timestamp": "2026-10-24T05:46:03Z",
+          "tree_id": "e3fb1b6529a0b672f72cc2edada3f25a6f9524b5",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/01f955a6c89b248b76f0c4f31b8dcb2390575b6f"
+        },
+        "date": 1792820805209,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.4,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 67,
             "unit": "ms"
           },
           {
