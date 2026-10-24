@@ -1310,7 +1310,7 @@ fn format_sig_wrapper(sig: &str) -> String {
 fn sys_runtime_c() -> String {
     let mut c = String::new();
     c.push_str("/* ---- process + filesystem runtime (sys::spawn/getenv/...) ---- */\n");
-    c.push_str("#ifndef _WIN32\n#include <sys/wait.h>\n#include <sys/stat.h>\n#include <dirent.h>\n#include <unistd.h>\n#endif\n");
+    c.push_str("#ifdef _WIN32\n#include <direct.h>\n#include <io.h>\n#else\n#include <sys/wait.h>\n#include <sys/stat.h>\n#include <dirent.h>\n#include <unistd.h>\n#endif\n");
     // stderr: the diagnostic channel a compiler needs
     c.push_str("static void _wlel_eprint_str(const char* s) { fputs(s, stderr); fflush(stderr); }\n");
     c.push_str("static void _wlel_eprint_int(long long v) { fprintf(stderr, \"%lld\", v); fflush(stderr); }\n");

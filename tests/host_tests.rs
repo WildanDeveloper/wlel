@@ -118,9 +118,16 @@ fn a_program_can_drive_the_c_compiler() {
     let c = Case::new("drive");
     c.write(
         "main.wlel",
-        "use std;\n\nfn main() -> int {\n    dir := sys::getenv(\"WLEL_TEST_DIR\");\n    cfile := dir + \"/hello.c\";\n    exe := dir + \"/hello\";\n    src := \"#include <stdio.h>\\nint main(void) { printf(\\\"from C\\\\n\\\"); return 0; }\\n\";\n    if !sys::write_file(cfile, src) {\n        sys::eprintln(\"write failed\");\n        return 1;\n    }\n    log := \"\";\n    if sys::spawn(\"cc -O1 -o \" + exe + \" \" + cfile + \" 2>&1\", &log) != 0 {\n        sys::eprintln(log);\n        return 1;\n    }\n    stdout := \"\";\n    rc := sys::spawn(exe, &stdout);\n    std::print_str(stdout);\n    std::println_int(rc);\n    sys::remove(cfile);\n    sys::remove(exe);\n    return 0;\n}\n",
+        "use std;\n\nfn main() -> int {\n    dir := sys::getenv(\"WLEL_TEST_DIR\");\n    cfile := dir + \"/hello.c\";\n    exe := dir + \"/hello\";\n    src := \"#include <stdio.h>\\nint main(void) { printf(\\\"from C\\\\n\\\"); return 0; }\\n\";\n    if !sys::write_file(cfile, src) {\n        sys::eprintln(\"write failed\");\n        return 1;\n    }\n    log := \"\";\n    if sys::spawn(\"CC -O1 -o \" + exe + \" \" + cfile + \" 2>&1\", &log) != 0 {\n        sys::eprintln(log);\n        return 1;\n    }\n    stdout := \"\";\n    rc := sys::spawn(exe, &stdout);\n    std::print_str(stdout);\n    std::println_int(rc);\n    sys::remove(cfile);\n    sys::remove(exe);\n    return 0;\n}\n",
     );
+    let cc = if cfg!(windows) { "gcc" } else { "cc" };
+    if Command::new(cc).arg("--version").output().map(|o| !o.status.success()).unwrap_or(true) {
+        eprintln!("skipping: no C compiler on PATH");
+        return;
+    }
     let dir = c.dir.display().to_string();
+    let src = fs::read_to_string(c.dir.join("main.wlel")).expect("read source");
+    fs::write(c.dir.join("main.wlel"), src.replace("CC", cc)).expect("patch source");
     let out = Command::new(env!("CARGO_BIN_EXE_wlel"))
         .args(["run", "main.wlel"])
         .current_dir(&c.dir)
