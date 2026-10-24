@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792820806415,
+  "lastUpdate": 1792820936162,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1445,6 +1445,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.8,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "0da4beef8fd374da28775cd485df25edf3e86a41",
+          "message": "release: v1.9.1 — v1.9.0 was tagged before the Windows path fix in the checker parity gate, so its archives carried a test that failed on Windows while the compiler itself was fine; this tag carries the normalised `relative()` (both sides slashed, so `D:\\a\\wlel\\wlel\\examples\\...` matches the gap list), the new `the_gap_list_matches_on_every_platform` test, the version bump and the changelog entry; 661 cargo tests green, clippy -D warnings clean, docs site renders",
+          "timestamp": "2026-10-24T05:48:12Z",
+          "tree_id": "8c628da19e36d95ffe5ee55adc8ca27abc5663cc",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/0da4beef8fd374da28775cd485df25edf3e86a41"
+        },
+        "date": 1792820935714,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.9,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 67,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 4,
             "unit": "ms"
           }
         ]
