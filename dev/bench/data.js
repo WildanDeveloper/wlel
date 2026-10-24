@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792803794539,
+  "lastUpdate": 1792804265544,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -961,6 +961,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "d39c863a086f0918d5d506f4c3e89b7546df2b9c",
+          "message": "host runtime: make the new sys:: layer correct on Windows — `_mkdir` needs `<direct.h>`/`<io.h>` (the previous commit), and two further bugs only the Windows runner found: `sys::remove` used `remove()`, which deletes files but not directories on Windows (`_rmdir` is the CRT call), so `mkdir`+`remove` left the directory behind; and a user variable named `stdout` shadowed MinGW's stdio macro and made the generated declaration unparseable, so `stdin`/`stdout`/`stderr` (and the libc names the host runtime itself uses) are now in the reserved-name list with a clear diagnostic instead of a cc error pointing at generated C; the drive-the-compiler test also names its capture buffer `program_out` and picks the host's C compiler (`gcc` on Windows, `cc` elsewhere, skipped when absent); 634 cargo tests green, clippy -D warnings clean",
+          "timestamp": "2026-10-24T01:10:13Z",
+          "tree_id": "771028e419c75e3d04620bdd8ba6ff283e8897b1",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/d39c863a086f0918d5d506f4c3e89b7546df2b9c"
+        },
+        "date": 1792804264415,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 15.2,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 58,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 7,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.4,
             "unit": "ms"
           }
         ]
