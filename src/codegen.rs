@@ -1437,7 +1437,14 @@ fn sys_runtime_c() -> String {
     c.push_str("#endif\n");
     c.push_str("}\n");
     c.push_str("static _Bool _wlel_rename(const char* from, const char* to) { return rename(from, to) == 0; }\n");
-    c.push_str("static _Bool _wlel_remove(const char* path) { return remove(path) == 0; }\n");
+    c.push_str("static _Bool _wlel_remove(const char* path) {\n");
+    c.push_str("    if (remove(path) == 0) return 1;\n");
+    c.push_str("#ifdef _WIN32\n");
+    c.push_str("    return _rmdir(path) == 0;\n");
+    c.push_str("#else\n");
+    c.push_str("    return 0;\n");
+    c.push_str("#endif\n");
+    c.push_str("}\n");
     c.push_str("static _Bool _wlel_exists(const char* path) {\n");
     c.push_str("#ifdef _WIN32\n");
     c.push_str("    return _access(path, 0) == 0;\n");

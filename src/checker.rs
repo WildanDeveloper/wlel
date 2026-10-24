@@ -6579,6 +6579,12 @@ fn c_reserved(name: &str) -> bool {
             | "pthread_mutex_lock" | "pthread_mutex_unlock" | "pthread_mutex_init"
             | "pthread_mutex_destroy" | "pthread_cond_wait" | "pthread_cond_signal"
             | "pthread_cond_broadcast" | "pthread_cond_init" | "pthread_cond_destroy"
+            // POSIX streams and the process/filesystem runtime: a local named
+            // `stdin`/`stdout`/`stderr` shadows the C global and the generated
+            // declaration stops compiling (MinGW makes this loudest)
+            | "stdin" | "stdout" | "stderr" | "getenv" | "system" | "access"
+            | "rename" | "remove" | "mkdir" | "opendir" | "readdir" | "closedir"
+            | "popen" | "pclose" | "fgetc" | "fputc" | "fflush" | "dirent"
     ) || name.starts_with("wlel_")
         || name.starts_with("_wlel_")
         || name.starts_with("std__")

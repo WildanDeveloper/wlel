@@ -118,7 +118,7 @@ fn a_program_can_drive_the_c_compiler() {
     let c = Case::new("drive");
     c.write(
         "main.wlel",
-        "use std;\n\nfn main() -> int {\n    dir := sys::getenv(\"WLEL_TEST_DIR\");\n    cfile := dir + \"/hello.c\";\n    exe := dir + \"/hello\";\n    src := \"#include <stdio.h>\\nint main(void) { printf(\\\"from C\\\\n\\\"); return 0; }\\n\";\n    if !sys::write_file(cfile, src) {\n        sys::eprintln(\"write failed\");\n        return 1;\n    }\n    log := \"\";\n    if sys::spawn(\"CC -O1 -o \" + exe + \" \" + cfile + \" 2>&1\", &log) != 0 {\n        sys::eprintln(log);\n        return 1;\n    }\n    stdout := \"\";\n    rc := sys::spawn(exe, &stdout);\n    std::print_str(stdout);\n    std::println_int(rc);\n    sys::remove(cfile);\n    sys::remove(exe);\n    return 0;\n}\n",
+        "use std;\n\nfn main() -> int {\n    dir := sys::getenv(\"WLEL_TEST_DIR\");\n    cfile := dir + \"/hello.c\";\n    exe := dir + \"/hello\";\n    src := \"#include <stdio.h>\\nint main(void) { printf(\\\"from C\\\\n\\\"); return 0; }\\n\";\n    if !sys::write_file(cfile, src) {\n        sys::eprintln(\"write failed\");\n        return 1;\n    }\n    log := \"\";\n    if sys::spawn(\"CC -O1 -o \" + exe + \" \" + cfile + \" 2>&1\", &log) != 0 {\n        sys::eprintln(log);\n        return 1;\n    }\n    program_out := \"\";\n    rc := sys::spawn(exe, &program_out);\n    std::print_str(program_out);\n    std::println_int(rc);\n    sys::remove(cfile);\n    sys::remove(exe);\n    return 0;\n}\n",
     );
     let cc = if cfg!(windows) { "gcc" } else { "cc" };
     if Command::new(cc).arg("--version").output().map(|o| !o.status.success()).unwrap_or(true) {
@@ -190,7 +190,14 @@ fn main() -> int {{
     let (out, err, code) = c.run("main.wlel");
     assert_eq!(code, Some(0), "{out}{err}");
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines, ["false", "true", "true", "true", "false", "true", "false"], "{out}");
+    // create -> exists -> rename -> gone -> removed -> gone
+    assert_eq!(lines[0], "false", "{out}");
+    assert_eq!(lines[1], "true", "mkdir: {out}");
+    assert_eq!(lines[2], "true", "exists after mkdir: {out}");
+    assert_eq!(lines[3], "true", "rename: {out}");
+    assert_eq!(lines[4], "false", "old path gone: {out}");
+    assert_eq!(lines[5], "true", "remove: {out}");
+    assert_eq!(lines[6], "false", "gone after remove: {out}");
 }
 
 #[test]
