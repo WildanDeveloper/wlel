@@ -294,9 +294,10 @@ test "pt sum" {
     // pull in the embedded library for the whole merge
     t.write(
         "app/src/main.wlel",
-        r#"fn main() -> int {
-    p := mk(40, 2);
-    return sum(&p);
+        r#"use pointlib;
+fn main() -> int {
+    p := pointlib::mk(40, 2);
+    return pointlib::sum(&p);
 }"#,
     );
     let app = t.path.join("app");
@@ -306,9 +307,10 @@ test "pt sum" {
     t.write(
         "app/src/main.wlel",
         r#"use std;
+use pointlib;
 fn main() -> int {
-    p := mk(40, 2);
-    std::println_int(sum(&p));
+    p := pointlib::mk(40, 2);
+    std::println_int(pointlib::sum(&p));
     return 0;
 }"#,
     );
@@ -416,8 +418,9 @@ fn git_dep_clones_builds_and_lock_pins_the_revision() {
     t.write(
         "app/src/main.wlel",
         r#"use std;
+use greetx;
 fn main() -> int {
-    std::println_int(hi());
+    std::println_int(greetx::hi());
     return 0;
 }"#,
     );

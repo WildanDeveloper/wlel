@@ -23,6 +23,7 @@ pub enum Token {
     Arena,
     Use,
     Test,
+    Module,
     As,
     Let,
     Return,

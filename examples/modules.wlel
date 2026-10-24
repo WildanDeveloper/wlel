@@ -1,0 +1,34 @@
+// modules.wlel — module namespaces: qualified access, import lists, aliases,
+// and two modules that define the same name without colliding.
+use std;
+use "lib/shapes.wlel";
+use "lib/units.wlel" as u;
+use "lib/units.wlel" { metres_to_feet };
+
+fn main() -> int {
+    std::println_str("== modules ==");
+
+    // every member is reached through its module
+    c := shapes::Circle { r: 2.0 };
+    r := shapes::Rect { w: 3.0, h: 4.0 };
+    std::println_float(shapes::area_of_circle(c));
+    std::println_float(shapes::area_of_rect(r));
+
+    // two modules, one name: qualified access always works
+    std::println_str(shapes::helper());
+    std::println_str(u::helper());
+
+    // `as u` aliases the module; `{ metres_to_feet }` imports a name
+    std::println_float(u::metres_to_feet(1.0));
+    std::println_float(metres_to_feet(2.0));
+    return 0;
+}
+
+test "modules keep their own helper" {
+    assert(shapes::helper() == "shapes");
+    assert(u::helper() == "units");
+}
+
+test "imported name is the same function" {
+    assert_eq(metres_to_feet(1.0), u::metres_to_feet(1.0));
+}

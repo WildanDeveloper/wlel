@@ -351,6 +351,10 @@
           {
             "type": "primitive_type",
             "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
           }
         ]
       },
@@ -1105,6 +1109,10 @@
           {
             "type": "primitive_type",
             "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
           }
         ]
       },
@@ -1722,6 +1730,10 @@
           {
             "type": "primitive_type",
             "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
           }
         ]
       }
@@ -1763,6 +1775,10 @@
           },
           {
             "type": "primitive_type",
+            "named": true
+          },
+          {
+            "type": "qualified_type",
             "named": true
           }
         ]
@@ -2164,6 +2180,10 @@
           {
             "type": "primitive_type",
             "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
           }
         ]
       },
@@ -2216,6 +2236,10 @@
         },
         {
           "type": "primitive_type",
+          "named": true
+        },
+        {
+          "type": "qualified_type",
           "named": true
         }
       ]
@@ -2348,6 +2372,10 @@
           {
             "type": "identifier",
             "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
           }
         ]
       },
@@ -2368,6 +2396,47 @@
       "types": [
         {
           "type": "function_declaration",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "import_item",
+    "named": true,
+    "fields": {
+      "alias": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "import_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "import_item",
           "named": true
         }
       ]
@@ -2609,6 +2678,10 @@
           },
           {
             "type": "primitive_type",
+            "named": true
+          },
+          {
+            "type": "qualified_type",
             "named": true
           }
         ]
@@ -3046,6 +3119,37 @@
     }
   },
   {
+    "type": "module_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "module_name",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "named_type",
     "named": true,
     "fields": {},
@@ -3185,6 +3289,10 @@
           {
             "type": "primitive_type",
             "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
           }
         ]
       }
@@ -3226,6 +3334,10 @@
           },
           {
             "type": "primitive_type",
+            "named": true
+          },
+          {
+            "type": "qualified_type",
             "named": true
           }
         ]
@@ -3426,6 +3538,10 @@
         {
           "type": "primitive_type",
           "named": true
+        },
+        {
+          "type": "qualified_type",
+          "named": true
         }
       ]
     }
@@ -3434,6 +3550,32 @@
     "type": "primitive_type",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "qualified_type",
+    "named": true,
+    "fields": {
+      "module": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
   },
   {
     "type": "range_expression",
@@ -3857,6 +3999,10 @@
           {
             "type": "primitive_type",
             "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
           }
         ]
       }
@@ -3885,6 +4031,10 @@
         },
         {
           "type": "impl_declaration",
+          "named": true
+        },
+        {
+          "type": "module_declaration",
           "named": true
         },
         {
@@ -3948,6 +4098,10 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "path_expression",
             "named": true
           }
         ]
@@ -4108,6 +4262,10 @@
         {
           "type": "primitive_type",
           "named": true
+        },
+        {
+          "type": "qualified_type",
+          "named": true
         }
       ]
     }
@@ -4248,13 +4406,28 @@
   {
     "type": "use_declaration",
     "named": true,
-    "fields": {},
+    "fields": {
+      "alias": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": true,
       "types": [
         {
-          "type": "std_module",
+          "type": "import_list",
+          "named": true
+        },
+        {
+          "type": "module_name",
           "named": true
         },
         {
@@ -4301,6 +4474,10 @@
         },
         {
           "type": "primitive_type",
+          "named": true
+        },
+        {
+          "type": "qualified_type",
           "named": true
         }
       ]
@@ -4713,6 +4890,10 @@
     "named": false
   },
   {
+    "type": "module",
+    "named": false
+  },
+  {
     "type": "new",
     "named": false
   },
@@ -4722,10 +4903,6 @@
   },
   {
     "type": "self_expression",
-    "named": true
-  },
-  {
-    "type": "std_module",
     "named": true
   },
   {

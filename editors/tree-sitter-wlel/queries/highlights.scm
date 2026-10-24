@@ -10,6 +10,21 @@
 
 ; ---- declarations ---------------------------------------------------------
 
+(module_declaration
+  name: (identifier) @namespace)
+
+(module_name) @namespace
+
+(import_item
+  name: (identifier) @variable.import)
+
+(qualified_type
+  module: (identifier) @namespace
+  name: (identifier) @type)
+
+(path_expression
+  module: (identifier) @namespace)
+
 (function_declaration
   name: (identifier) @function)
 
@@ -147,6 +162,8 @@
 
 [
   "use"
+  "module"
+  "as"
   "fn"
   "extern"
   "struct"

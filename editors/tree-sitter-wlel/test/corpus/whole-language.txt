@@ -70,7 +70,8 @@ fn main() -> int {
 
 (source_file
   (use_declaration
-    (std_module))
+    (module_name
+      (identifier)))
   (extern_declaration
     (identifier)
     (parameter_list

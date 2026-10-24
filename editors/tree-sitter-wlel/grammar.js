@@ -34,6 +34,7 @@ module.exports = grammar({
     source_file: $ => repeat($._item),
 
     _item: $ => choice(
+      $.module_declaration,
       $.use_declaration,
       $.function_declaration,
       $.extern_declaration,
@@ -53,13 +54,42 @@ module.exports = grammar({
 
     // ---- declarations -----------------------------------------------------
 
-    use_declaration: $ => seq(
-      'use',
-      choice($.string_literal, $.std_module),
+    // `module geom;` names the namespace this file's items live in
+    module_declaration: $ => seq(
+      'module',
+      field('name', $.identifier),
       ';',
     ),
 
-    std_module: _ => 'std',
+    // `use "lib/geom.wlel" [as g] [{ add, Vec2 as V } | { * }];`
+    // `use std;` and `use geom;` (a module or package by name)
+    use_declaration: $ => seq(
+      'use',
+      choice($.string_literal, $.module_name),
+      optional(seq('as', field('alias', $.identifier))),
+      optional($.import_list),
+      ';',
+    ),
+
+    module_name: $ => $.identifier,
+
+    import_list: $ => seq(
+      '{',
+      choice(
+        '*',
+        seq(
+          $.import_item,
+          repeat(seq(',', $.import_item)),
+          optional(','),
+        ),
+      ),
+      '}',
+    ),
+
+    import_item: $ => seq(
+      field('name', $.identifier),
+      optional(seq('as', field('alias', $.identifier))),
+    ),
 
     function_declaration: $ => seq(
       'fn',
@@ -110,7 +140,7 @@ module.exports = grammar({
 
     impl_declaration: $ => seq(
       'impl',
-      field('type', $.identifier),
+      field('type', choice($.identifier, $.qualified_type)),
       optional(field('type_params', $.type_parameters)),
       '{',
       repeat($.function_declaration),
@@ -147,8 +177,16 @@ module.exports = grammar({
       $.pointer_type,
       $.array_type,
       $.generic_type,
+      $.qualified_type,
       $.named_type,
     ),
+
+    // a type from another module
+    qualified_type: $ => prec(1, seq(
+      field('module', $.identifier),
+      '::',
+      field('name', $.identifier),
+    )),
 
     primitive_type: _ => choice(
       'int', 'i8', 'i16', 'i32', 'i64',
@@ -397,7 +435,7 @@ module.exports = grammar({
     try_expression: $ => prec(15, seq($._control_expression, '?')),
 
     struct_literal: $ => prec(1, seq(
-      field('name', $.identifier),
+      field('name', choice($.identifier, $.path_expression)),
       '{',
       optional(seq($.field_initializer, repeat(seq(',', $.field_initializer)), optional(','))),
       '}',

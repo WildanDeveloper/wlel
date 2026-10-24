@@ -2,6 +2,13 @@ use crate::span::{Span, Spanned};
 
 #[derive(Debug, Clone)]
 pub struct Program {
+    /// `module geom;` — the name this file's items live under. Empty for the
+    /// program root (the file the user asked to run/build) and for a file
+    /// parsed on its own without a declaration; the loader fills it in from
+    /// the file stem when a module omits the declaration.
+    pub module: String,
+    /// where the `module` declaration appeared (zero when absent)
+    pub module_span: Span,
     pub uses: Vec<UseDecl>,
     pub structs: Vec<StructDef>,
     /// tagged enums: `enum Shape { Circle(float), Point }`
@@ -12,20 +19,126 @@ pub struct Program {
     pub funcs: Vec<FuncDef>,
     /// `test "name" { ... }` blocks, merged from this file and its imports
     pub tests: Vec<TestDef>,
+    /// every module reachable from this program, keyed by name — the
+    /// namespace table the checker resolves `geom::add` against. The root
+    /// module is present under the empty name.
+    pub modules: Vec<ModuleInfo>,
 }
+
+/// One module: what it exports and what it brought into its own scope.
+#[derive(Debug, Clone)]
+pub struct ModuleInfo {
+    pub name: String,
+    /// canonical path of the defining file; empty for the program root
+    pub file: String,
+    /// names this module exports, sorted and deduplicated
+    pub exports: Vec<Export>,
+    /// what `use` brought into this module's own scope
+    pub imports: Vec<ImportBinding>,
+    /// the `use` declarations written in this module's file, so a named
+    /// import (`use geom;`) can be bound once every module is known
+    pub uses: Vec<UseDecl>,
+}
+
+/// One binding created by a `use` in a module.
+#[derive(Debug, Clone)]
+pub struct ImportBinding {
+    /// the name written at the use site: a module alias (`as g`) or an
+    /// imported item's local name (`{ add as plus }`)
+    pub local: String,
+    /// what it resolves to: a module name when `is_module`, otherwise the
+    /// qualified item name (`geom::add`)
+    pub target: String,
+    pub is_module: bool,
+    /// true for `{ add }` / `{ * }`: an explicit import wins over a name
+    /// that another imported module merely makes available
+    pub explicit: bool,
+}
+
+/// One exported name. A module can export a function, a struct, an enum, a
+/// variant constructor or a builtin (`std::println_int`); `kind` tells the
+/// checker which table to look the name up in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExportKind {
+    Function,
+    Struct,
+    Enum,
+    Variant,
+}
+
+#[derive(Debug, Clone)]
+pub struct Export {
+    /// the name as written in the module (`add`, `Vec2`, `Circle`)
+    pub name: String,
+    /// the unique name the declaration was qualified to (`geom::add`), which
+    /// is what resolution returns
+    pub qualified: String,
+    pub kind: ExportKind,
+    /// the owning enum for a variant (its qualified name); empty otherwise
+    pub owner: String,
+}
+
+impl Program {
+    pub fn empty() -> Program {
+        Program {
+            module: String::new(),
+            module_span: Span::point(0, 0),
+            uses: Vec::new(),
+            structs: Vec::new(),
+            enums: Vec::new(),
+            impls: Vec::new(),
+            funcs: Vec::new(),
+            tests: Vec::new(),
+            modules: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UseDecl {
-    /// None = std
+    /// None = std (or a named module import, see `named`)
     pub path: Option<String>,
+    /// `use geom;` — a module or package dependency by name, resolved
+    /// against the program's module table rather than the filesystem
+    pub named: Option<String>,
     /// canonical path of a file import, filled in by the loader so the
     /// checker can attribute usage to this import (None in unit tests)
     pub resolved: Option<String>,
+    /// the module the import binds (`use "lib/geom.wlel";` -> "geom"),
+    /// filled in by the loader; empty when unknown (unit tests)
+    pub module: String,
+    /// `use "lib/geom.wlel" as g;` — the local name for the module
+    pub alias: Option<String>,
+    /// `use "lib/geom.wlel" { add, Vec2 };` — names pulled into this
+    /// module's scope. Empty means "module only, use it qualified";
+    /// `Selective::All` is `{ * }` and pulls every export in.
+    pub names: ImportNames,
+    pub span: Span,
+}
+
+/// What a `use` brings into the importing module's own scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportNames {
+    /// nothing: the module is bound, its items need `mod::item`
+    None,
+    /// `{ * }` — every export
+    All,
+    /// `{ add, Vec2 as V }`
+    Some(Vec<ImportName>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportName {
+    pub name: String,
+    pub alias: Option<String>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct StructDef {
     pub name: String,
+    /// the module this struct is defined in (empty for the program root)
+    pub module: String,
     /// raw type strings, e.g. "float", "*Point" — may reference the struct's
     /// type parameters ("T") when type_params is non-empty
     pub fields: Vec<(String, String)>,
@@ -52,6 +165,8 @@ pub struct VariantDef {
 #[derive(Debug, Clone)]
 pub struct EnumDef {
     pub name: String,
+    /// the module this enum is defined in (empty for the program root)
+    pub module: String,
     pub variants: Vec<VariantDef>,
     /// generic type parameters ("T", "E", ...) — empty for a plain enum;
     /// generic enums are monomorphized per concrete argument list
@@ -74,6 +189,9 @@ pub struct FuncDef {
     /// `extern fn ...;` — declaration of a C function; no body is emitted,
     /// the call links against the external symbol at cc time
     pub is_extern: bool,
+    /// the module this function is defined in (empty for the program root).
+    /// Resolution of bare names looks in this module's imports.
+    pub module: String,
     pub span: Span,
     /// absolute path of the source file this function was parsed from
     /// (used for `#line` directives so cc errors map back to `.wlel`)
@@ -111,6 +229,8 @@ pub struct ImplDef {
 #[derive(Debug, Clone)]
 pub struct TestDef {
     pub name: String,
+    /// the module this test is defined in (empty for the program root)
+    pub module: String,
     pub body: Block,
     pub span: Span,
     /// absolute path of the source file this test was parsed from

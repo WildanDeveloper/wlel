@@ -15,7 +15,8 @@ use crate::ast::*;
 use crate::checker::Checker;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::project::load_program;
+use crate::modules;
+use crate::project::{self, load_program};
 use crate::span::{Pos, Span};
 use crate::stdsrc::{splice_std, STD_FILE};
 use std::collections::{HashMap, HashSet};
@@ -560,14 +561,7 @@ pub struct Analysis {
 }
 
 fn empty_program() -> Program {
-    Program {
-        uses: Vec::new(),
-        structs: Vec::new(),
-        enums: Vec::new(),
-        impls: Vec::new(),
-        funcs: Vec::new(),
-        tests: Vec::new(),
-    }
+    Program::empty()
 }
 
 /// analyze a document. `doc_path` enables file-import resolution and is used
@@ -633,6 +627,8 @@ pub fn analyze(text: &str, doc_path: Option<&Path>) -> Analysis {
             }
             let use_count = program.uses.len();
             let mut propagated: Vec<UseDecl> = Vec::new();
+            let mut modules: Vec<ModuleInfo> = Vec::new();
+            let mut imports: Vec<ImportBinding> = Vec::new();
             for ui in 0..use_count {
                 let Some(rel) = program.uses[ui].path.clone() else { continue };
                 let use_span = program.uses[ui].span;
@@ -641,12 +637,33 @@ pub fn analyze(text: &str, doc_path: Option<&Path>) -> Analysis {
                     Ok(sub) => {
                         program.uses[ui].resolved =
                             ip.canonicalize().ok().map(|p| p.display().to_string());
+                        // the buffer is the root module: imported files are
+                        // qualified, and their names are visible here
+                        let sub_module = modules::bind_name(&sub.module, &rel);
+                        let bound = program.uses[ui]
+                            .alias
+                            .clone()
+                            .unwrap_or_else(|| sub_module.clone());
+                        let info = sub.modules.iter().find(|m| m.name == sub_module);
+                        match project::scope_bindings(&program.uses[ui], &sub_module, &bound, info) {
+                            Ok(mut b) => imports.append(&mut b),
+                            Err(e) => diags.push(Diag {
+                                span: use_span,
+                                msg: e,
+                                severity: 1,
+                            }),
+                        }
+                        modules.extend(sub.modules.clone());
                         // `use std` anywhere in the import tree pulls in the
                         // embedded library (loader parity)
                         if sub.uses.iter().any(|su| su.path.is_none()) {
                             propagated.push(UseDecl {
                                 path: None,
+                                named: None,
                                 resolved: None,
+                                module: "std".into(),
+                                alias: None,
+                                names: ImportNames::None,
                                 span: use_span,
                             });
                         }
@@ -664,6 +681,28 @@ pub fn analyze(text: &str, doc_path: Option<&Path>) -> Analysis {
                 }
             }
             program.uses.extend(propagated);
+            program.modules = modules;
+            program.modules.insert(
+                0,
+                ModuleInfo {
+                    name: String::new(),
+                    file: file_str.clone(),
+                    exports: modules::exports_of(&program),
+                    imports,
+                    uses: program.uses.clone(),
+                },
+            );
+            let exports: HashMap<String, Vec<Export>> = program
+                .modules
+                .iter()
+                .map(|m| (m.name.clone(), m.exports.clone()))
+                .collect();
+            let table: HashMap<String, Vec<ImportBinding>> = program
+                .modules
+                .iter()
+                .map(|m| (m.name.clone(), m.imports.clone()))
+                .collect();
+            modules::qualify_program_types(&mut program, &exports, &table);
         }
         None => {
             for u in &program.uses {

@@ -1,0 +1,28 @@
+// shapes.wlel — one module among several; the file name is the default
+// module name, so `shapes::area(...)` is how other files reach it.
+module shapes;
+
+use std;
+
+struct Circle {
+    r: float
+}
+
+struct Rect {
+    w: float,
+    h: float
+}
+
+// `helper` deliberately has the same name as the one in units.wlel: two
+// modules may both define it, and only a bare reference would be ambiguous.
+fn helper() -> string {
+    return "shapes";
+}
+
+fn area_of_circle(c: Circle) -> float {
+    return 3.141592653589793 * c.r * c.r;
+}
+
+fn area_of_rect(r: Rect) -> float {
+    return r.w * r.h;
+}

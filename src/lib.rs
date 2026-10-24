@@ -5,6 +5,7 @@ pub mod doc;
 pub mod fmt;
 pub mod lexer;
 pub mod lsp;
+pub mod modules;
 pub mod parser;
 pub mod playground;
 pub mod project;

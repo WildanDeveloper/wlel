@@ -15,6 +15,9 @@
 
 ; ---- definitions ----------------------------------------------------------
 
+(module_declaration
+  name: (identifier) @definition.module)
+
 (function_declaration
   name: (identifier) @definition.function)
 

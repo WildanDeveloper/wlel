@@ -656,12 +656,52 @@ enclosing function MUST return the same std enum with the same `E`.
 
 ## 9. Programs and modules
 
-### 9.1 Files
+### 9.1 Files and modules
 
-A `.wlel` file contains top-level items in any order: `fn`, `extern fn`,
-`struct`, `enum`, `impl`, `test`, `use`. Names live in one flat namespace
-after import merging; there are no module qualifiers except the hardcoded
-`std::` and `sys::` roots.
+A `.wlel` file contains top-level items in any order: `module` (first, at
+most once), `fn`, `extern fn`, `struct`, `enum`, `impl`, `test`, `use`.
+
+**Every file belongs to a module.** `module geom;` names it; a file without
+the declaration takes its stem (`lib/geom.wlel` → `geom`). Module names are
+unique within a program and may not be `std` or `sys`, which the compiler
+provides.
+
+The file the user asked to run, check or build is the **root module**. Its
+items stay unqualified — `fn main` is still the C entry point — and a
+single-file program is unchanged by any of this.
+
+A module's items are reached through the module:
+
+```wlel
+module geom;
+
+struct Vec2 { x: float, y: float }
+fn add(a: Vec2, b: Vec2) -> Vec2 { return Vec2 { x: a.x + b.x, y: a.y + b.y }; }
+```
+
+```wlel
+use "lib/geom.wlel";
+
+fn main() -> int {
+    a := geom::Vec2 { x: 1.0, y: 2.0 };
+    b := geom::add(a, a);
+    return b.x as int;
+}
+```
+
+Two modules MAY define the same name. `geom::helper` and `text::helper` are
+distinct, and both may exist in one program.
+
+**Name resolution.** A bare name resolves, in order, to:
+
+1. a local variable, parameter or pattern binding;
+2. an item of the current module;
+3. a name the current module imported (`use "…" { name }`, or any export of
+   a plain `use "…";`).
+
+Two candidates at step 3 are an **ambiguity error** naming both modules; the
+qualified form always resolves. A name from another module that was never
+imported is an error that names the module and the fix.
 
 ### 9.2 Entry point
 
@@ -675,14 +715,31 @@ freeing, §10.1).
 
 ### 9.3 Imports
 
-- `use "path.wlel";` — imports a file relative to the importing file,
-  **recursively**, with diamond deduplication by canonical path. Imported
-  items are tagged with their source file. A `use std;` in any imported
-  file propagates to the whole import tree.
-- `use std;` — splices the embedded standard library ahead of user code; it
+Every form ends with `;` and may be followed by `{ … }` to pull names into
+the importing module's own scope.
+
+| Form | Meaning |
+|---|---|
+| `use "path.wlel";` | import a file, relative to the importing file |
+| `use "path.wlel" as g;` | …and reach it as `g::item` |
+| `use "path.wlel" { add, Vec2 };` | …and use `add` / `Vec2` unqualified |
+| `use "path.wlel" { add as plus };` | …renaming the imported item |
+| `use "path.wlel" { * };` | …importing every export |
+| `use std;` | the embedded standard library (equivalent to `{ * }`) |
+| `use geom;` | a module or package dependency by name (project mode) |
+
+- File imports are **recursive**, with diamond deduplication by canonical
+  path: one module merged once, however many files import it. A `use std;`
+  in any imported file propagates to the whole import tree.
+- `use std;` splices the embedded standard library ahead of user code; it
   flows through the same checker, so only used instantiations are emitted.
+  Its names are the prelude and are visible in every module.
+- An explicit `{ … }` import wins over a name another module merely makes
+  available through a plain import, so a collision is resolvable by naming
+  the one you want.
 - An import that contributes nothing produces the `import 'x' is never
   used` warning.
+- Importing an item the module does not export is an error.
 
 ### 9.4 Toolchain contract
 
@@ -917,10 +974,14 @@ Informal EBNF; `(* ... *)` comments, `...` repetition. Precedence is §5.1,
 not encoded here.
 
 ```
-file        = { item } ;
+file        = [ module_decl ] { item } ;
+module_decl = "module" IDENT ";" ;
 item        = use | func | extern_func | struct_def | enum_def
             | impl_block | test_def ;
-use         = "use" ( "std" | STRING ) ";" ;
+use         = "use" ( "std" | STRING | IDENT ) [ "as" IDENT ]
+              [ "{" ( "*" | import_items ) "}" ] ";" ;
+import_items = import_item { "," import_item } [ "," ] ;
+import_item  = IDENT [ "as" IDENT ] ;
 func        = "fn" IDENT [ type_params ] "(" [ params ] ")" [ "->" type ] block ;
 extern_func = "extern" "fn" IDENT "(" [ params ] ")" "->" type ";" ;
 params      = param { "," param } ;   param = IDENT [ ":" type ] ;
@@ -975,7 +1036,8 @@ match_arm   = pattern "=>" ( expr | block ) ;
 pattern     = IDENT [ "(" [ IDENT { "," IDENT } ] ")" ] | "_" ;
 ```
 
-Types: `IDENT` (builtin or user), `*` type, `[` type `;` INT `]`.
+Types: `IDENT` (builtin or user), `MODULE "::" IDENT`, `*` type,
+`[` type `;` INT `]`.
 
 ## 17. Resolved for the 1.0 freeze
 

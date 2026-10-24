@@ -327,7 +327,7 @@ fn update_moves_the_pin_to_a_new_tag_and_is_idempotent() {
     // and the new revision is what the program compiles against
     fs::write(
         app.join("src/main.wlel"),
-        "use std;\nfn main() -> int { std::println_int(hi()); return 0; }\n",
+        "use std;\nuse greetx;\nfn main() -> int { std::println_int(greetx::hi()); return 0; }\n",
     )
     .unwrap();
     let out = c.ok_in(&app, &["run"]);

@@ -73,7 +73,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Pointers (`*T`, `&`, `*`), arrays `[T; N]` with C-style decay (implicit at call arguments, explicit `arr as *T` anywhere), `wlel_sizeof(T)`
 - [x] Casts: `expr as T` (numerics, pointers, int↔ptr)
 - [x] Compound assignment `+= -= *= /= %=`, bitwise `& | ^ ~ << >>`
-- [x] Modules: recursive `use "path.wlel";` with diamond-import deduplication, `use std;`
+- [x] Modules: `module name;`, qualified access (`geom::add`), import lists/aliases, recursive `use "path.wlel";` with diamond deduplication, `use std;` (see [Modules](#modules))
 - [x] FFI: `extern fn sqrt(x: f64) -> f64;` binds straight to C symbols; structs are C structs (see [FFI](#ffi))
 - [x] Reserved names rejected by the compiler: the `_wlel_` prefix, `__` (the monomorphization separator), builtin type names, C keywords and `main`
 
@@ -627,6 +627,67 @@ fn main() -> int {
   declaration is fine (the prelude already declares libc), but never
   redeclare a libc typedef — bind a name the headers do not define.
 
+## Modules
+
+Every file is a module: `module geom;` names it, or the file stem does
+(`lib/geom.wlel` → `geom`). Files reach each other through that name, so two
+modules may both define `helper` — they are `geom::helper` and `text::helper`,
+not a duplicate-symbol error.
+
+```wlel
+// lib/geom.wlel
+module geom;
+
+struct Vec2 { x: float, y: float }
+
+fn add(a: Vec2, b: Vec2) -> Vec2 {
+    return Vec2 { x: a.x + b.x, y: a.y + b.y };
+}
+```
+
+```wlel
+// main.wlel — the file you run is the root module: its own items stay
+// unqualified, which is why `fn main` is still the entry point.
+use std;
+use "lib/geom.wlel";
+use "lib/units.wlel" as u;
+use "lib/units.wlel" { metres_to_feet };
+
+fn main() -> int {
+    v := geom::Vec2 { x: 1.0, y: 2.0 };
+    w := geom::add(v, v);
+    std::println_float(u::metres_to_feet(w.x));
+    std::println_float(metres_to_feet(w.y));   // imported by name
+    return 0;
+}
+```
+
+The import forms:
+
+| Form | Meaning |
+|---|---|
+| `use "lib/geom.wlel";` | bind the module; `geom::add(...)` works |
+| `use "lib/geom.wlel" as g;` | bind it under another name |
+| `use "lib/geom.wlel" { add, Vec2 };` | also use those names unqualified |
+| `use "lib/geom.wlel" { add as plus };` | rename one imported name |
+| `use "lib/geom.wlel" { * };` | import every export |
+| `use std;` | the embedded standard library |
+| `use geom;` | a package dependency by name (project mode) |
+
+Resolution is deliberate about collisions: a bare name resolves to the
+current module first, then to imported names. If two imported modules both
+provide it, that is an **error naming both** — never a silent pick:
+
+```
+main.wlel:7:12: 'helper' is ambiguous — it could be `geom::helper` or
+`text::helper`; qualify it, or import the one you want with
+`use "…" { helper };`
+```
+
+Names are mangled to `geom__add` in the generated C, so the two modules never
+collide at link time. A single-file program is unaffected: with no `use` and
+no `module` line, everything behaves exactly as before.
+
 ## Projects
 
 A project is a directory with a `wlel.toml`. Scaffold one and run it:
@@ -692,9 +753,10 @@ added 'json' (git = "https://github.com/user/wlel-json") (satisfies 1.2 via tag 
 next: wlel run
 ```
 
-Dependency functions, structs and tests merge into your program (like file
-imports, diamond-deduped), nested dependencies resolve recursively, and two
-dependencies sharing a name from different sources are rejected. Git
+A dependency is a **module named after its package**: `use pointlib;` then
+`pointlib::mk(...)`. Its tests join your suite, nested dependencies resolve
+recursively, and two dependencies sharing a name from different sources are
+rejected. Git
 revisions are pinned in `wlel.lock` after the first build — commit it, and
 every later build checks out exactly that revision, even on machines that
 have never seen the repo. Delete the lock to move to the remote's HEAD.
@@ -820,7 +882,7 @@ highlighting and the language client together:
 
 ```bash
 git clone https://github.com/WildanDeveloper/wlel
-cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.3.0
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.4.0
 # reload the window, then open any .wlel file
 ```
 
@@ -1018,9 +1080,10 @@ Shipped:
    checksum-verifying `install.sh`, generated Homebrew/Scoop manifests, a
    documentation site, and a WebAssembly playground that runs the real
    lexer/parser/type checker in the browser.
-7. **Module namespaces** — imports currently merge into one flat global
-   scope (two files defining `helper` is a duplicate-symbol error); this is
-   also the main blocker for self-hosting.
+7. **Module namespaces** — shipped in 1.4.0: `module name;`, qualified
+   access (`geom::add`), import lists/aliases, and deliberate ambiguity
+   errors instead of a flat global scope. Two files may now define the same
+   name.
 8. **Self-hosting** — the only unchecked milestone left.
 9. **Runtime/compile performance** — incremental per-file compilation for
    the LSP, arena memory reclamation for parse-heavy programs, collection

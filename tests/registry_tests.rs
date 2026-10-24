@@ -265,7 +265,7 @@ fn add_resolves_the_best_tag_pins_the_lock_and_stays_offline() {
 
     t.wlel(&["new", "app"], &t.path);
     let app = t.path.join("app");
-    t.write("app/src/main.wlel", "use std;\nfn main() -> int {\n    std::println_int(hi());\n    return 0;\n}\n");
+    t.write("app/src/main.wlel", "use std;\nuse greetx;\nfn main() -> int {\n    std::println_int(greetx::hi());\n    return 0;\n}\n");
 
     // add with a requirement: the manifest gains the dep, the best matching
     // tag (v1.1.0 for ^1.0.0) is checked out and reported
@@ -328,7 +328,7 @@ fn add_without_a_requirement_pins_head() {
 
     t.wlel(&["new", "app"], &t.path);
     let app = t.path.join("app");
-    t.write("app/src/main.wlel", "use std;\nfn main() -> int {\n    std::println_int(hi());\n    return 0;\n}\n");
+    t.write("app/src/main.wlel", "use std;\nuse loosex;\nfn main() -> int {\n    std::println_int(loosex::hi());\n    return 0;\n}\n");
 
     let (out, err, code) = t.wlel(&["add", "loosex", &url], &app);
     assert_eq!(code, Some(0), "stdout: {out}\nstderr: {err}");
@@ -443,7 +443,7 @@ fn add_path_dep_creates_the_deps_section_and_derives_the_name() {
 
     t.wlel(&["new", "app"], &t.path);
     let app = t.path.join("app");
-    t.write("app/src/main.wlel", "use std;\nfn main() -> int {\n    std::println_int(triple(14));\n    return 0;\n}\n");
+    t.write("app/src/main.wlel", "use std;\nuse pointlib;\nfn main() -> int {\n    std::println_int(pointlib::triple(14));\n    return 0;\n}\n");
 
     // no [deps] section yet: `wlel add --path` creates it, name derives from
     // the directory

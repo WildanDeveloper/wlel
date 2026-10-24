@@ -1,0 +1,10 @@
+// units.wlel — a second module with a colliding `helper`.
+module units;
+
+fn helper() -> string {
+    return "units";
+}
+
+fn metres_to_feet(m: float) -> float {
+    return m * 3.280839895;
+}

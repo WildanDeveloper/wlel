@@ -88,6 +88,11 @@ impl Printer {
 
     fn render(mut self, program: &Program) -> String {
         let mut decls: Vec<Decl> = Vec::new();
+        let module_line = if program.module.is_empty() {
+            None
+        } else {
+            Some((program.module.clone(), program.module_span))
+        };
         for u in &program.uses {
             decls.push(Decl::Use(u));
         }
@@ -107,6 +112,12 @@ impl Printer {
             decls.push(Decl::Test(t));
         }
         decls.sort_by_key(|d| d.start_line());
+
+        if let Some((name, span)) = module_line {
+            self.flush_before(span.start.line);
+            self.put(&format!("module {name};"));
+            self.last_src = span.end.line;
+        }
 
         let mut prev_use = false;
         for d in &decls {
@@ -205,10 +216,29 @@ impl Printer {
     }
 
     fn use_decl(&mut self, u: &UseDecl) {
-        match &u.path {
-            Some(p) => self.put(&format!("use \"{}\";", escape_string(p))),
-            None => self.put("use std;"),
+        let mut line = match &u.path {
+            Some(p) => format!("use \"{}\"", escape_string(p)),
+            None => "use std".to_string(),
+        };
+        if let Some(a) = &u.alias {
+            line.push_str(&format!(" as {a}"));
         }
+        match &u.names {
+            ImportNames::None => {}
+            ImportNames::All => line.push_str(" { * }"),
+            ImportNames::Some(list) => {
+                let items: Vec<String> = list
+                    .iter()
+                    .map(|n| match &n.alias {
+                        Some(a) => format!("{} as {a}", n.name),
+                        None => n.name.clone(),
+                    })
+                    .collect();
+                line.push_str(&format!(" {{ {} }}", items.join(", ")));
+            }
+        }
+        line.push(';');
+        self.put(&line);
         self.last_src = u.span.end.line;
     }
 

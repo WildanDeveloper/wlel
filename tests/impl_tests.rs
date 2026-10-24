@@ -466,7 +466,7 @@ fn impls_flow_through_project_deps() {
     .expect("write app manifest");
     fs::write(
         dir.join("app/src/main.wlel"),
-        "use std;\nfn main() -> int {\n    p := Pt { x: 3.0, y: 4.0 };\n    p.scale(2.0);\n    std::println_int(p.len() as int);\n    return 0;\n}\n",
+        "use std;\nuse geomlib;\nfn main() -> int {\n    p := geomlib::Pt { x: 3.0, y: 4.0 };\n    p.scale(2.0);\n    std::println_int(p.len() as int);\n    return 0;\n}\n",
     )
     .expect("write main");
     let run = Command::new(env!("CARGO_BIN_EXE_wlel"))

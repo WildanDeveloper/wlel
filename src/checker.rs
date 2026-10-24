@@ -369,6 +369,19 @@ pub struct Checker {
     /// variant name -> owning enum's source name ("Circle" -> "Shape";
     /// for generics the TEMPLATE name: "Ok" -> "Result")
     variant_owner: FMap<String, String>,
+    /// module name -> its scope bindings; the namespace table
+    module_table: FMap<String, Vec<ImportBinding>>,
+    /// module name -> what it exports (source name -> qualified name)
+    module_exports: FMap<String, Vec<Export>>,
+    /// function/type name -> the module that defines it ("" = root)
+    def_module: FMap<String, String>,
+    /// names that come from the embedded std library and are therefore
+    /// visible everywhere (the prelude), regardless of module
+    prelude: FSet<String>,
+    /// the module the function being checked belongs to
+    current_module: String,
+    /// the function being checked, for "did you mean geom::add?" hints
+    current_fn: String,
     /// method table: (impl type name, method name) -> the desugared
     /// template function ("Vec", "push") -> `fn Vec__push[T](self: *Vec[T], x: T)`
     methods: FMap<(String, String), FuncDef>,
@@ -440,6 +453,12 @@ impl Checker {
             used_enums: FSet::default(),
             used_type_from: FMap::default(),
             variant_owner: FMap::default(),
+            module_table: FMap::default(),
+            module_exports: FMap::default(),
+            def_module: FMap::default(),
+            prelude: FSet::default(),
+            current_module: String::new(),
+            current_fn: String::new(),
             methods: FMap::default(),
             defer_depth: 0,
             block_terminated: false,
@@ -461,12 +480,40 @@ impl Checker {
             expected: None,
         };
 
+        // the module namespace table: every module reachable from this
+        // program, with what it exports and what it imported
+        for m in &program.modules {
+            cx.module_table.insert(m.name.clone(), m.imports.clone());
+            cx.module_exports.insert(m.name.clone(), m.exports.clone());
+        }
+        // where each top-level name is defined, so a module cannot reach
+        // another module's items without importing them
+        for f in &program.funcs {
+            cx.def_module.insert(f.name.clone(), f.module.clone());
+            if f.file == STD_FILE {
+                cx.prelude.insert(f.name.clone());
+            }
+        }
+        for s in &program.structs {
+            cx.def_module.insert(s.name.clone(), s.module.clone());
+            if s.file == STD_FILE {
+                cx.prelude.insert(s.name.clone());
+            }
+        }
+        for e in &program.enums {
+            cx.def_module.insert(e.name.clone(), e.module.clone());
+            if e.file == STD_FILE {
+                cx.prelude.insert(e.name.clone());
+            }
+        }
+
         // the builtin `Chan[T]` channel template is reserved up front: a
         // user declaration of the same name collides here, before any
         // instantiation path exists
         cx.generic_structs.insert(
             "Chan".into(),
             StructDef {
+                module: String::new(),
                 name: "Chan".into(),
                 fields: Vec::new(),
                 type_params: vec!["T".into()],
@@ -956,6 +1003,7 @@ impl Checker {
             cx.scopes = vec![FMap::default()];
             cx.block_terminated = false;
             cx.current_file = t.file.clone();
+            cx.current_module = t.module.clone();
             cx.check_block_mut(&mut t.body)?;
         }
 
@@ -1094,6 +1142,8 @@ impl Checker {
         self.scopes = vec![FMap::default()];
         self.block_terminated = false;
         self.current_file = f.file.clone();
+        self.current_module = f.module.clone();
+        self.current_fn = f.name.clone();
         for (p, t) in f.params.iter().zip(sig_params.iter()) {
             self.declare(&f.name, &p.name, t.clone(), p.span)?;
         }
@@ -1355,6 +1405,7 @@ impl Checker {
         }
         self.enums.insert(mangled.clone(), variants);
         self.pending_enums.push(EnumDef {
+            module: String::new(),
             name: mangled.clone(),
             variants: concrete_variants,
             type_params: Vec::new(),
@@ -1429,6 +1480,7 @@ impl Checker {
         }
         self.structs.insert(mangled.clone(), fields);
         self.pending_structs.push(StructDef {
+            module: String::new(),
             name: mangled.clone(),
             fields: concrete_fields,
             type_params: Vec::new(),
@@ -1458,6 +1510,13 @@ impl Checker {
             if c.is_ascii_alphanumeric() || c == '_' {
                 ident.push(c);
                 i += 1;
+                continue;
+            }
+            // `geom::Vec2` is one name: keep the module separator inside the
+            // identifier so the whole thing is looked up as one symbol
+            if c == ':' && chars.get(i + 1) == Some(&':') && !ident.is_empty() {
+                ident.push_str("::");
+                i += 2;
                 continue;
             }
             if !ident.is_empty() {
@@ -1942,10 +2001,14 @@ impl Checker {
         let stars = s.chars().take_while(|c| *c == '*').count();
         let base_full = &s[stars..];
         // generic arguments: "Box[int]" -> base "Box", args ["int"]
-        let (base, gen_args) = match base_full.find('[') {
+        let (base_raw, gen_args) = match base_full.find('[') {
             Some(i) => (&base_full[..i], Some(&base_full[i..])),
             None => (base_full, None),
         };
+        // a bare type name may come from an imported module; `T` and the
+        // builtins resolve to themselves
+        let resolved_base = self.resolve_ref(base_raw, span)?;
+        let base: &str = &resolved_base;
         if let Some(args_s) = gen_args {
             let inner = args_s
                 .strip_prefix('[')
@@ -2020,7 +2083,10 @@ impl Checker {
                     self.note_type_use(base, true);
                     Type::Enum(base.to_string())
                 } else {
-                    return err_at(span, format!("unknown type '{}'", base));
+                    return err_at(
+                span,
+                format!("unknown type '{base}'{}", self.module_hint(base)),
+            );
                 }
             }
         };
@@ -2065,6 +2131,52 @@ impl Checker {
     /// record a call from the function currently being checked, so the
     /// unused-import pass can tell a call from the importer apart from the
     /// imported file calling its own helpers
+    /// Resolve a written name against the module namespace.
+    ///
+    /// Returns the declaration's qualified name, or falls back to the written
+    /// name so the existing "undefined/unknown" diagnostics stay in charge.
+    fn resolve_ref(&self, name: &str, sp: Span) -> CResult<String> {
+        match crate::modules::resolve(
+            name,
+            &self.current_module,
+            &self.module_exports,
+            &self.module_table,
+        ) {
+            Ok(crate::modules::Resolved::Item(q)) => Ok(q),
+            Ok(crate::modules::Resolved::Module(m)) => Ok(m),
+            Ok(crate::modules::Resolved::Unknown) => {
+                // a name defined in another module is not visible without an
+                // import; the root module is a module too
+                if !self.current_module.is_empty() && !self.prelude.contains(name) {
+                    if let Some(def) = self.def_module.get(name) {
+                        if def != &self.current_module {
+                            let msg = if def.is_empty() {
+                                format!(
+                                    "'{name}' is not visible here — it belongs to the program root; \
+                                     pass it in or move it into this module"
+                                )
+                            } else {
+                                format!(
+                                    "'{name}' is not visible here — it belongs to module '{def}'; \
+                                     write {def}::{name} or add `use {def};`"
+                                )
+                            };
+                            return err_at(sp, msg);
+                        }
+                    }
+                }
+                Ok(name.to_string())
+            }
+            Err(amb) => err_at(sp, format!("{amb}")),
+        }
+    }
+
+    /// "did you mean geom::add?" for a name that resolved to nothing.
+    fn module_hint(&self, name: &str) -> String {
+        crate::modules::hint(name, &self.current_module, &self.module_exports)
+            .unwrap_or_default()
+    }
+
     fn note_call(&mut self, callee: &str) {
         self.called_funcs.insert(callee.to_string());
         // the inner set is keyed by file and stays tiny (one entry per
@@ -2234,7 +2346,24 @@ impl Checker {
         let sp = e.span;
         // enum variant construction (`Circle(3.0)`, `Ok(5)`) rewrites the
         // node, so it dispatches before the general call path
-        if let ExprKind::Call(name, ty_args, _) = &e.node {
+        let written = match &e.node {
+            ExprKind::Call(name, _, _) => Some(name.clone()),
+            _ => None,
+        };
+        if let Some(written) = written {
+            // `geom::Shape::Circle(1.0)` and an imported `Circle(1.0)` both
+            // have to become the qualified constructor name first
+            let resolved = self.resolve_ref(&written, sp)?;
+            if resolved != written {
+                if let ExprKind::Call(n, _, _) = &mut e.node {
+                    *n = resolved.clone();
+                }
+            }
+            let name = &resolved;
+            let ty_args: &Vec<String> = match &e.node {
+                ExprKind::Call(_, ta, _) => ta,
+                _ => unreachable!(),
+            };
             if self.variant_owner.contains_key(name.as_str()) {
                 if !ty_args.is_empty() {
                     return err_at(
@@ -2254,13 +2383,22 @@ impl Checker {
             ExprKind::Str(_) => Ok(Type::Str),
             ExprKind::Bool(_) => Ok(Type::Bool),
             ExprKind::Ident(n) => {
+                // an imported name (`Point` from `geom`, `None` from std)
+                // becomes its qualified form before anything else looks at it
+                if self.lookup(n).is_none() {
+                    let resolved = self.resolve_ref(n, sp)?;
+                    if resolved != *n && self.variant_owner.contains_key(&resolved) {
+                        *e = Spanned::new(ExprKind::Ident(resolved.clone()), sp);
+                        return self.check_variant_construct(e, sp);
+                    }
+                }
                 // locals shadow variant names; a bare zero-payload variant
                 // (`Point`, `None`) is a value
                 if self.lookup(n).is_none() && self.variant_owner.contains_key(n) {
                     return self.check_variant_construct(e, sp);
                 }
                 self.lookup(n).ok_or_else(|| CheckError {
-                    msg: format!("undefined variable '{n}'"),
+                    msg: format!("undefined variable '{n}'{}", self.module_hint(n)),
                     span: sp,
                 })
             }
@@ -2429,6 +2567,13 @@ impl Checker {
                 self.expr_ty(e)
             }
             ExprKind::StructLit(name, fields) => {
+                // `geom::Vec2 { ... }` or an imported `Vec2 { ... }`
+                {
+                    let resolved = self.resolve_ref(&name.clone(), sp)?;
+                    if resolved != *name {
+                        *name = resolved;
+                    }
+                }
                 // generic struct literal: infer type arguments from the
                 // field expressions, monomorphize, then re-check concretely
                 if self.generic_structs.contains_key(name.as_str())
@@ -3011,7 +3156,7 @@ impl Checker {
                                 );
                             }
                             let work_name = match &args[0].node {
-                                ExprKind::Ident(n) => n.clone(),
+                                ExprKind::Ident(n) => self.resolve_ref(&n.clone(), sp)?,
                                 _ => {
                                     return err_at(
                                         sp,
@@ -3074,7 +3219,10 @@ impl Checker {
                                     "_wlel_thread_spawn".into(),
                                     vec![],
                                     vec![
-                                        Spanned::new(ExprKind::Str(work_name), sp),
+                                        Spanned::new(
+                                            ExprKind::Str(crate::modules::mangle(&work_name)),
+                                            sp,
+                                        ),
                                         Spanned::new(ExprKind::Str(param_ty), sp),
                                         data,
                                     ],
@@ -3790,7 +3938,7 @@ impl Checker {
                         // the comparator must name a concrete function
                         let cmp_span = args[nvals].span;
                         let cmp_name = match &args[nvals].node {
-                            ExprKind::Ident(n) => n.clone(),
+                            ExprKind::Ident(n) => self.resolve_ref(&n.clone(), cmp_span)?,
                             _ => {
                                 return err_at(
                                     cmp_span,
@@ -4034,7 +4182,10 @@ impl Checker {
                             v
                         };
                         new_args.push(Spanned::new(ExprKind::Str(elem.name()), sp));
-                        new_args.push(Spanned::new(ExprKind::Str(cmp_name), sp));
+                        new_args.push(Spanned::new(
+                            ExprKind::Str(crate::modules::mangle(&cmp_name)),
+                            sp,
+                        ));
                         if vec_like {
                             // trailing metadata tells codegen to bind the
                             // collection to a temp before reading data/len,
@@ -4221,6 +4372,15 @@ impl Checker {
                         return Ok(Type::Enum(inst));
                     }
                 }
+                // user module: resolve `add` -> `geom::add` before the
+                // generic and signature lookups see the name. A builtin
+                // (`std::len`, `assert`) is never shadowed by a module.
+                if !name.starts_with("std::") && !name.starts_with("sys::") {
+                    let resolved = self.resolve_ref(&name.clone(), sp)?;
+                    if resolved != *name {
+                        *name = resolved;
+                    }
+                }
                 // generic function call. With explicit type arguments
                 // (`vec_new[int]()`) the bindings come straight from the
                 // source; otherwise they are inferred from argument types.
@@ -4375,7 +4535,10 @@ impl Checker {
                             }
                             return Ok(Type::Void);
                         }
-                        return err_at(sp, format!("call to undefined function '{name}'"));
+                        return err_at(
+                            sp,
+                            format!("call to undefined function '{name}'{}", self.module_hint(name)),
+                        );
                     }
                 };
                 if args.len() != sig.params.len() {
@@ -5275,6 +5438,13 @@ impl Checker {
             msg: format!("unknown enum '{enum_name}'"),
             span: sp,
         })?;
+        // patterns name variants; qualify them through the module table, the
+        // same way construction sites are
+        for arm in m.arms.iter_mut() {
+            if let Pattern::Variant { name, .. } = &mut arm.pattern {
+                *name = self.resolve_ref(&name.clone(), arm.span)?;
+            }
+        }
         let mut covered = vec![false; variants.len()];
         let mut wildcard = false;
         let mut result_ty: Option<Type> = None;
@@ -5530,6 +5700,7 @@ impl Checker {
         );
         if !self.enums.contains_key(&name) {
             self.pending_enums.push(EnumDef {
+                module: String::new(),
                 name: name.clone(),
                 variants: vec![
                     VariantDef {

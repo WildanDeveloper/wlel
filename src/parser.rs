@@ -22,6 +22,17 @@ fn err_at<T>(span: Span, msg: impl Into<String>) -> PResult<T> {
     Err(ParseError { msg: msg.into(), span })
 }
 
+/// The default module name for an import path: the file stem.
+///
+/// `use "lib/geom.wlel";` binds `geom`. The loader replaces this with the
+/// name the file actually declares when it has a `module` line, so this is
+/// only the fallback used before the file is read (and by the parser's own
+/// tests).
+pub fn module_name_from_path(path: &str) -> String {
+    let stem = path.rsplit('/').next().unwrap_or(path);
+    stem.strip_suffix(".wlel").unwrap_or(stem).to_string()
+}
+
 pub struct Parser<'a> {
     toks: &'a [SpannedToken],
     pos: usize,
@@ -131,8 +142,39 @@ impl<'a> Parser<'a> {
         let mut funcs = Vec::new();
         let mut uses = Vec::new();
         let mut tests = Vec::new();
+        let mut module = String::new();
+        let mut module_span = Span::point(0, 0);
+        let mut declared = false;
+        let mut saw_item = false;
         while *self.peek() != Token::Eof {
             let before = self.pos;
+            if *self.peek() == Token::Module {
+                let start = self.peek_span();
+                let result = self.module_decl();
+                match result {
+                    Ok((name, span)) => {
+                        if declared {
+                            self.errors.push(ParseError {
+                                msg: "a file declares `module` once".into(),
+                                span,
+                            });
+                        } else if saw_item {
+                            self.errors.push(ParseError {
+                                msg: "`module` must come before every other item".into(),
+                                span,
+                            });
+                        } else {
+                            module = name;
+                            module_span = span;
+                            declared = true;
+                        }
+                    }
+                    Err(e) => self.errors.push(e),
+                }
+                let _ = start;
+                continue;
+            }
+            saw_item = true;
             let result = match self.peek() {
                 Token::Struct => self.struct_def().map(|s| {
                     structs.push(s);
@@ -167,12 +209,15 @@ impl<'a> Parser<'a> {
         }
         (
             Program {
+                module,
+                module_span,
                 uses,
                 structs,
                 enums,
                 impls,
                 funcs,
                 tests,
+                modules: Vec::new(),
             },
             self.errors,
         )
@@ -182,7 +227,15 @@ impl<'a> Parser<'a> {
     fn sync_top(&mut self) {
         while !matches!(
             self.peek(),
-            Token::Eof | Token::Fn | Token::Extern | Token::Struct | Token::Enum | Token::Impl | Token::Use | Token::Test
+            Token::Eof
+                | Token::Fn
+                | Token::Extern
+                | Token::Struct
+                | Token::Enum
+                | Token::Impl
+                | Token::Use
+                | Token::Test
+                | Token::Module
         ) {
             self.advance();
         }
@@ -252,6 +305,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(&Token::RBrace)?;
         Ok(StructDef {
+            module: String::new(),
             name,
             fields,
             type_params,
@@ -293,6 +347,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(&Token::RBrace)?;
         Ok(EnumDef {
+            module: String::new(),
             name,
             variants,
             type_params,
@@ -305,7 +360,10 @@ impl<'a> Parser<'a> {
     fn impl_def(&mut self) -> PResult<ImplDef> {
         let start = self.peek_span();
         self.expect(&Token::Impl)?;
-        let type_name = self.ident()?;
+        let mut type_name = self.ident()?;
+        while self.eat(&Token::DoubleColon) {
+            type_name = format!("{}::{}", type_name, self.ident()?);
+        }
         let type_params = self.type_params()?;
         self.expect(&Token::LBrace)?;
         let mut methods = Vec::new();
@@ -336,27 +394,88 @@ impl<'a> Parser<'a> {
     }
 
     /// use std;   |   use "lib/math.wlel";
+    /// `module geom;` — names the namespace this file's items live in.
+    fn module_decl(&mut self) -> PResult<(String, Span)> {
+        let start = self.peek_span();
+        self.expect(&Token::Module)?;
+        let name = self.ident()?;
+        let span = self.span_from(start);
+        self.expect(&Token::Semicolon)?;
+        Ok((name, span))
+    }
+
+    /// `use "path.wlel" [as name] [{ a, b as c } | { * }];`
     fn use_decl(&mut self) -> PResult<UseDecl> {
         let start = self.peek_span();
         self.expect(&Token::Use)?;
+        let mut named = None;
         let path = match self.peek().clone() {
             Token::Str(s) => {
                 self.advance();
                 Some(s)
             }
-            Token::Ident(i) if i == "std" => {
+            Token::Ident(i) => {
                 self.advance();
-                None
+                if i == "std" {
+                    None
+                } else {
+                    // `use geom;` — a module or package dependency by name
+                    named = Some(i);
+                    None
+                }
             }
             t => {
                 let sp = self.peek_span();
-                return err_at(sp, format!("expected \"path\" or std, found {:?}", t));
+                return err_at(sp, format!("expected \"path\" or a module name, found {:?}", t));
             }
+        };
+        let module = match (&path, &named) {
+            (_, Some(n)) => n.clone(),
+            (None, None) => "std".to_string(),
+            (Some(p), _) => module_name_from_path(p),
+        };
+        let mut alias = None;
+        if self.eat(&Token::As) {
+            alias = Some(self.ident()?);
+        }
+        let names = if self.eat(&Token::LBrace) {
+            if self.eat(&Token::Star) {
+                self.expect(&Token::RBrace)?;
+                ImportNames::All
+            } else {
+                let mut list = Vec::new();
+                loop {
+                    let sp = self.peek_span();
+                    let name = self.ident()?;
+                    let mut item_alias = None;
+                    if self.eat(&Token::As) {
+                        item_alias = Some(self.ident()?);
+                    }
+                    list.push(ImportName { name, alias: item_alias, span: sp });
+                    if !self.eat(&Token::Comma) {
+                        break;
+                    }
+                    if *self.peek() == Token::RBrace {
+                        break;
+                    }
+                }
+                self.expect(&Token::RBrace)?;
+                if list.is_empty() {
+                    return err_at(self.peek_span(), "empty import list — use `{ * }` or remove the braces");
+                }
+                ImportNames::Some(list)
+            }
+        } else {
+            ImportNames::None
         };
         self.expect(&Token::Semicolon)?;
         Ok(UseDecl {
             path,
+            named,
             resolved: None,
+            module,
+            alias,
+            names,
             span: self.span_from(start),
         })
     }
@@ -377,6 +496,7 @@ impl<'a> Parser<'a> {
         };
         let body = self.block()?;
         Ok(TestDef {
+            module: String::new(),
             name,
             body,
             span: self.span_from(start),
@@ -418,7 +538,12 @@ impl<'a> Parser<'a> {
         let base = match self.peek().clone() {
             Token::Ident(s) => {
                 self.advance();
-                s
+                let mut qname = s;
+                // `geom::Vec2` — a type from another module
+                while self.eat(&Token::DoubleColon) {
+                    qname = format!("{}::{}", qname, self.ident()?);
+                }
+                qname
             }
             t => {
                 let sp = self.peek_span();
@@ -492,6 +617,7 @@ impl<'a> Parser<'a> {
             body: Block(Vec::new()),
             type_params,
             is_extern: true,
+            module: String::new(),
             span: self.span_from(start),
             file: String::new(),
         })
@@ -537,6 +663,7 @@ impl<'a> Parser<'a> {
             body,
             type_params,
             is_extern: false,
+            module: String::new(),
             span: self.span_from(start),
             file: String::new(),
         })
@@ -872,6 +999,10 @@ impl<'a> Parser<'a> {
                 return Ok(Pattern::Wildcard);
             }
             self.advance();
+            let mut n = n;
+            while self.eat(&Token::DoubleColon) {
+                n = format!("{}::{}", n, self.ident()?);
+            }
             let mut binds = Vec::new();
             if self.eat(&Token::LParen) {
                 if *self.peek() != Token::RParen {

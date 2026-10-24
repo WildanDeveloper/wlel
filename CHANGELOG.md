@@ -6,6 +6,65 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.4.0] — 2026-10-24
+
+Module namespaces: a program is no longer one flat scope. Two files may define
+the same name, and every file's items are reachable through its module. This
+was the last blocker for self-hosting.
+
+### Added
+
+- **`module name;`** — every file belongs to a module. The declaration names
+  it; without one the file stem is used (`lib/geom.wlel` -> `geom`). The file
+  you run/check/build is the *root module*, whose items stay unqualified, so
+  `fn main` is still the C entry point and single-file programs are unchanged.
+- **Qualified access** — `geom::add(...)`, `geom::Vec2 { ... }`,
+  `geom::Vec2` as a type annotation, `impl geom::Vec2`, and
+  `geom::Circle(1.0)` / `geom::Circle(r) => ...` for enum variants.
+  Declarations are mangled to `geom__add` / `geom__Vec2` in the generated C,
+  so two modules with the same name never collide at link time. The QBE
+  backend and the LSP see the same resolved program.
+- **Import forms** — `use "lib/geom.wlel";` binds the module;
+  `as g` renames it; `{ add, Vec2 }` also brings those names into scope;
+  `{ add as plus }` renames an import; `{ * }` imports every export;
+  `use geom;` names a module or a package dependency. File imports stay
+  recursive and diamond-deduplicated (one module merged once).
+- **Deliberate collisions** — a bare name resolves to the current module's
+  items first, then to imports. Two imported modules providing the same name
+  is an error that names both candidates and shows the fix; the qualified
+  form always resolves. A name from a module that was never imported is an
+  error that names the module (`'hi' is in module 'greetx'; write greetx::hi
+  or add `use greetx;``), and a module referencing another module's item
+  without importing it is rejected.
+- **Module-aware diagnostics** — duplicate `module` declarations across files,
+  reserved names (`std`, `sys`), `module` not first, a second `module` line,
+  and importing an item a module does not export all have dedicated messages.
+- **`examples/modules.wlel`** plus `examples/lib/shapes.wlel` and
+  `examples/lib/units.wlel`: two modules defining the same `helper`, reached
+  qualified, through an alias, and through an import list.
+- **tree-sitter**: `module_declaration`, named/qualified imports, qualified
+  types and qualified struct-literal names, plus a corpus case and
+  highlight queries for modules and imported names.
+- **`tests/module_tests.rs`** — 29 tests covering the same name in two
+  modules, ambiguity, qualified access, import lists/aliases/globs, root
+  scope, module-local visibility, nested and diamond imports, enums, methods,
+  generics, tests in imported modules, project dependencies, reserved and
+  duplicate module names, formatter round-trips, C mangling, and the
+  pre-existing examples.
+
+### Changed
+
+- **Project dependencies are modules.** `use geom;` then `geom::mk(...)`;
+  the package name is the module name. A bare `mk(...)` is now an error that
+  says which module has it (it used to work because dependencies were
+  flattened into the program).
+- `wlel fmt` prints the `module` line and every import form verbatim;
+  `wlel doc` keeps one page per file; the language server resolves the same
+  module names as the CLI.
+- The spec's §9 is rewritten (files and modules, resolution order, imports)
+  and §16's grammar gains `module_decl` and the import forms.
+- Version 1.3.0 -> 1.4.0.
+
 ## [1.3.0] — 2026-10-23
 
 Distribution: Wlel is now one command away on every platform, and the front-end

@@ -35,8 +35,11 @@
 //! against the dependency's own manifest (see [`crate::registry`]); the
 //! requirement and resolved revision are both recorded in `wlel.lock`.
 
-use crate::ast::{Program, UseDecl};
+use crate::ast::{
+    Export, ImportBinding, ImportNames, ModuleInfo, Program, UseDecl,
+};
 use crate::lexer::Lexer;
+use crate::modules;
 use crate::parser::Parser;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -420,11 +423,14 @@ pub fn load_project(dir: &Path) -> Result<Project, String> {
 
     let lock = read_lock(dir);
     let mut resolved: Vec<LockEntry> = Vec::new();
-    let mut program = Program { uses: Vec::new(), structs: Vec::new(), enums: Vec::new(), impls: Vec::new(), funcs: Vec::new(), tests: Vec::new() };
+    let mut program = Program::empty();
     let mut visited = HashSet::new();
     let mut seen: HashMap<String, String> = HashMap::new();
     let mut warnings = Vec::new();
 
+    // the entry file's own imports, and its dependency packages, are all
+    // modules; load them first, then resolve `use name;` against the complete
+    // table (the order of `use` lines never matters)
     let root_prog = load_program(&entry, &mut visited)?;
     merge_into(&mut program, root_prog);
     resolve_deps(
@@ -439,12 +445,97 @@ pub fn load_project(dir: &Path) -> Result<Project, String> {
         0,
         &mut warnings,
     )?;
+    bind_named_uses(&mut program);
+    modules::check_unique(&program)?;
+    finalize_modules(&mut program);
 
     if !resolved.is_empty() {
         resolved.sort_by(|a, b| a.name.cmp(&b.name));
         write_lock(dir, &resolved);
     }
     Ok(Project { dir: dir.to_path_buf(), manifest, entry, is_bin, program, warnings })
+}
+
+
+
+/// Rewrite every type annotation, impl target and literal name through the
+/// assembled module table.
+///
+/// Idempotent: runs once when a file tree has been loaded, and again after
+/// `use name;` bindings appear (a dependency is only in the table once the
+/// whole project has been resolved).
+pub fn finalize_modules(program: &mut Program) {
+    let exports: HashMap<String, Vec<Export>> =
+        program.modules.iter().map(|m| (m.name.clone(), m.exports.clone())).collect();
+    let table: HashMap<String, Vec<ImportBinding>> =
+        program.modules.iter().map(|m| (m.name.clone(), m.imports.clone())).collect();
+    modules::qualify_impl_targets(program, &exports, &table);
+    modules::qualify_program_types(program, &exports, &table);
+}
+
+/// Resolve `use name;` declarations against the assembled module table.
+///
+/// A named import has no filesystem path: it refers to a module loaded from a
+/// dependency (`use geom;` for `geom = { path = "..." }`) or to a module that
+/// another file already pulled in. Running this after every file is loaded is
+/// what makes the order of `use` lines irrelevant.
+fn bind_named_uses(program: &mut Program) {
+    let names: HashMap<String, Vec<Export>> = program
+        .modules
+        .iter()
+        .map(|m| (m.name.clone(), m.exports.clone()))
+        .collect();
+    let snapshot = program.modules.clone();
+    for (mi, m) in snapshot.iter().enumerate() {
+        let mut additions: Vec<ImportBinding> = Vec::new();
+        for u in &m.uses {
+            let Some(named) = &u.named else { continue };
+            let Some(exports) = names.get(named) else { continue };
+            additions.push(ImportBinding {
+                local: u.alias.clone().unwrap_or_else(|| named.clone()),
+                target: named.clone(),
+                is_module: true,
+                explicit: true,
+            });
+            match &u.names {
+                ImportNames::None => {
+                    for e in exports {
+                        additions.push(ImportBinding {
+                            local: e.name.clone(),
+                            target: e.qualified.clone(),
+                            is_module: false,
+                            explicit: false,
+                        });
+                    }
+                }
+                ImportNames::All => {
+                    for e in exports {
+                        additions.push(ImportBinding {
+                            local: e.name.clone(),
+                            target: e.qualified.clone(),
+                            is_module: false,
+                            explicit: true,
+                        });
+                    }
+                }
+                ImportNames::Some(list) => {
+                    for n in list {
+                        if let Some(e) = exports.iter().find(|e| e.name == n.name) {
+                            additions.push(ImportBinding {
+                                local: n.alias.clone().unwrap_or_else(|| n.name.clone()),
+                                target: e.qualified.clone(),
+                                is_module: false,
+                                explicit: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(target) = program.modules.get_mut(mi) {
+            target.imports.extend(additions);
+        }
+    }
 }
 
 fn merge_into(program: &mut Program, sub: Program) {
@@ -454,6 +545,7 @@ fn merge_into(program: &mut Program, sub: Program) {
     program.impls.extend(sub.impls);
     program.funcs.extend(sub.funcs);
     program.tests.extend(sub.tests);
+    program.modules.extend(sub.modules);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -542,7 +634,10 @@ fn resolve_deps(
         // parent's are merged — order does not matter to the checker, but a
         // failing nested manifest should be reported before anything else)
         resolve_deps(workspace, &dep_root, &mf.deps, program, visited, lock, resolved, seen, depth + 1, warnings)?;
-        let sub = load_program(&lib, visited)?;
+        // a dependency is a module, named by its package (`use geom;` or
+        // `geom::Vec2`). Loading it as a non-root file is what qualifies its
+        // declarations.
+        let sub = load_program_with(&lib, visited, false, Some(&dep.name))?;
         merge_into(program, sub);
     }
     Ok(())
@@ -552,23 +647,105 @@ fn resolve_deps(
 // loader (shared with single-file mode)
 // ---------------------------------------------------------------------------
 
+
+/// The scope entries a single `use` creates in the importing module:
+/// the module binding itself (`geom::add`) plus, for `{ a, b }` / `{ * }`,
+/// each imported name.
+pub fn scope_bindings(
+    u: &UseDecl,
+    sub_module: &str,
+    bound: &str,
+    sub: Option<&ModuleInfo>,
+) -> Result<Vec<ImportBinding>, String> {
+    let mut out = vec![ImportBinding {
+        local: bound.to_string(),
+        target: sub_module.to_string(),
+        is_module: true,
+        explicit: true,
+    }];
+    let exports: Vec<Export> = sub.map(|m| m.exports.clone()).unwrap_or_default();
+    match &u.names {
+        ImportNames::None => {
+            // `use "lib/geom.wlel";` keeps the pre-module behaviour: the
+            // module's names are reachable without a qualifier, but an
+            // explicit `{ ... }` list wins if two modules collide
+            for e in exports {
+                out.push(ImportBinding {
+                    local: e.name.clone(),
+                    target: e.qualified.clone(),
+                    is_module: false,
+                    explicit: false,
+                });
+            }
+        }
+        ImportNames::All => {
+            for e in exports {
+                out.push(ImportBinding {
+                    local: e.name.clone(),
+                    target: e.qualified.clone(),
+                    is_module: false,
+                    explicit: true,
+                });
+            }
+        }
+        ImportNames::Some(list) => {
+            for n in list {
+                let Some(e) = exports.iter().find(|e| e.name == n.name) else {
+                    return Err(format!(
+                        "{}: module '{sub_module}' has no item '{}'",
+                        n.span, n.name
+                    ));
+                };
+                out.push(ImportBinding {
+                    local: n.alias.clone().unwrap_or_else(|| n.name.clone()),
+                    target: e.qualified.clone(),
+                    is_module: false,
+                    explicit: true,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// lex + parse a `.wlel` file and recursively merge its `use "path.wlel"` imports
 /// (relative to the importing file, diamond-deduped). Returns the merged
 /// program; every function/struct/test carries the absolute path of the file
 /// it was parsed from.
 pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Program, String> {
+    let mut program = load_program_inner(path, visited, true)?;
+    bind_named_uses(&mut program);
+    modules::check_unique(&program)?;
+    finalize_modules(&mut program);
+    Ok(program)
+}
+
+/// `is_root` marks the file the user asked for: its items stay unqualified so
+/// `main` remains the C entry point. Every imported file is qualified with its
+/// module name.
+pub fn load_program_inner(
+    path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    is_root: bool,
+) -> Result<Program, String> {
+    load_program_with(path, visited, is_root, None)
+}
+
+/// As [`load_program_inner`], with an explicit module name.
+///
+/// A package dependency is named by its `wlel.toml` `[package] name`, not by
+/// its file stem, so `use geom;` and `geom::Pt` mean the package.
+pub fn load_program_with(
+    path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    is_root: bool,
+    module_override: Option<&str>,
+) -> Result<Program, String> {
     let canonical =
         path.canonicalize().map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     if !visited.insert(canonical.clone()) {
         // already merged (diamond import)
-        return Ok(Program {
-            uses: Vec::new(),
-            structs: Vec::new(),
-            enums: Vec::new(),
-            impls: Vec::new(),
-            funcs: Vec::new(),
-            tests: Vec::new(),
-        });
+        return Ok(Program::empty());
     }
     let src = fs::read_to_string(&canonical)
         .map_err(|e| format!("cannot read {}: {e}", canonical.display()))?;
@@ -607,10 +784,58 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
         t.file = file_str.clone();
     }
 
+    // The module this file belongs to. The root module keeps the empty name:
+    // its items are the program's own and must stay unqualified.
+    let declared = program.module.clone();
+    let stem = canonical
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let module = if is_root {
+        String::new()
+    } else if let Some(forced) = module_override {
+        forced.to_string()
+    } else if declared.is_empty() {
+        stem
+    } else {
+        declared
+    };
+    // record the exports in source terms *before* qualifying, so the table
+    // maps `add` -> `geom::add`
+    let raw_exports = modules::exports_of(&program);
+    modules::qualify(&mut program, &module, is_root);
+    modules::tag_module(&mut program, &module);
+    let mut own_module = ModuleInfo {
+        name: module.clone(),
+        file: file_str.clone(),
+        exports: Vec::new(),
+        imports: Vec::new(),
+        uses: program.uses.clone(),
+    };
+    if !is_root {
+        // rename the export table to the qualified names
+        own_module.exports = raw_exports
+            .into_iter()
+            .map(|e| Export {
+                qualified: format!("{module}::{}", e.name),
+                owner: if e.owner.is_empty() {
+                    String::new()
+                } else {
+                    format!("{module}::{}", e.owner)
+                },
+                ..e
+            })
+            .collect();
+    } else {
+        own_module.exports = raw_exports;
+    }
+
     // recursively merge `use "path.wlel";` imports (relative to the importing file)
     let base_dir =
         canonical.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
     let mut import_resolved: Vec<Option<String>> = Vec::new();
+    let mut modules: Vec<ModuleInfo> = vec![own_module];
+    let mut own_imports: Vec<ImportBinding> = Vec::new();
     // `use std` in any imported file must also pull in the embedded library,
     // otherwise a dependency that uses std breaks programs that never import
     // it themselves — propagate std imports up the whole import tree
@@ -626,9 +851,34 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
             continue;
         };
         let ip = base_dir.join(rel);
-        let sub = load_program(&ip, visited)?;
+        let canonical = ip.canonicalize().ok().map(|p| p.display().to_string());
+        // A diamond import returns an empty program (the file was merged
+        // already), so the module it names has to come from the table.
+        let mut sub = load_program_inner(&ip, visited, false)?;
+        let declared = sub.module.clone();
+        let info = sub
+            .modules
+            .iter()
+            .find(|m| m.name == declared)
+            .cloned()
+            .or_else(|| {
+                canonical
+                    .as_ref()
+                    .and_then(|c| modules.iter().find(|m| &m.file == c).cloned())
+            });
+        // the name the import is reached by: what the file declares, else its
+        // stem — an `as` alias wins when present
+        let sub_module = match &info {
+            Some(m) => m.name.clone(),
+            None => modules::bind_name(&declared, rel),
+        };
+        let bound = u.alias.clone().unwrap_or_else(|| sub_module.clone());
         // keep the canonical path so the checker can attribute usage
-        import_resolved.push(ip.canonicalize().ok().map(|p| p.display().to_string()));
+        import_resolved.push(canonical);
+
+        // every name this import brings into the importing module's scope
+        own_imports.extend(scope_bindings(u, &sub_module, &bound, info.as_ref())?);
+        modules.append(&mut sub.modules);
         for su in sub.uses {
             if su.path.is_none() {
                 propagated_std_uses.push(su);
@@ -643,6 +893,10 @@ pub fn load_program(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<Progr
     for (u, resolved) in program.uses.iter_mut().zip(import_resolved) {
         u.resolved = resolved;
     }
+    program.modules = modules;
+    program.modules[0].imports = own_imports;
+
+    finalize_modules(&mut program);
     program.uses.extend(propagated_std_uses);
     structs.append(&mut program.structs);
     enums.append(&mut program.enums);

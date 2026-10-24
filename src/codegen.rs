@@ -2,7 +2,236 @@ use crate::ast::*;
 use crate::span::Spanned;
 
 /// Transpiles a Wlel program to C99 source.
+/// The `::` module separator is not valid in a C identifier, so the whole
+/// program is rewritten once, right before emission: `geom::add` ->
+/// `geom__add`. Doing it here (instead of at every use site) keeps the
+/// checker's names readable and means the mangling can never be forgotten.
+fn mangle_program(p: &Program) -> Program {
+    let mut p = p.clone();
+    let m = crate::modules::mangle;
+    let mt = crate::modules::mangle_type;
+    for f in p.funcs.iter_mut() {
+        f.name = m(&f.name);
+        if let Some(t) = f.ret_type.as_mut() {
+            *t = mt(t);
+        }
+        for pa in f.params.iter_mut() {
+            if let Some(t) = pa.ty.as_mut() {
+                *t = mt(t);
+            }
+        }
+        mangle_block(&mut f.body);
+    }
+    for t in p.tests.iter_mut() {
+        mangle_block(&mut t.body);
+    }
+    for s in p.structs.iter_mut() {
+        s.name = m(&s.name);
+        for (_, t) in s.fields.iter_mut() {
+            *t = mt(t);
+        }
+    }
+    for e in p.enums.iter_mut() {
+        e.name = m(&e.name);
+        for v in e.variants.iter_mut() {
+            v.name = m(&v.name);
+            for t in v.payloads.iter_mut() {
+                *t = mt(t);
+            }
+        }
+    }
+    p
+}
+
+fn mangle_block(b: &mut Block) {
+    for s in b.0.iter_mut() {
+        mangle_stmt(s);
+    }
+}
+
+fn mangle_stmt(s: &mut Stmt) {
+    if let Some(t) = s.ty.as_mut() {
+        *t = crate::modules::mangle_type(t);
+    }
+    match &mut s.node {
+        StmtKind::Let(_, ty, e) => {
+            if let Some(t) = ty {
+                *t = crate::modules::mangle_type(t);
+            }
+            mangle_expr(e);
+        }
+        StmtKind::Assign(a) => {
+            mangle_expr(&mut a.target);
+            mangle_expr(&mut a.value);
+        }
+        StmtKind::If(i) => {
+            mangle_expr(&mut i.cond);
+            mangle_block(&mut i.then_body);
+            if let Some(ElseBranch::Block(b)) = i.else_branch.as_mut() {
+                mangle_block(b);
+            } else if let Some(ElseBranch::If(inner)) = i.else_branch.as_mut() {
+                mangle_if(inner);
+            }
+        }
+        StmtKind::While(c, b) => {
+            mangle_expr(c);
+            mangle_block(b);
+        }
+        StmtKind::For(_, a, b, body) => {
+            mangle_expr(a);
+            mangle_expr(b);
+            mangle_block(body);
+        }
+        StmtKind::ForIn(f) => {
+            mangle_expr(&mut f.iter);
+            mangle_block(&mut f.body);
+            if let Some(e) = f.elem.as_mut() {
+                *e = crate::modules::mangle_type(e);
+            }
+        }
+        StmtKind::Return(e) => {
+            if let Some(e) = e {
+                mangle_expr(e);
+            }
+        }
+        StmtKind::ExprStmt(e) => mangle_expr(e),
+        StmtKind::Defer(d) => match d {
+            DeferBody::Expr(e) => mangle_expr(e),
+            DeferBody::Block(b) => mangle_block(b),
+        },
+        StmtKind::Arena(e, b) => {
+            if let Some(e) = e {
+                mangle_expr(e);
+            }
+            mangle_block(b);
+        }
+        StmtKind::Match(m) => mangle_match(m),
+        StmtKind::Block(b) => mangle_block(b),
+        StmtKind::Break | StmtKind::Continue => {}
+    }
+}
+
+fn mangle_if(i: &mut IfStmt) {
+    mangle_expr(&mut i.cond);
+    mangle_block(&mut i.then_body);
+    match i.else_branch.as_mut() {
+        Some(ElseBranch::Block(b)) => mangle_block(b),
+        Some(ElseBranch::If(inner)) => mangle_if(inner),
+        None => {}
+    }
+}
+
+fn mangle_match(m: &mut MatchStmt) {
+    mangle_expr(&mut m.scrutinee);
+    if let Some(t) = m.result_ty.as_mut() {
+        *t = crate::modules::mangle_type(t);
+    }
+    for arm in m.arms.iter_mut() {
+        if let Pattern::Variant { name, binds, .. } = &mut arm.pattern {
+            *name = crate::modules::mangle(name);
+            for b in binds.iter_mut() {
+                if let Some(t) = b.ty.as_mut() {
+                    *t = crate::modules::mangle_type(t);
+                }
+            }
+        }
+        match &mut arm.body {
+            MatchBody::Expr(e) => mangle_expr(e),
+            MatchBody::Block(b) => mangle_block(b),
+        }
+    }
+}
+
+fn mangle_expr(e: &mut Expr) {
+    let mt = crate::modules::mangle_type;
+    let m = crate::modules::mangle;
+    if let Some(t) = e.ty.as_mut() {
+        *t = mt(t);
+    }
+    match &mut e.node {
+        ExprKind::Call(n, ta, args) => {
+            *n = m(n);
+            for t in ta.iter_mut() {
+                *t = mt(t);
+            }
+            for a in args.iter_mut() {
+                mangle_expr(a);
+            }
+            // internal helpers carry type/function *names* as string
+            // arguments (`_wlel_sort_<elem>`, thread entry points, channel
+            // element types); they become C identifiers, so they mangle too
+            if n.starts_with("_wlel_") {
+                for a in args.iter_mut() {
+                    if let ExprKind::Str(s) = &mut a.node {
+                        *s = mt(s);
+                    }
+                }
+            }
+        }
+        ExprKind::Ident(n) => *n = m(n),
+        ExprKind::StructLit(n, fields) => {
+            *n = m(n);
+            for (_, v) in fields.iter_mut() {
+                mangle_expr(v);
+            }
+        }
+        ExprKind::Cast(t, x) => {
+            *t = mt(t);
+            mangle_expr(x);
+        }
+        ExprKind::Sizeof(t) => *t = mt(t),
+        ExprKind::New(t, c) => {
+            *t = mt(t);
+            if let Some(c) = c {
+                mangle_expr(c);
+            }
+        }
+        ExprKind::Unary(_, x) | ExprKind::AddrOf(x) | ExprKind::Deref(x) => mangle_expr(x),
+        ExprKind::Binary(_, a, b) => {
+            mangle_expr(a);
+            mangle_expr(b);
+        }
+        ExprKind::Field(o, _) => mangle_expr(o),
+        ExprKind::MethodCall(r, _, args) => {
+            mangle_expr(r);
+            for a in args.iter_mut() {
+                mangle_expr(a);
+            }
+        }
+        ExprKind::Index(a, b) => {
+            mangle_expr(a);
+            mangle_expr(b);
+        }
+        ExprKind::ArrayLit(items) => {
+            for i in items.iter_mut() {
+                mangle_expr(i);
+            }
+        }
+        ExprKind::Match(m) => mangle_match(m),
+        ExprKind::EnumLit(enum_name, _, variant, payloads) => {
+            *enum_name = m(enum_name);
+            *variant = m(variant);
+            for p in payloads.iter_mut() {
+                mangle_expr(p);
+            }
+        }
+        ExprKind::Try(t) => {
+            t.ret_name = m(&t.ret_name.clone());
+            t.err_variant = m(&t.err_variant.clone());
+            t.ok_variant = m(&t.ok_variant.clone());
+            mangle_expr(&mut t.inner);
+        }
+        ExprKind::Int(_)
+        | ExprKind::UInt(_)
+        | ExprKind::Float(_)
+        | ExprKind::Str(_)
+        | ExprKind::Bool(_)
+        | ExprKind::CurrentArena => {}
+    }
+}
+
 pub fn gen_program(p: &Program) -> String {
+    let p = &mangle_program(p);
     let mut cg = Cg {
         // the prelude alone is ~12 KiB and generated C runs ~3x the .wlel
         // source, so start with room instead of regrowing from zero
@@ -43,6 +272,7 @@ pub fn gen_program(p: &Program) -> String {
 /// This is what `wlel run` and `wlel test` compile with; `wlel build` uses
 /// the plain release form (zero overhead).
 pub fn gen_program_safe(p: &Program) -> String {
+    let p = &mangle_program(p);
     let mut cg = Cg {
         // the prelude alone is ~12 KiB and generated C runs ~3x the .wlel
         // source, so start with room instead of regrowing from zero
@@ -82,6 +312,7 @@ pub fn gen_program_safe(p: &Program) -> String {
 /// becomes a C function, and the generated main runs them one by one,
 /// catching assertion failures via setjmp/longjmp.
 pub fn gen_program_tests(p: &Program) -> String {
+    let p = &mangle_program(p);
     let mut cg = Cg {
         // the prelude alone is ~12 KiB and generated C runs ~3x the .wlel
         // source, so start with room instead of regrowing from zero
@@ -119,6 +350,7 @@ pub fn gen_program_tests(p: &Program) -> String {
 
 /// `wlel test` counterpart of `gen_program_safe`.
 pub fn gen_program_tests_safe(p: &Program) -> String {
+    let p = &mangle_program(p);
     let mut cg = Cg {
         // the prelude alone is ~12 KiB and generated C runs ~3x the .wlel
         // source, so start with room instead of regrowing from zero
@@ -2225,7 +2457,7 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
             format!("({} {} {})", lc, binop_str(*op), rc)
         }
         ExprKind::Call(f, _ty_args, args) => {
-            if f == "std::len" {
+            if f == "std::len" || f == "std__len" {
                 let arr = gen_expr(cg, &args[0]);
                 return format!("((long long)(sizeof({}) / sizeof(({}[0]))))", arr, arr);
             }
