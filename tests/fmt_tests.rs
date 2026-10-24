@@ -395,3 +395,34 @@ fn fmt_project_mode_formats_all_wl_files() {
     assert!(out.contains("all formatted"), "{out}");
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn field_doc_comments_stay_inside_the_type_body() {
+    // a `///` above a field used to be flushed at the closing brace, which
+    // moved it after `}` and silently detached it from the field
+    // the last field takes no trailing comma, which is canonical
+    let src = "struct Cg {\n    /// the buffer\n    out: Vec[u8],\n    /// a counter\n    tmp: int,\n    c: *Ck\n}\n";
+    let out = fmt_idempotent(src);
+    assert_eq!(
+        out, src,
+        "a field's doc comment must stay above the field:\n{out}"
+    );
+    assert!(out.contains("    /// the buffer\n    out: Vec[u8],"), "{out}");
+    assert!(out.contains("    /// a counter\n    tmp: int,"), "{out}");
+    let out_struct = out;
+
+    // the same for enum variants
+    let src = "enum E {\n    /// first\n    A(int),\n    /// second\n    B\n}\n";
+    let out = fmt_idempotent(src);
+    assert!(out.contains("    /// first\n    A(int),"), "{out}");
+    assert!(out.contains("    /// second\n    B\n"), "{out}");
+
+    // and the struct still parses back to the same fields
+    let prog = wlel::parser::Parser::new(
+        &wlel::lexer::Lexer::new(&out_struct).tokenize().expect("lex"),
+    )
+    .program();
+    assert!(prog.1.is_empty(), "{:?}", prog.1);
+    assert_eq!(prog.0.structs.len(), 1);
+    assert_eq!(prog.0.structs[0].fields.len(), 3);
+}

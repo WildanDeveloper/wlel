@@ -156,6 +156,19 @@ impl Printer {
         self.out
     }
 
+    /// Emit the pending comments that come before `line`, at the current
+    /// indent. A field's doc comment sits above the field in the source, so
+    /// it is flushed just before that field is printed — never at the closing
+    /// brace, which would move it after the type.
+    fn flush_upto(&mut self, line: usize) {
+        while self.ci < self.comments.len() && self.comments[self.ci].line < line {
+            let text = format!("//{}", self.comments[self.ci].text.trim_end());
+            self.put(&text);
+            self.last_src = self.comments[self.ci].line;
+            self.ci += 1;
+        }
+    }
+
     fn blank(&mut self) {
         if !self.out.is_empty() && !self.out.ends_with("\n\n") {
             self.out.push('\n');
@@ -330,6 +343,10 @@ impl Printer {
             self.put(&format!("{head} {{"));
             self.indent += 1;
             for (i, (fname, fty)) in s.fields.iter().enumerate() {
+                // a `///` above the field stays above the field
+                if let Some(&line) = s.field_lines.get(i) {
+                    self.flush_upto(line);
+                }
                 let comma = if i + 1 < s.fields.len() { "," } else { "" };
                 self.put(&format!("{fname}: {fty}{comma}"));
             }
@@ -350,6 +367,7 @@ impl Printer {
             self.put(&format!("{head} {{"));
             self.indent += 1;
             for (i, v) in e.variants.iter().enumerate() {
+                self.flush_upto(v.line);
                 let comma = if i + 1 < e.variants.len() { "," } else { "" };
                 if v.payloads.is_empty() {
                     self.put(&format!("{}{comma}", v.name));

@@ -299,11 +299,14 @@ impl<'a> Parser<'a> {
         let type_params = self.type_params()?;
         self.expect(&Token::LBrace)?;
         let mut fields = Vec::new();
+        let mut field_lines = Vec::new();
         while *self.peek() != Token::RBrace {
+            let line = self.peek_span().start.line;
             let fname = self.ident()?;
             self.expect(&Token::Colon)?;
             let ty = self.type_expr()?;
             fields.push((fname, ty));
+            field_lines.push(line);
             // comma optional before '}'
             if !self.eat(&Token::Comma) {
                 break;
@@ -314,6 +317,7 @@ impl<'a> Parser<'a> {
             module: String::new(),
             name,
             fields,
+            field_lines,
             type_params,
             span: self.span_from(start),
             file: String::new(),
@@ -329,6 +333,7 @@ impl<'a> Parser<'a> {
         self.expect(&Token::LBrace)?;
         let mut variants = Vec::new();
         while *self.peek() != Token::RBrace && *self.peek() != Token::Eof {
+            let vline = self.peek_span().start.line;
             let vname = self.ident()?;
             let mut payloads = Vec::new();
             if self.eat(&Token::LParen) {
@@ -345,6 +350,7 @@ impl<'a> Parser<'a> {
             variants.push(VariantDef {
                 name: vname,
                 payloads,
+                line: vline,
             });
             // comma optional before '}'
             if !self.eat(&Token::Comma) {

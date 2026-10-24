@@ -1,10 +1,8 @@
-
 /// The Wlel standard library, pulled in with `use std;`. Collections,
 /// Result/Option, the string library and sort/search are written in Wlel
 /// itself and flow through the normal pipeline, so only what your program
 /// uses is emitted. The compiler builtins (print, math, random, ...) are
 /// listed under Builtin functions.
-
 
 // ---- Result[T, E]: success or failure ------------------------------------
 
@@ -13,7 +11,7 @@
 /// (exhaustiveness is enforced by the checker), propagate with `expr?`.
 enum Result[T, E] {
     Ok(T),
-    Err(E),
+    Err(E)
 }
 
 // ---- Option[T]: a value or nothing ---------------------------------------
@@ -22,7 +20,7 @@ enum Result[T, E] {
 /// of lookups that can miss.
 enum Option[T] {
     Some(T),
-    None,
+    None
 }
 
 // ---- Result/Option helpers ------------------------------------------------
@@ -46,7 +44,9 @@ fn result_is_err[T, E](r: Result[T, E]) -> bool {
 /// the success payload; panics with a message when r is an Err
 fn result_unwrap[T, E](r: Result[T, E]) -> T {
     match r {
-        Ok(v) => { return v; }
+        Ok(v) => {
+            return v;
+        }
         Err(_) => {
             panic("called 'result_unwrap' on an Err value");
         }
@@ -56,24 +56,36 @@ fn result_unwrap[T, E](r: Result[T, E]) -> T {
 /// the success payload, or the fallback when r is an Err
 fn result_unwrap_or[T, E](r: Result[T, E], fallback: T) -> T {
     match r {
-        Ok(v) => { return v; }
-        Err(_) => { return fallback; }
+        Ok(v) => {
+            return v;
+        }
+        Err(_) => {
+            return fallback;
+        }
     }
 }
 
 /// the success payload as Some, or None when r is an Err
 fn result_ok[T, E](r: Result[T, E]) -> Option[T] {
     match r {
-        Ok(v) => { return Some(v); }
-        Err(_) => { return None; }
+        Ok(v) => {
+            return Some(v);
+        }
+        Err(_) => {
+            return None;
+        }
     }
 }
 
 /// the error payload as Some, or None when r is an Ok
 fn result_err[T, E](r: Result[T, E]) -> Option[E] {
     match r {
-        Ok(_) => { return None; }
-        Err(e) => { return Some(e); }
+        Ok(_) => {
+            return None;
+        }
+        Err(e) => {
+            return Some(e);
+        }
     }
 }
 
@@ -93,7 +105,9 @@ fn option_is_none[T](o: Option[T]) -> bool {
 /// the payload; panics with a message when o is None
 fn option_unwrap[T](o: Option[T]) -> T {
     match o {
-        Some(v) => { return v; }
+        Some(v) => {
+            return v;
+        }
         None => {
             panic("called 'option_unwrap' on a None value");
         }
@@ -103,8 +117,12 @@ fn option_unwrap[T](o: Option[T]) -> T {
 /// the payload, or the fallback when o is None
 fn option_unwrap_or[T](o: Option[T], fallback: T) -> T {
     match o {
-        Some(v) => { return v; }
-        None => { return fallback; }
+        Some(v) => {
+            return v;
+        }
+        None => {
+            return fallback;
+        }
     }
 }
 
@@ -112,49 +130,58 @@ fn option_unwrap_or[T](o: Option[T], fallback: T) -> T {
 // The same operations as the free functions above, attached to their types:
 // `r.is_ok()`, `v.push(x)`, `m.set(k, val)`. The free functions stay — std
 // internals and existing programs call them directly.
-
 impl Result[T, E] {
-    /// true when this Result is `Ok`
+
     fn is_ok(self) -> bool {
+        /// true when this Result is `Ok`
         return result_is_ok(self);
     }
-    /// true when this Result is `Err`
+
     fn is_err(self) -> bool {
+        /// true when this Result is `Err`
         return result_is_err(self);
     }
-    /// the success payload; panics when this is an `Err`
+
     fn unwrap(self) -> T {
+        /// the success payload; panics when this is an `Err`
         return result_unwrap(self);
     }
-    /// the success payload, or `fallback` when this is an `Err`
+
     fn unwrap_or(self, fallback: T) -> T {
+        /// the success payload, or `fallback` when this is an `Err`
         return result_unwrap_or(self, fallback);
     }
-    /// the success payload as an Option (None on `Err`)
+
     fn ok(self) -> Option[T] {
+        /// the success payload as an Option (None on `Err`)
         return result_ok(self);
     }
-    /// the error payload as an Option (None on `Ok`)
+
     fn err(self) -> Option[E] {
+        /// the error payload as an Option (None on `Ok`)
         return result_err(self);
     }
 }
 
 impl Option[T] {
-    /// true when this Option is `Some`
+
     fn is_some(self) -> bool {
+        /// true when this Option is `Some`
         return option_is_some(self);
     }
-    /// true when this Option is `None`
+
     fn is_none(self) -> bool {
+        /// true when this Option is `None`
         return option_is_none(self);
     }
-    /// the payload; panics when this is `None`
+
     fn unwrap(self) -> T {
+        /// the payload; panics when this is `None`
         return option_unwrap(self);
     }
-    /// the payload, or `fallback` when this is `None`
+
     fn unwrap_or(self, fallback: T) -> T {
+        /// the payload, or `fallback` when this is `None`
         return option_unwrap_or(self, fallback);
     }
 }
@@ -170,7 +197,7 @@ impl Option[T] {
 struct Vec[T] {
     data: *T,
     len: int,
-    cap: int,
+    cap: int
 }
 
 /// a new empty Vec
@@ -190,8 +217,12 @@ fn vec_with_cap[T](n: int) -> Vec[T] {
 
 fn vec_grow[T](v: *Vec[T], min_cap: int) {
     nc := v.cap * 2;
-    if nc < 4 { nc = 4; }
-    if nc < min_cap { nc = min_cap; }
+    if nc < 4 {
+        nc = 4;
+    }
+    if nc < min_cap {
+        nc = min_cap;
+    }
     nd := new(T, nc);
     i := 0;
     while i < v.len {
@@ -243,28 +274,34 @@ fn vec_clear[T](v: *Vec[T]) {
 }
 
 impl Vec[T] {
-    /// append `x` to the end
+
     fn push(self: *Vec[T], x: T) {
+        /// append `x` to the end
         vec_push(self, x);
     }
-    /// remove and return the last element (asserts when empty)
+
     fn pop(self: *Vec[T]) -> T {
+        /// remove and return the last element (asserts when empty)
         return vec_pop(self);
     }
-    /// element at index `i` (asserts on out-of-bounds)
+
     fn get(self: *Vec[T], i: int) -> T {
+        /// element at index `i` (asserts on out-of-bounds)
         return vec_get(self, i);
     }
-    /// overwrite the element at index `i` (asserts on out-of-bounds)
+
     fn set(self: *Vec[T], i: int, x: T) {
+        /// overwrite the element at index `i` (asserts on out-of-bounds)
         vec_set(self, i, x);
     }
-    /// number of elements
+
     fn len(self: *Vec[T]) -> int {
+        /// number of elements
         return vec_len(self);
     }
-    /// drop all elements (capacity is kept)
+
     fn clear(self: *Vec[T]) {
+        /// drop all elements (capacity is kept)
         vec_clear(self);
     }
 }
@@ -284,7 +321,7 @@ struct HashMap[K, V] {
     vals: *V,
     len: int,
     used: int,
-    cap: int,
+    cap: int
 }
 
 /// a new empty map
@@ -311,7 +348,7 @@ fn map_find[K, V](m: *HashMap[K, V], key: K) -> int {
         return -1;
     }
     mask := m.cap - 1;
-    i := (_wlel_hash(key) as int) & mask;
+    i := _wlel_hash(key) as int & mask;
     while true {
         st := m.state[i];
         if st == 0 {
@@ -322,7 +359,7 @@ fn map_find[K, V](m: *HashMap[K, V], key: K) -> int {
                 return i;
             }
         }
-        i = (i + 1) & mask;
+        i = i + 1 & mask;
     }
     return -1;
 }
@@ -331,7 +368,7 @@ fn map_find[K, V](m: *HashMap[K, V], key: K) -> int {
 // otherwise the first tombstone at or after the hash position is reused
 fn map_slot_for_insert[K, V](m: *HashMap[K, V], key: K) -> int {
     mask := m.cap - 1;
-    i := (_wlel_hash(key) as int) & mask;
+    i := _wlel_hash(key) as int & mask;
     tomb := -1;
     while true {
         st := m.state[i];
@@ -350,7 +387,7 @@ fn map_slot_for_insert[K, V](m: *HashMap[K, V], key: K) -> int {
                 tomb = i;
             }
         }
-        i = (i + 1) & mask;
+        i = i + 1 & mask;
     }
     return -1;
 }
@@ -461,32 +498,39 @@ fn map_clear[K, V](m: *HashMap[K, V]) {
 }
 
 impl HashMap[K, V] {
-    /// insert or overwrite `key -> val`
+
     fn set(self: *HashMap[K, V], key: K, val: V) {
+        /// insert or overwrite `key -> val`
         map_set(self, key, val);
     }
-    /// value stored under `key` (asserts when the key is absent)
+
     fn get(self: *HashMap[K, V], key: K) -> V {
+        /// value stored under `key` (asserts when the key is absent)
         return map_get(self, key);
     }
-    /// value stored under `key`, or `fallback` when absent
+
     fn get_or(self: *HashMap[K, V], key: K, fallback: V) -> V {
+        /// value stored under `key`, or `fallback` when absent
         return map_get_or(self, key, fallback);
     }
-    /// true when `key` is present
+
     fn has(self: *HashMap[K, V], key: K) -> bool {
+        /// true when `key` is present
         return map_has(self, key);
     }
-    /// remove `key`; true when it was present
+
     fn del(self: *HashMap[K, V], key: K) -> bool {
+        /// remove `key`; true when it was present
         return map_del(self, key);
     }
-    /// all live keys in table order (unspecified)
+
     fn keys(self: *HashMap[K, V]) -> Vec[K] {
+        /// all live keys in table order (unspecified)
         return map_keys(self);
     }
-    /// drop all entries (capacity is kept)
+
     fn clear(self: *HashMap[K, V]) {
+        /// drop all entries (capacity is kept)
         map_clear(self);
     }
 }
@@ -499,7 +543,7 @@ impl HashMap[K, V] {
 
 // true when c is ASCII whitespace (space, \t \n \v \f \r)
 fn str_is_space(c: u8) -> bool {
-    return c == 32 || (c >= 9 && c <= 13);
+    return c == 32 || c >= 9 && c <= 13;
 }
 
 /// byte index of the first occurrence of `needle` in `hay` at or after
@@ -636,6 +680,7 @@ fn str_parse_int(s: string, out: *int) -> bool {
         neg = true;
         i = 1;
     } else if s[0] == 43 {
+
         // '+'
         i = 1;
     }

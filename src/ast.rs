@@ -147,6 +147,9 @@ pub struct StructDef {
     /// raw type strings, e.g. "float", "*Point" — may reference the struct's
     /// type parameters ("T") when type_params is non-empty
     pub fields: Vec<(String, String)>,
+    /// source line of each field, parallel to `fields`; the formatter uses it
+    /// to keep a field's doc comment directly above that field
+    pub field_lines: Vec<usize>,
     /// generic type parameters ("T", "K", ...) — empty for a plain struct
     pub type_params: Vec<String>,
     pub span: Span,
@@ -161,6 +164,8 @@ pub struct VariantDef {
     pub name: String,
     /// raw payload type strings, in order ("f64", "*Point", ...)
     pub payloads: Vec<String>,
+    /// source line of the variant, for doc-comment placement
+    pub line: usize,
 }
 
 /// `enum Name { Variant(T, ...), ... }` — a closed tagged union. The C

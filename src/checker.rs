@@ -577,6 +577,7 @@ impl Checker {
                 module: String::new(),
                 name: "Chan".into(),
                 fields: Vec::new(),
+                field_lines: Vec::new(),
                 type_params: vec!["T".into()],
                 span: Span::point(1, 1),
                 file: STD_FILE.into(),
@@ -1803,6 +1804,7 @@ impl Checker {
             variants.push((v.name.clone(), payloads));
             concrete_variants.push(VariantDef {
                 name: v.name.clone(),
+                line: v.line,
                 payloads: concrete_payloads,
             });
         }
@@ -1887,6 +1889,7 @@ impl Checker {
             module: String::new(),
             name: mangled.clone(),
             fields: concrete_fields,
+            field_lines: Vec::new(),
             type_params: Vec::new(),
             span: gen.span,
             file: gen.file.clone(),
@@ -6621,10 +6624,12 @@ impl Checker {
                     VariantDef {
                         name: "Ok".to_string(),
                         payloads: vec![ok.name()],
+                        line: 0,
                     },
                     VariantDef {
                         name: "Err".to_string(),
                         payloads: vec![err.name()],
+                        line: 0,
                     },
                 ],
                 type_params: Vec::new(),
