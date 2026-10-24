@@ -991,7 +991,7 @@ highlighting and the language client together:
 
 ```bash
 git clone https://github.com/WildanDeveloper/wlel
-cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.9.0
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.9.1
 # reload the window, then open any .wlel file
 ```
 

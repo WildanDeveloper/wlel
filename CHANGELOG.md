@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.9.1] — 2026-10-24
+
+Patch release: the checker parity gate failed on Windows.
+
+### Fixed
+
+- `relative()` stripped a `root()/` prefix that never matched on Windows,
+  where the checker reports `D:\a\wlel\wlel\examples\...`, so all twenty
+  known gaps were read as regressions. Both sides are slashed first now, and
+  a unit test pins the Windows form, the Unix form and an out-of-tree path.
+  The test also asserts every `KNOWN_GAPS` entry names a file that exists, so
+  a typo cannot silently disable a gap.
+- The `lib/std.wlel` exclusion in `sources()` compared an absolute path with a
+  relative string and so never excluded anything.
+
 ## [1.9.0] — 2026-10-24
 
 The checker joins the lexer and the parser: three of the compiler's four
