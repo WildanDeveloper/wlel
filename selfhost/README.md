@@ -8,7 +8,7 @@ implementation before the next one starts.
 |---|---|---|
 | lexer | `lexer.wlel` | `tests/selfhost_tests.rs` — token-for-token parity on every `.wlel` file in the repository |
 | parser | `parser.wlel` | `tests/parser_parity_tests.rs` — AST dump parity on every `.wlel` file |
-| checker | planned | diagnostics parity |
+| checker | `checker.wlel` | `tests/checker_parity_tests.rs` — agreement on every `.wlel` file, plus an exact-diagnostic corpus |
 | codegen | planned | generated C diff parity |
 
 ## The lexer
@@ -95,6 +95,40 @@ spellings and literal spellings included.
 wparse <file>            # node count (or the parse error, with line:col)
 wparse <file> dump       # canonical AST, one node per line
 wparse <file> bench [n]  # n in-process passes, prints MB/s
+```
+
+## The checker
+
+`checker.wlel` decides whether a program is well typed. It reads the parser's
+node arena directly — no tree, just indices — and covers scopes and shadowing,
+literal widths and suffixes, arithmetic and comparison with the mixed-width
+rules, bitwise and unary operators, casts, calls and arity, struct fields
+(including `p.x` on a `*S`), indexing (strings index to a byte), `let`,
+assignment and `return` compatibility, `if`/`while` conditions, function
+signatures, `match` arms with pattern binding, enum construction, generic
+signatures with `T` substitution, and the `std::`/`sys::` prelude.
+
+It reads `lib/std.wlel` the same way the Rust checker splices it, so
+`std::` names resolve from real declarations rather than a hand-written list.
+
+The parity gate asks both checkers about every source in the repository and
+compares their first diagnostic, `file:line:col: message`, exactly. Programs
+that need work the stage does not do yet are listed in `KNOWN_GAPS` with the
+reason; that list is a ratchet — the test fails when an entry starts agreeing,
+so a fixed gap cannot be forgotten. Twenty broken programs pin the
+diagnostics themselves, not just the agreement.
+
+```
+$ ./wcheck flagship/json.wlel bench 20
+20 passes, 79300 nodes, 30 ms, 24 MB/s
+```
+
+### Usage
+
+```sh
+wcheck <file>          # "ok", or the first diagnostic on stderr
+wcheck <file> -v       # also print every declared signature
+wcheck <file> bench 20 # 20 full checks in-process, prints MB/s
 ```
 
 ## Why parity first

@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.9.0] — 2026-10-24
+
+The checker joins the lexer and the parser: three of the compiler's four
+stages are now written in Wlel and proven against the Rust ones.
+
+### Added
+
+- **`selfhost/checker.wlel`** — a type checker over the parser's node arena:
+  scopes and shadowing, literal widths and suffixes, arithmetic and comparison
+  with the mixed-width rules, bitwise and unary operators, casts, calls and
+  arity, struct fields (including `p.x` on a `*S`), indexing (a string indexes
+  to a byte), `let`/assignment/`return` compatibility, `if`/`while`
+  conditions, function signatures, `match` arms with pattern binding, enum
+  construction, generic signatures with `T` substitution, and the
+  `std::`/`sys::` prelude. 24 MB/s over `flagship/json.wlel`.
+- **`tests/checker_parity_tests.rs`** — asks both checkers about **every**
+  `.wlel` file in the repository and compares their first diagnostic,
+  `file:line:col: message`, exactly; twenty broken programs pin the
+  diagnostics themselves; a `KNOWN_GAPS` ratchet names the constructs the
+  stage does not cover yet and fails when one starts agreeing, so a fixed gap
+  cannot be forgotten. Plus a throughput guard.
+- **`wcheck <file> [-v|bench [n]]`** — the checker's CLI.
+- **`lib/std.wlel`** — the standard library is now a real file, included with
+  `include_str!`. The self-hosted stages need to read it, and the editor
+  tooling can now see it; the compiled bytes are unchanged.
+
+### Changed
+
+- Version 1.8.1 -> 1.9.0 (additive; the Rust compiler is still the one that
+  ships).
+
 ## [1.8.1] — 2026-10-24
 
 Patch release: v1.8.0 was tagged before the parser performance fix, so its

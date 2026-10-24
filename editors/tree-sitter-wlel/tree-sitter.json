@@ -16,7 +16,7 @@
     }
   ],
   "metadata": {
-    "version": "1.8.1",
+    "version": "1.9.0",
     "license": "Apache-2.0",
     "description": "Wlel grammar for tree-sitter",
     "authors": [

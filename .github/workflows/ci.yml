@@ -121,10 +121,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
-      - name: wlel fmt -check (examples + flagships)
+      - name: wlel fmt -check (examples + flagships + self-hosted stages)
         run: |
           cargo build --release --locked
-          find examples flagship -name '*.wlel' -print0 | xargs -0 ./target/release/wlel fmt -check
+          find examples flagship selfhost -name '*.wlel' -print0 | xargs -0 ./target/release/wlel fmt -check
       # the tag-driven release workflow only runs on v* tags; exercise the
       # packaging script on every push so a broken artifact is caught here
       - name: Release packaging dry run
