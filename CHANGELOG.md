@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.5.1] — 2026-10-24
+
+Patch release for the host runtime, all three found by the Windows runner:
+
+### Fixed
+
+- `sys::mkdir` did not compile on Windows/MinGW — `_mkdir` lives in
+  `<direct.h>` (and `_access` in `<io.h>`), which the spliced runtime did not
+  include, so any program touching it failed at cc time.
+- `sys::remove` deleted files but not directories on Windows (`remove()` is
+  the wrong CRT call there; `_rmdir` is used instead).
+- A local named `stdin`, `stdout` or `stderr` shadowed MinGW's stdio macro
+  and made the generated C unparseable. Those names (plus the libc functions
+  the runtime itself calls) are now rejected by the checker with a normal
+  diagnostic instead of a cc error pointing into generated C.
+
 ## [1.5.0] — 2026-10-24
 
 Two gaps that blocked self-hosting: enum variants were one flat global
