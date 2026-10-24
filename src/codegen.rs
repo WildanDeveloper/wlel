@@ -208,6 +208,12 @@ fn mangle_expr(e: &mut Expr) {
             }
         }
         ExprKind::Match(m) => mangle_match(m),
+        ExprKind::CallExpr(callee, args) => {
+            mangle_expr(callee);
+            for a in args.iter_mut() {
+                mangle_expr(a);
+            }
+        }
         ExprKind::EnumLit(enum_name, _, variant, payloads) => {
             *enum_name = m(enum_name);
             *variant = m(variant);
@@ -832,19 +838,29 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
         if f.name == "main" {
             continue;
         }
-        let ret = c_type(f.ret_type.as_deref().unwrap_or("void"));
         let params: Vec<String> = f
             .params
             .iter()
-            .map(|pa| format!("{} {}", c_type(pa.ty.as_deref().unwrap_or("int")), pa.name))
+            .map(|pa| c_decl(pa.ty.as_deref().unwrap_or("int"), &pa.name))
             .collect();
         let linkage = if f.is_extern { "" } else { "static " };
-        cg.out.push_str(&format!(
-            "{linkage}{} {}({});\n",
-            ret,
-            f.name,
-            params.join(", ")
-        ));
+        // a function returning a function pointer puts its name inside the
+        // declarator: `long long (*pick(long long))(long long);`
+        let ret_ty = f.ret_type.as_deref().unwrap_or("void");
+        let head = match fn_ptr_parts(ret_ty) {
+            // `long long (*pick(long long))(long long)` — the trailing list is
+            // the returned function's parameters
+            Some((stars, ret, fargs)) => format!(
+                "{} ({}{}({}))({})",
+                ret,
+                "*".repeat(stars + 1),
+                f.name,
+                params.join(", "),
+                fargs.join(", ")
+            ),
+            None => format!("{} {}({})", c_type(ret_ty), f.name, params.join(", ")),
+        };
+        cg.out.push_str(&format!("{linkage}{head};\n"));
     }
     cg.out.push('\n');
     // sort/search helpers splice in HERE: struct definitions and the
@@ -862,11 +878,12 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
             // the linker provides the definition
             continue;
         }
-        let ret_c = c_type(f.ret_type.as_deref().unwrap_or("void"));
+        let ret_ty = f.ret_type.as_deref().unwrap_or("void");
+        let ret_c = c_type(ret_ty);
         let params: Vec<String> = f
             .params
             .iter()
-            .map(|pa| format!("{} {}", c_type(pa.ty.as_deref().unwrap_or("int")), pa.name))
+            .map(|pa| c_decl(pa.ty.as_deref().unwrap_or("int"), &pa.name))
             .collect();
         cg.src_file = f.file.clone();
         cg.sync_line(f.span.start.line);
@@ -889,7 +906,18 @@ fn gen_program_into(cg: &mut Cg, p: &Program, test_mode: bool) {
         } else {
             cg.current_ret_c = ret_c.clone();
             cg.main_void = false;
-            cg.out.push_str(&format!("{} {}({}) {{\n", ret_c, f.name, params.join(", ")));
+            let head = match fn_ptr_parts(ret_ty) {
+                Some((stars, ret, fargs)) => format!(
+                    "{} ({}{}({}))({})",
+                    ret,
+                    "*".repeat(stars + 1),
+                    f.name,
+                    params.join(", "),
+                    fargs.join(", ")
+                ),
+                None => format!("{} {}({})", ret_c, f.name, params.join(", ")),
+            };
+            cg.out.push_str(&format!("{head} {{\n"));
         }
         gen_block(cg, &f.body, 1);
         let ends_with_return = matches!(
@@ -1311,6 +1339,50 @@ fn sys_runtime_c() -> String {
     let mut c = String::new();
     c.push_str("/* ---- process + filesystem runtime (sys::spawn/getenv/...) ---- */\n");
     c.push_str("#ifdef _WIN32\n#include <direct.h>\n#include <io.h>\n#else\n#include <sys/wait.h>\n#include <sys/stat.h>\n#include <dirent.h>\n#include <unistd.h>\n#endif\n");
+    // growable string builder: appending to a `string` reallocates and copies
+    // the whole buffer every time (O(n^2) for n appends), which a code
+    // generator cannot afford; this is the amortized-O(1) append path
+    c.push_str("typedef struct StrBuf { char* buf; unsigned long long len; unsigned long long cap; } StrBuf;\n");
+    c.push_str("static StrBuf* _wlel_strbuf_new(void) {\n");
+    c.push_str("    StrBuf* b = (StrBuf*)malloc(sizeof(StrBuf));\n");
+    c.push_str("    b->cap = 256; b->len = 0; b->buf = (char*)malloc(b->cap);\n");
+    c.push_str("    b->buf[0] = 0;\n");
+    c.push_str("    return b;\n");
+    c.push_str("}\n");
+    c.push_str("static void _wlel_strbuf_reserve(StrBuf* b, unsigned long long extra) {\n");
+    c.push_str("    if (b->len + extra + 1 <= b->cap) return;\n");
+    c.push_str("    while (b->len + extra + 1 > b->cap) b->cap *= 2;\n");
+    c.push_str("    b->buf = (char*)realloc(b->buf, b->cap);\n");
+    c.push_str("}\n");
+    c.push_str("static void _wlel_strbuf_push(StrBuf* b, const char* s) {\n");
+    c.push_str("    unsigned long long n = strlen(s);\n");
+    c.push_str("    _wlel_strbuf_reserve(b, n);\n");
+    c.push_str("    memcpy(b->buf + b->len, s, n);\n");
+    c.push_str("    b->len += n; b->buf[b->len] = 0;\n");
+    c.push_str("}\n");
+    c.push_str("static void _wlel_strbuf_push_int(StrBuf* b, long long v) {\n");
+    c.push_str("    char tmp[32];\n");
+    c.push_str("    int n = snprintf(tmp, sizeof tmp, \"%lld\", v);\n");
+    c.push_str("    _wlel_strbuf_push(b, tmp);\n");
+    c.push_str("    (void)n;\n");
+    c.push_str("}\n");
+    c.push_str("static void _wlel_strbuf_push_float(StrBuf* b, double v) {\n");
+    c.push_str("    char tmp[64];\n");
+    c.push_str("    snprintf(tmp, sizeof tmp, \"%g\", v);\n");
+    c.push_str("    _wlel_strbuf_push(b, tmp);\n");
+    c.push_str("}\n");
+    c.push_str("static void _wlel_strbuf_push_char(StrBuf* b, unsigned char c) {\n");
+    c.push_str("    _wlel_strbuf_reserve(b, 1);\n");
+    c.push_str("    b->buf[b->len++] = (char)c; b->buf[b->len] = 0;\n");
+    c.push_str("}\n");
+    c.push_str("static long long _wlel_strbuf_len(StrBuf* b) { return (long long)b->len; }\n");
+    c.push_str("static char* _wlel_strbuf_finish(StrBuf* b) {\n");
+    c.push_str("    char* out = _wlel_alloc_str(b->len + 1);\n");
+    c.push_str("    memcpy(out, b->buf, b->len); out[b->len] = 0;\n");
+    c.push_str("    free(b->buf); free(b);\n");
+    c.push_str("    return out;\n");
+    c.push_str("}\n");
+    c.push_str("static void _wlel_strbuf_free(StrBuf* b) { if (!b) return; free(b->buf); free(b); }\n");
     // stderr: the diagnostic channel a compiler needs
     c.push_str("static void _wlel_eprint_str(const char* s) { fputs(s, stderr); fflush(stderr); }\n");
     c.push_str("static void _wlel_eprint_int(long long v) { fprintf(stderr, \"%lld\", v); fflush(stderr); }\n");
@@ -2629,6 +2701,11 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
             }
             format!("({} {} {})", lc, binop_str(*op), rc)
         }
+        ExprKind::CallExpr(callee, args) => {
+            let c = gen_expr(cg, callee);
+            let a: Vec<String> = args.iter().map(|x| gen_expr(cg, x)).collect();
+            format!("({})({})", c, a.join(", "))
+        }
         ExprKind::Call(f, _ty_args, args) => {
             if f == "std::len" || f == "std__len" {
                 let arr = gen_expr(cg, &args[0]);
@@ -2771,6 +2848,9 @@ fn gen_expr(cg: &mut Cg, e: &Expr) -> String {
                 || f == "sys::mutex_unlock" || f == "sys::mutex_free" || f == "sys::sleep_ms"
             {
                 cg.used_conc = true;
+            }
+            if f.starts_with("_wlel_strbuf_") {
+                cg.used_sys = true;
             }
             // host process/filesystem helpers rewritten by the checker
             if matches!(
@@ -3011,6 +3091,9 @@ fn array_ty_info(ty: &Option<String>) -> Option<(String, usize)> {
 fn c_type(t: &str) -> String {
     let stars = t.chars().take_while(|c| *c == '*').count();
     let base = &t[stars..];
+    // the pointer level is part of a function-pointer type: `*fn(int) -> int`
+    // is a pointer to a function pointer
+    let _ = stars;
     // an array type is only valid in a declaration; as a value/pointer
     // target it decays (`[int; 2]` -> `long long*`), which is what a cast,
     // parameter or `sizeof` argument needs
@@ -3023,7 +3106,12 @@ fn c_type(t: &str) -> String {
         out.push_str(&"*".repeat(stars));
         return out;
     }
+    if let Some(ptr) = fn_ptr_type(t) {
+        return ptr;
+    }
     let base_c = match base {
+        // opaque runtime handle: only ever used through *StrBuf
+        "StrBuf" => "StrBuf",
         "int" | "i64" => "long long",
         "i8" => "int8_t",
         "i16" => "int16_t",
@@ -3041,6 +3129,59 @@ fn c_type(t: &str) -> String {
         other => other, // struct name
     };
     format!("{}{}", base_c, "*".repeat(stars))
+}
+
+/// A `fn(A, B) -> R` type, split into the number of extra pointer levels, the
+/// return type and the parameter types. `*fn(int) -> int` (a pointer TO a
+/// function pointer) is two levels.
+fn fn_ptr_parts(ty: &str) -> Option<(usize, String, Vec<String>)> {
+    let stars = ty.chars().take_while(|c| *c == '*').count();
+    let rest = ty[stars..].trim().strip_prefix("fn(")?;
+    let close = rest.rfind(") -> ")?;
+    let params = rest[..close].trim();
+    let ret = rest[close + 5..].trim();
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, b) in params.as_bytes().iter().enumerate() {
+        match b {
+            b'(' | b'[' => depth += 1,
+            b')' | b']' => depth -= 1,
+            b',' if depth == 0 => {
+                parts.push(params[start..i].trim().to_string());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = params[start..].trim();
+    if !tail.is_empty() {
+        parts.push(tail.to_string());
+    }
+    Some((stars, c_type(ret), parts.iter().map(|p| c_type(p)).collect()))
+}
+
+/// `fn(int) -> int` -> `long long (*)(long long)`
+fn fn_ptr_type(ty: &str) -> Option<String> {
+    let (stars, ret, args) = fn_ptr_parts(ty)?;
+    Some(format!(
+        "{} ({}{})({})",
+        ret,
+        "*".repeat(stars + 1),
+        "",
+        args.join(", ")
+    ))
+}
+
+/// `fn(int) -> int` + `f` -> `long long (*f)(long long)`
+fn fn_ptr_decl(ty: &str, name: &str) -> Option<String> {
+    let (stars, ret, args) = fn_ptr_parts(ty)?;
+    Some(format!(
+        "{} ({}{name})({})",
+        ret,
+        "*".repeat(stars + 1),
+        args.join(", ")
+    ))
 }
 
 /// split a canonical array type into its base type and dimensions:
@@ -3077,6 +3218,10 @@ fn c_sizeof_ty(ty: &str) -> String {
 /// declaration fragment: arrays need `long long a[4]` (and
 /// `long long m[2][2]` when nested), others `long long a`
 fn c_decl(ty: &str, name: &str) -> String {
+    // `fn(int) -> int` -> `long long (*name)(long long)`
+    if let Some(decl) = fn_ptr_decl(ty, name) {
+        return decl;
+    }
     if ty.trim_start().starts_with('[') {
         let (base, dims) = c_array_dims(ty);
         let stars = base.chars().take_while(|c| *c == '*').count();

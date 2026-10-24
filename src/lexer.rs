@@ -508,6 +508,7 @@ impl<'a> Lexer<'a> {
             "use" => Token::Use,
             "test" => Token::Test,
             "module" => Token::Module,
+            "const" => Token::Const,
             "as" => Token::As,
             "defer" => Token::Defer,
             "arena" => Token::Arena,

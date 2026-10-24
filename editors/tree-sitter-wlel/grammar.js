@@ -35,6 +35,7 @@ module.exports = grammar({
 
     _item: $ => choice(
       $.module_declaration,
+      $.const_declaration,
       $.use_declaration,
       $.function_declaration,
       $.extern_declaration,
@@ -53,6 +54,17 @@ module.exports = grammar({
     doc_comment: _ => token(seq('///', /[^\n]*/)),
 
     // ---- declarations -----------------------------------------------------
+
+    // `const NAME: type = expr;` — a compile-time constant
+    const_declaration: $ => seq(
+      'const',
+      field('name', $.identifier),
+      ':',
+      field('type', $._type),
+      '=',
+      field('value', $._expression),
+      ';',
+    ),
 
     // `module geom;` names the namespace this file's items live in
     module_declaration: $ => seq(
@@ -177,8 +189,18 @@ module.exports = grammar({
       $.pointer_type,
       $.array_type,
       $.generic_type,
+      $.function_type,
       $.qualified_type,
       $.named_type,
+    ),
+
+    // `fn(int, string) -> float` — a function pointer
+    function_type: $ => seq(
+      'fn',
+      '(',
+      optional(seq($._type, repeat(seq(',', $._type)), optional(','))),
+      ')',
+      optional(seq('->', $._type)),
     ),
 
     // a type from another module

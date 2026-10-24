@@ -1,0 +1,39 @@
+use std;
+
+fn inc(x: int) -> int {
+    return x + 1;
+}
+
+fn dbl(x: int) -> int {
+    return x * 2;
+}
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x);
+}
+
+struct Callback {
+    f: fn(int) -> int
+}
+
+fn pick(which: int) -> fn(int) -> int {
+    if which == 0 {
+        return inc;
+    }
+    return dbl;
+}
+
+fn main() -> int {
+    f := inc;
+    std::println_int(f(41));
+    g := pick(1);
+    std::println_int(g(21));
+    std::println_int(apply(inc, 10));
+    std::println_int(apply(dbl, 10));
+    fs := vec_new[Callback]();
+    fs.push(Callback { f: inc });
+    fs.push(Callback { f: dbl });
+    std::println_int(fs.get(0).f(5));
+    std::println_int(fs.get(1).f(5));
+    return 0;
+}

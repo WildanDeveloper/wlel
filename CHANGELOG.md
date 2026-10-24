@@ -6,6 +6,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.6.0] — 2026-10-24
+
+The last three language gaps on the self-hosting checklist: compile-time
+constants, function pointers, and a string builder that is not quadratic.
+
+### Added
+
+- **`const NAME: type = expr;`** — a compile-time constant. The value must be
+  a literal, another constant, a cast to a builtin type, or arithmetic on
+  those; it is folded and substituted at every use, so a lookup table costs
+  nothing at runtime. Constants may be defined in terms of earlier ones
+  (`const DOUBLE: int = LIMIT * 2;`), cross module boundaries
+  (`limits::MAX`, or the bare name when imported), and are printed by
+  `wlel fmt`. A cycle, a type mismatch, or a non-foldable value (a call, an
+  index) is a clear error rather than a confusing runtime failure.
+- **Function pointers** — `fn(int, string) -> float` as a type. A top-level
+  function name is a value of that type (`f := inc;`, `apply(inc, 10)`), and
+  `f(x)` is an indirect call. They work as parameters, locals, struct fields
+  and return types, a function-pointer field is callable with dot syntax
+  (`obj.cb(x)`), and the emitted C carries the declarator correctly
+  (`long long (*pick(long long))(long long)`). Calling a non-function value
+  and a wrong arity through a pointer are compile errors. A function pointer
+  cannot be a generic argument (`Vec[fn(int) -> int]`) — the message explains
+  the wrapper-struct form and why.
+- **`std::str_buf_*`** — an amortized string builder (`str_buf_new`,
+  `str_buf_push`, `str_buf_push_int`, `str_buf_push_float`,
+  `str_buf_push_char`, `str_buf_len`, `str_buf_finish`). Building a string by
+  repeated `s = s + piece` copies the whole buffer each time; 20 000 appends
+  through the builder take milliseconds where concatenation took seconds.
+  The builder is freed by `str_buf_finish`.
+- **`examples/constants.wlel`** and **`examples/function_pointers.wlel`**,
+  plus `tests/lang_ext_tests.rs` — 15 tests covering const folding, chains,
+  modules, cycles, type mismatch and non-foldable values; function pointers
+  as values, parameters, return types, struct/vec fields, dot-syntax calls,
+  plus the two error cases; and the builder's correctness, length and
+  linearity.
+
+### Changed
+
+- The tree-sitter grammar gained `const_declaration` and `function_type`;
+  every `.wlel` file in the repository still parses with zero errors.
+- Spec §6.11 documents constants, §16's type grammar gained the function
+  type with its restrictions, and README has a
+  "Constants and function pointers" section.
+- Version 1.5.1 -> 1.6.0 (additive; no existing program changes meaning).
+
 ## [1.5.1] — 2026-10-24
 
 Patch release for the host runtime, all three found by the Windows runner:

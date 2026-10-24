@@ -40,6 +40,7 @@ pub fn format_source(src: &str) -> Result<String, String> {
 /// interleaving of uses/structs/enums/impls/funcs/tests is preserved
 enum Decl<'a> {
     Use(&'a UseDecl),
+    Const(&'a ConstDef),
     Struct(&'a StructDef),
     Enum(&'a EnumDef),
     Impl(&'a ImplDef),
@@ -51,6 +52,7 @@ impl Decl<'_> {
     fn start_line(&self) -> usize {
         match self {
             Decl::Use(u) => u.span.start.line,
+            Decl::Const(c) => c.span.start.line,
             Decl::Struct(s) => s.span.start.line,
             Decl::Enum(e) => e.span.start.line,
             Decl::Impl(i) => i.span.start.line,
@@ -62,6 +64,7 @@ impl Decl<'_> {
     fn end_line(&self) -> usize {
         match self {
             Decl::Use(u) => u.span.end.line,
+            Decl::Const(c) => c.span.end.line,
             Decl::Struct(s) => s.span.end.line,
             Decl::Enum(e) => e.span.end.line,
             Decl::Impl(i) => i.span.end.line,
@@ -96,6 +99,9 @@ impl Printer {
         for u in &program.uses {
             decls.push(Decl::Use(u));
         }
+        for c in &program.consts {
+            decls.push(Decl::Const(c));
+        }
         for s in &program.structs {
             decls.push(Decl::Struct(s));
         }
@@ -121,7 +127,9 @@ impl Printer {
 
         let mut prev_use = false;
         for d in &decls {
-            let is_use = matches!(d, Decl::Use(_));
+            // `use` and `const` lines are grouped like a header: adjacent
+            // ones stay together, one blank line separates them from bodies
+            let is_use = matches!(d, Decl::Use(_) | Decl::Const(_));
             if self.last_src > 0 && (!is_use || !prev_use) {
                 // exactly one blank line between declarations, but adjacent
                 // `use` lines stay grouped
@@ -130,6 +138,7 @@ impl Printer {
             self.flush_before(d.start_line());
             match d {
                 Decl::Use(u) => self.use_decl(u),
+                Decl::Const(c) => self.const_def(c),
                 Decl::Struct(s) => self.struct_def(s),
                 Decl::Enum(e) => self.enum_def(e),
                 Decl::Impl(i) => self.impl_def(i),
@@ -240,6 +249,74 @@ impl Printer {
         line.push(';');
         self.put(&line);
         self.last_src = u.span.end.line;
+    }
+
+    fn const_def(&mut self, c: &ConstDef) {
+        let mut line = format!("const {}: {}", c.name, c.ty);
+        line.push_str(" = ");
+        // the value is a single expression; render it with the existing
+        // expression printer so operators keep their canonical spacing
+        line.push_str(&self.expr_inline(&c.value));
+        line.push(';');
+        self.put(&line);
+        self.last_src = c.span.end.line;
+    }
+
+    /// one expression on one line (const values are literals or arithmetic)
+    fn expr_inline(&self, e: &Expr) -> String {
+        match &e.node {
+            ExprKind::Int(v) => v.to_string(),
+            ExprKind::UInt(v) => format!("{v}u64"),
+            ExprKind::Float(v) => {
+                let mut s = format!("{v:?}");
+                if !s.contains('.') && !s.contains('e') {
+                    s.push_str(".0");
+                }
+                s
+            }
+            ExprKind::Str(s) => format!("\"{}\"", escape_string(s)),
+            ExprKind::Bool(true) => "true".into(),
+            ExprKind::Bool(false) => "false".into(),
+            ExprKind::Ident(n) => n.clone(),
+            ExprKind::Unary(op, x) => {
+                let sym = match op {
+                    crate::ast::UnOp::Neg => "-",
+                    crate::ast::UnOp::Not => "!",
+                    crate::ast::UnOp::BitNot => "~",
+                };
+                format!("{sym}{}", self.expr_inline(x))
+            }
+            ExprKind::Binary(op, a, b) => {
+                let sym = match op {
+                    crate::ast::BinOp::Add => "+",
+                    crate::ast::BinOp::Sub => "-",
+                    crate::ast::BinOp::Mul => "*",
+                    crate::ast::BinOp::Div => "/",
+                    crate::ast::BinOp::Mod => "%",
+                    crate::ast::BinOp::Eq => "==",
+                    crate::ast::BinOp::Ne => "!=",
+                    crate::ast::BinOp::Lt => "<",
+                    crate::ast::BinOp::Gt => ">",
+                    crate::ast::BinOp::Le => "<=",
+                    crate::ast::BinOp::Ge => ">=",
+                    crate::ast::BinOp::And => "&&",
+                    crate::ast::BinOp::Or => "||",
+                    crate::ast::BinOp::BitAnd => "&",
+                    crate::ast::BinOp::BitOr => "|",
+                    crate::ast::BinOp::BitXor => "^",
+                    crate::ast::BinOp::Shl => "<<",
+                    crate::ast::BinOp::Shr => ">>",
+                };
+                format!("{} {sym} {}", self.expr_inline(a), self.expr_inline(b))
+            }
+            ExprKind::Cast(t, x) => format!("{} as {}", self.expr_inline(x), t),
+            ExprKind::CallExpr(c, args) => format!(
+                "{}({})",
+                self.expr_inline(c),
+                args.iter().map(|a| self.expr_inline(a)).collect::<Vec<_>>().join(", ")
+            ),
+            _ => "0".into(),
+        }
     }
 
     fn struct_def(&mut self, s: &StructDef) {
@@ -671,6 +748,14 @@ impl Printer {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{s}({a})")
+            }
+            ExprKind::CallExpr(callee, args) => {
+                let a = args
+                    .iter()
+                    .map(|x| self.expr(x, 0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({a})", self.expr(callee, 100))
             }
             ExprKind::Field(base, name) => format!("{}.{}", self.expr(base, 100), name),
             ExprKind::MethodCall(base, name, args) => {

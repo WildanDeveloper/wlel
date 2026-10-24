@@ -535,6 +535,17 @@ parameter-less function. Test blocks are **ignored** by `wlel run` and
 `assert_eq`/`panic` inside a test fail that test only (the suite continues);
 anywhere else they abort the process.
 
+
+### 6.11 Constants
+
+`const NAME: type = expr;` declares a compile-time constant. The value MUST be
+a literal, a reference to another constant, a cast to a builtin type, or
+arithmetic on those; it is folded at compile time and substituted at every
+use, so a constant costs nothing at runtime. Referencing a constant that
+cannot be folded (a call, an index, a field of a runtime value) is an error,
+as is a cycle between constants. A constant declared in a module is reached
+as `module::NAME`, or by its bare name when imported.
+
 ## 7. Functions, generics and methods
 
 ### 7.1 Declaration
@@ -786,7 +797,11 @@ rather than trapping.
 | `sys::thread/join`, `sys::mutex_*`, `sys::chan_*` | concurrency |
 
 `std::` is the other compiler-provided module; `std::name` and the plain
-`name` (after `use std;`) are the same function.
+`name` (after `use std;`) are the same function. It also has an amortized
+string builder, because `s = s + piece` copies the whole buffer per append:
+`std::str_buf_new()`, `std::str_buf_push(buf, s)`, `str_buf_push_int`,
+`str_buf_push_float`, `str_buf_push_char`, `str_buf_len(buf)` and
+`std::str_buf_finish(buf) -> string` (which frees the builder).
 
 ### 9.6 Diagnostics
 
@@ -1068,7 +1083,15 @@ pattern     = IDENT [ "(" [ IDENT { "," IDENT } ] ")" ] | "_" ;
 ```
 
 Types: `IDENT` (builtin or user), `MODULE "::" IDENT`, `*` type,
-`[` type `;` INT `]`.
+`[` type `;` INT `]`, `fn(` type { `,` type } `)` [ `->` type ].
+
+A **function pointer** is written `fn(int) -> string`. A top-level function
+name is a value of that type (`f := inc;`, `take(inc)`), and `f(x)` is an
+indirect call. Function pointers may be parameters, locals, struct fields and
+return types; a struct field may be called with dot syntax (`obj.cb(x)`). They
+may NOT be a generic type argument (`Vec[fn(int) -> int]`) — wrap one in a
+one-field struct instead, because the emitted `T*` would need a pointer to a
+function pointer.
 
 ## 17. Resolved for the 1.0 freeze
 

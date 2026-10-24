@@ -17,6 +17,9 @@ pub struct Program {
     /// desugared by the checker into plain functions (`Name__method`)
     pub impls: Vec<ImplDef>,
     pub funcs: Vec<FuncDef>,
+    /// `const NAME: type = expr;` — compile-time constants, substituted at
+    /// every use
+    pub consts: Vec<ConstDef>,
     /// `test "name" { ... }` blocks, merged from this file and its imports
     pub tests: Vec<TestDef>,
     /// every module reachable from this program, keyed by name — the
@@ -64,6 +67,7 @@ pub enum ExportKind {
     Struct,
     Enum,
     Variant,
+    Const,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +92,7 @@ impl Program {
             enums: Vec::new(),
             impls: Vec::new(),
             funcs: Vec::new(),
+            consts: Vec::new(),
             tests: Vec::new(),
             modules: Vec::new(),
         }
@@ -222,6 +227,20 @@ pub struct ImplDef {
     /// absolute path of the source file this impl was parsed from
     /// (used for unused-import detection)
     pub file: String,
+}
+
+/// `const NAME: type = expr;` — evaluated at compile time and substituted at
+/// every use, so it costs nothing at runtime.
+#[derive(Debug, Clone)]
+pub struct ConstDef {
+    pub name: String,
+    /// required: the value must be assignable to it
+    pub ty: String,
+    pub value: Expr,
+    pub span: Span,
+    pub file: String,
+    /// the module this constant belongs to (empty for the program root)
+    pub module: String,
 }
 
 /// `test "name" { ... }` — a void body run by `wlel test`; a failed
@@ -385,6 +404,9 @@ pub enum ExprKind {
     /// (type args may also be filled in by the checker when rewriting calls
     /// to monomorphized/builtin helpers)
     Call(String, Vec<String>, Vec<Expr>),
+    /// `callee(args)` where the callee is an arbitrary expression — a
+    /// function-pointer call (`f(x)`, `fs.get(0)(5)`)
+    CallExpr(Box<Expr>, Vec<Expr>),
     /// &lvalue
     AddrOf(Box<Expr>),
     /// *ptr

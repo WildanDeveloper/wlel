@@ -142,6 +142,7 @@ impl<'a> Parser<'a> {
         let mut funcs = Vec::new();
         let mut uses = Vec::new();
         let mut tests = Vec::new();
+        let mut consts = Vec::new();
         let mut module = String::new();
         let mut module_span = Span::point(0, 0);
         let mut declared = false;
@@ -188,6 +189,9 @@ impl<'a> Parser<'a> {
                 Token::Use => self.use_decl().map(|u| {
                     uses.push(u);
                 }),
+                Token::Const => self.const_decl().map(|c| {
+                    consts.push(c);
+                }),
                 Token::Test => self.test_decl().map(|t| {
                     tests.push(t);
                 }),
@@ -216,6 +220,7 @@ impl<'a> Parser<'a> {
                 enums,
                 impls,
                 funcs,
+                consts,
                 tests,
                 modules: Vec::new(),
             },
@@ -236,6 +241,7 @@ impl<'a> Parser<'a> {
                 | Token::Use
                 | Token::Test
                 | Token::Module
+                | Token::Const
         ) {
             self.advance();
         }
@@ -394,6 +400,26 @@ impl<'a> Parser<'a> {
     }
 
     /// use std;   |   use "lib/math.wlel";
+    /// `const NAME: type = expr;`
+    fn const_decl(&mut self) -> PResult<ConstDef> {
+        let start = self.peek_span();
+        self.expect(&Token::Const)?;
+        let name = self.ident()?;
+        self.expect(&Token::Colon)?;
+        let ty = self.type_expr()?;
+        self.expect(&Token::Assign)?;
+        let value = self.expr(0)?;
+        self.expect(&Token::Semicolon)?;
+        Ok(ConstDef {
+            name,
+            ty,
+            value,
+            span: self.span_from(start),
+            file: String::new(),
+            module: String::new(),
+        })
+    }
+
     /// `module geom;` — names the namespace this file's items live in.
     fn module_decl(&mut self) -> PResult<(String, Span)> {
         let start = self.peek_span();
@@ -515,6 +541,27 @@ impl<'a> Parser<'a> {
     }
 
     fn type_expr_inner(&mut self) -> PResult<String> {
+        // `fn(A, B) -> R` — a function pointer type
+        if *self.peek() == Token::Fn {
+            self.advance();
+            self.expect(&Token::LParen)?;
+            let mut params = Vec::new();
+            if *self.peek() != Token::RParen {
+                loop {
+                    params.push(self.type_expr()?);
+                    if !self.eat(&Token::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.expect(&Token::RParen)?;
+            let ret = if self.eat(&Token::Arrow) {
+                self.type_expr()?
+            } else {
+                "void".to_string()
+            };
+            return Ok(format!("fn({}) -> {}", params.join(", "), ret));
+        }
         if self.eat(&Token::LBracket) {
             let inner = self.type_expr()?;
             self.expect(&Token::Semicolon)?;
@@ -1172,6 +1219,23 @@ impl<'a> Parser<'a> {
                 self.expect(&Token::RBracket)?;
                 let start = cur.span;
                 cur = self.node(start, ExprKind::Index(Box::new(cur), Box::new(idx)));
+                continue;
+            }
+            // a call through an expression: `fs.get(0)(5)`
+            if *self.peek() == Token::LParen {
+                let start = cur.span;
+                self.advance();
+                let mut args = Vec::new();
+                if *self.peek() != Token::RParen {
+                    loop {
+                        args.push(self.expr(0)?);
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&Token::RParen)?;
+                cur = self.node(start, ExprKind::CallExpr(Box::new(cur), args));
                 continue;
             }
             if self.eat(&Token::Question) {

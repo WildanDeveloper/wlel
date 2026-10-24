@@ -100,6 +100,7 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 - [x] Concurrency: `sys::thread/join` (name-resolved workers, per-thread arenas), `sys::mutex_new/lock/unlock/free`, `sys::chan_new[T]/send/recv/close/free`, `sys::sleep_ms` — data races are user discipline, like C (see [Concurrency](#concurrency))
 - [x] Tagged enums + exhaustive `match`, `std::Result[T,E]` / `std::Option[T]`, the `?` try operator and the `result_*`/`option_*` helpers, `panic(msg)`; variants are namespaced (`Tok::Ident`, two enums may share a name) (see [Tagged enums](#tagged-enums--match) and [File I/O](#file-io))
 - [x] Host integration: `sys::spawn/run` (drive a compiler), `getenv`, `read_dir`, `read_line`/`read_stdin`, `eprintln`, `mkdir/remove/rename/exists` — everything a tool that shells out needs (see [Host integration](#host-integration))
+- [x] `const` (folded at compile time), function pointers (`fn(int) -> int`), and an amortized string builder (`std::str_buf_*`) (see [Constants and function pointers](#constants-and-function-pointers))
 - [x] Projects: `wlel new` / `init`, `wlel.toml` manifests, path + git dependencies (auto-cloned, revision-pinned by `wlel.lock`), nested deps, `wlel add/remove/update/tree/clean`, `wlel run/build/check/test` in project mode; the scaffold ships a README and a CI workflow that installs the matching release (see [Projects](#projects))
 - [x] Package registry v0: `wlel add github:user/repo[@x.y.z]` — no central server, git tags are the registry; caret version requirements verified against each tag's own manifest, offline-friendly resolution (see [Projects](#projects))
 - [x] Formatter: `wlel fmt` — canonical, idempotent, comment-preserving; `wlel fmt` in a project formats every `.wlel`; `-check` mode for CI (see [Formatting](#formatting))
@@ -740,6 +741,58 @@ calls one**, so a program that never shells out carries none of it.
 `std::int_to_str` and the plain names are the same function, so either
 spelling works once `use std;` is present.
 
+## Constants and function pointers
+
+`const` declares a compile-time value. It is folded and substituted at every
+use, so a lookup table costs nothing at runtime, and constants may be defined
+in terms of earlier ones:
+
+```wlel
+const LIMIT: int = 10;
+const DOUBLE: int = LIMIT * 2;
+const NAME: string = "wlel";
+```
+
+A function pointer is written `fn(int) -> int`. A top-level function name is a
+value of that type, and calling one is an indirect call:
+
+```wlel
+fn inc(x: int) -> int { return x + 1; }
+fn dbl(x: int) -> int { return x * 2; }
+
+fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x);
+}
+
+fn pick(which: int) -> fn(int) -> int {
+    if which == 0 { return inc; }
+    return dbl;
+}
+
+fn main() -> int {
+    f := inc;
+    g := pick(1);
+    return apply(f, 1) + g(2);      // 2 + 4
+}
+```
+
+They work as parameters, locals, struct fields and return types, and a
+function-pointer field is callable with dot syntax (`obj.cb(x)`). A function
+pointer cannot be a *generic* type argument (`Vec[fn(int) -> int]`), because
+the emitted `T*` would be a pointer to a function pointer; wrap it in a
+one-field struct instead.
+
+Strings are immutable and appending copies the whole buffer, so building a
+large string by `s = s + piece` is quadratic. `std::str_buf_*` is the linear
+path — 20 000 appends take milliseconds instead of seconds:
+
+```wlel
+b := std::str_buf_new();
+std::str_buf_push(b, "value: ");
+std::str_buf_push_int(b, 42);
+s := std::str_buf_finish(b);     // "value: 42"
+```
+
 ## Projects
 
 A project is a directory with a `wlel.toml`. Scaffold one and run it:
@@ -934,7 +987,7 @@ highlighting and the language client together:
 
 ```bash
 git clone https://github.com/WildanDeveloper/wlel
-cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.5.1
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.6.0
 # reload the window, then open any .wlel file
 ```
 

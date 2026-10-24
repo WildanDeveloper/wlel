@@ -83,6 +83,10 @@ pub fn qualify(program: &mut Program, module: &str, is_root: bool) {
         // namespaced by the enum (`geom::Shape::Circle`, not `geom::Circle`)
         e.name = q(&e.name);
     }
+    for c in program.consts.iter_mut() {
+        c.name = q(&c.name);
+        c.module = module.to_string();
+    }
     for i in program.impls.iter_mut() {
         i.type_name = q(&i.type_name);
         // method names stay short: they are looked up as
@@ -134,6 +138,14 @@ pub fn exports_of(program: &Program) -> Vec<Export> {
                 owner: e.name.clone(),
             });
         }
+    }
+    for c in &program.consts {
+        out.push(Export {
+            name: unq(&c.name),
+            qualified: c.name.clone(),
+            kind: ExportKind::Const,
+            owner: String::new(),
+        });
     }
     // dedup by the *qualified* name: two enums may both export a variant
     // called `Same`, and collapsing them would silently pick one
@@ -440,6 +452,10 @@ pub fn qualify_program_types<S: std::hash::BuildHasher>(
         for (_, t) in s.fields.iter_mut() {
             *t = q(t, &m);
         }
+    }
+    for c in program.consts.iter_mut() {
+        let m = c.module.clone();
+        c.ty = q(&c.ty, &m);
     }
     for e in program.enums.iter_mut() {
         let m = e.module.clone();

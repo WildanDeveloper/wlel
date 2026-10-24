@@ -24,6 +24,7 @@ pub enum Token {
     Use,
     Test,
     Module,
+    Const,
     As,
     Let,
     Return,

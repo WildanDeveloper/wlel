@@ -1,0 +1,15 @@
+use std;
+const LIMIT: int = 10;
+const DOUBLE: int = LIMIT * 2;
+const NAME: string = "wlel";
+const ON: bool = true;
+const SMALL: u8 = 200;
+
+fn main() -> int {
+    std::println_int(LIMIT);
+    std::println_int(DOUBLE);
+    std::println_str(NAME);
+    std::println_bool(ON);
+    std::println_int(SMALL as int);
+    return 0;
+}

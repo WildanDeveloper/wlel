@@ -544,6 +544,7 @@ fn merge_into(program: &mut Program, sub: Program) {
     program.enums.extend(sub.enums);
     program.impls.extend(sub.impls);
     program.funcs.extend(sub.funcs);
+    program.consts.extend(sub.consts);
     program.tests.extend(sub.tests);
     program.modules.extend(sub.modules);
 }
@@ -783,6 +784,9 @@ pub fn load_program_with(
     for t in program.tests.iter_mut() {
         t.file = file_str.clone();
     }
+    for c in program.consts.iter_mut() {
+        c.file = file_str.clone();
+    }
 
     // The module this file belongs to. The root module keeps the empty name:
     // its items are the program's own and must stay unqualified.
@@ -844,6 +848,7 @@ pub fn load_program_with(
     let mut enums = Vec::new();
     let mut impls = Vec::new();
     let mut funcs = Vec::new();
+    let mut consts = Vec::new();
     let mut tests = Vec::new();
     for u in &program.uses {
         let Some(rel) = &u.path else {
@@ -888,6 +893,7 @@ pub fn load_program_with(
         enums.extend(sub.enums);
         impls.extend(sub.impls);
         funcs.extend(sub.funcs);
+        consts.extend(sub.consts);
         tests.extend(sub.tests);
     }
     for (u, resolved) in program.uses.iter_mut().zip(import_resolved) {
@@ -902,11 +908,13 @@ pub fn load_program_with(
     enums.append(&mut program.enums);
     impls.append(&mut program.impls);
     funcs.append(&mut program.funcs);
+    consts.append(&mut program.consts);
     tests.append(&mut program.tests);
     program.structs = structs;
     program.enums = enums;
     program.impls = impls;
     program.funcs = funcs;
+    program.consts = consts;
     program.tests = tests;
     Ok(program)
 }
