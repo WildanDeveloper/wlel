@@ -74,9 +74,15 @@ individually, which is what makes the tree cheap to build and cheap for the
 checker to walk later.
 
 ```
-$ ./wparse flagship/json.wlel bench 50
-20 passes, 79300 nodes, 20 ms, 37 MB/s
+$ ./wparse flagship/json.wlel bench 20
+20 passes, 79300 nodes, 14 ms, 53 MB/s
 ```
+
+Every name in the tree is a **source slice** (`slice_start`/`slice_len` on the
+node, `-1` meaning "a synthesized string"), so parsing an identifier,
+parameter, field or variant allocates nothing. The first version copied each
+name into a `String`; that was 2 MB/s on the Windows runner against 37 MB/s on
+Linux, which is why the slice form exists.
 
 The parity gate builds the parser, dumps the tree for every source in the
 repository, and compares it line for line against a Rust-side dumper of

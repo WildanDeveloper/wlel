@@ -101,6 +101,8 @@ const U_BITNOT: int = 2;
 struct Node {
     kind: int,
     text: string,
+    slice_start: int,
+    slice_len: int,
     a: int,
     b: int,
     c: int,
@@ -109,7 +111,7 @@ struct Node {
     num: int,
     line: int,
     col: int
-}
+} /// a source slice when `slice_len >= 0`, otherwise a synthesized string
 
 struct P {
     src: string,
@@ -123,7 +125,7 @@ struct P {
 }
 
 fn new_node(p: *P, kind: int, line: int, col: int) -> int {
-    n := Node { kind: kind, text: "", a: -1, b: -1, c: -1, d: -1, next: -1, num: 0, line: line, col: col };
+    n := Node { kind: kind, text: "", slice_start: 0, slice_len: -1, a: -1, b: -1, c: -1, d: -1, next: -1, num: 0, line: line, col: col };
     p.nodes.push(n);
     return p.nodes.len() - 1;
 }
@@ -162,9 +164,27 @@ fn set_next(p: *P, i: int, nxt: int) {
     p.nodes.set(i, n);
 }
 
+/// point the node's text at a token, with no allocation
+fn set_slice(p: *P, i: int, t: lx::Tok) {
+    n := p.nodes.get(i);
+    n.slice_start = t.start;
+    n.slice_len = t.end - t.start;
+    p.nodes.set(i, n);
+}
+
+/// the node's text: a source slice or a synthesized string
+fn text_of(p: *P, i: int) -> string {
+    n := get(p, i);
+    if n.slice_len < 0 {
+        return n.text;
+    }
+    return std::str_sub(p.src, n.slice_start, n.slice_len);
+}
+
 fn set_text(p: *P, i: int, text: string) {
     n := p.nodes.get(i);
     n.text = text;
+    n.slice_len = -1;
     p.nodes.set(i, n);
 }
 
@@ -289,6 +309,25 @@ fn ends_with(s: string, tail: string) -> bool {
 fn ident(p: *P) -> string {
     t := expect(p, lx::T_IDENT, "identifier");
     return tok_text(p, t);
+}
+
+fn slice_eq(s: string, start: int, end: int, want: string) -> bool {
+    n := end - start;
+    if n != std::strlen(want) {
+        return false;
+    }
+    i := 0;
+    while i < n {
+        if s[start + i] != want[i] {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn ident_tok(p: *P) -> lx::Tok {
+    return expect(p, lx::T_IDENT, "identifier");
 }
 
 // ---- types ----------------------------------------------------------------
@@ -726,12 +765,19 @@ fn primary(p: *P) -> int {
     }
     if k == lx::T_IDENT {
         advance(p);
-        name := tok_text(p, t);
-        while eat(p, lx::T_DOUBLECOLON) {
-            name = name + "::" + ident(p);
+        name := "";
+        qualified := at(p, lx::T_DOUBLECOLON);
+        if qualified {
+            name = tok_text(p, t);
+            while eat(p, lx::T_DOUBLECOLON) {
+                name = name + "::" + ident(p);
+            }
         }
         // wlel_sizeof(T) / new(T[, n]) / wlel_arena()
-        if name == "wlel_sizeof" && at(p, lx::T_LPAREN) {
+        is_sizeof := slice_eq(p.src, t.start, t.end, "wlel_sizeof");
+        is_new := slice_eq(p.src, t.start, t.end, "new");
+        is_arena := slice_eq(p.src, t.start, t.end, "wlel_arena");
+        if is_sizeof && at(p, lx::T_LPAREN) {
             advance(p);
             ty := parse_type(p);
             expect(p, lx::T_RPAREN, "')'");
@@ -739,7 +785,7 @@ fn primary(p: *P) -> int {
             set_text(p, n, ty);
             return n;
         }
-        if name == "new" && at(p, lx::T_LPAREN) {
+        if is_new && at(p, lx::T_LPAREN) {
             advance(p);
             ty := parse_type(p);
             cnt := -1;
@@ -752,7 +798,7 @@ fn primary(p: *P) -> int {
             set_a(p, n, cnt);
             return n;
         }
-        if name == "wlel_arena" && at(p, lx::T_LPAREN) && peek_at(p, 1) == lx::T_RPAREN {
+        if is_arena && at(p, lx::T_LPAREN) && peek_at(p, 1) == lx::T_RPAREN {
             advance(p);
             advance(p);
             return new_node(p, N_CURRENT_ARENA, t.line, t.col);
@@ -784,7 +830,11 @@ fn primary(p: *P) -> int {
         if at(p, lx::T_LPAREN) {
             args := arg_list(p);
             n := new_node(p, N_CALL, t.line, t.col);
-            set_text(p, n, name);
+            if qualified {
+                set_text(p, n, name);
+            } else {
+                set_slice(p, n, t);
+            }
             set_a(p, n, targs);
             set_b(p, n, args);
             return n;
@@ -793,7 +843,11 @@ fn primary(p: *P) -> int {
         if at(p, lx::T_LBRACE) && peek_at(p, 1) == lx::T_IDENT && peek_at(p, 2) == lx::T_COLON {
             advance(p);
             n := new_node(p, N_STRUCT_LIT, t.line, t.col);
-            set_text(p, n, name);
+            if qualified {
+                set_text(p, n, name);
+            } else {
+                set_slice(p, n, t);
+            }
             first := -1;
             last := -1;
             while !at(p, lx::T_RBRACE) && !p.failed {
@@ -801,7 +855,7 @@ fn primary(p: *P) -> int {
                 expect(p, lx::T_COLON, "':'");
                 v := expr(p, 0);
                 f := new_node(p, N_INIT, ft.line, ft.col);
-                set_text(p, f, tok_text(p, ft));
+                set_slice(p, f, ft);
                 set_a(p, f, v);
                 if first < 0 {
                     first = f;
@@ -818,7 +872,11 @@ fn primary(p: *P) -> int {
             return n;
         }
         n := new_node(p, N_IDENT, t.line, t.col);
-        set_text(p, n, name);
+        if qualified {
+            set_text(p, n, name);
+        } else {
+            set_slice(p, n, t);
+        }
         return n;
     }
     fail(p, "expected an expression");
@@ -844,7 +902,7 @@ fn pattern(p: *P) -> int {
                 while true {
                     bt := expect(p, lx::T_IDENT, "binding name");
                     b := new_node(p, N_IDENT, bt.line, bt.col);
-                    set_text(p, b, tok_text(p, bt));
+                    set_slice(p, b, bt);
                     if first < 0 {
                         first = b;
                     } else {
@@ -1142,7 +1200,7 @@ fn parse_use(p: *P) -> int {
             while !at(p, lx::T_RBRACE) && !p.failed {
                 it := expect(p, lx::T_IDENT, "imported name");
                 item := new_node(p, N_IMPORT_ITEM, it.line, it.col);
-                set_text(p, item, tok_text(p, it));
+                set_slice(p, item, it);
                 if eat(p, lx::T_AS) {
                     alias := new_node(p, N_IDENT, it.line, it.col);
                     set_text(p, alias, ident(p));
@@ -1170,7 +1228,7 @@ fn parse_use(p: *P) -> int {
 fn parse_fn(p: *P) -> int {
     t := expect(p, lx::T_FN, "'fn'");
     n := new_node(p, N_FN, t.line, t.col);
-    set_text(p, n, ident(p));
+    set_slice(p, n, ident_tok(p));
     type_params(p, n);
     expect(p, lx::T_LPAREN, "'('");
     first := -1;
@@ -1179,7 +1237,7 @@ fn parse_fn(p: *P) -> int {
         while true {
             pt := expect(p, lx::T_IDENT, "parameter name");
             param := new_node(p, N_PARAM, pt.line, pt.col);
-            set_text(p, param, tok_text(p, pt));
+            set_slice(p, param, pt);
             if eat(p, lx::T_COLON) {
                 ty := parse_type(p);
                 tn := new_node(p, N_IDENT, pt.line, pt.col);
@@ -1214,7 +1272,7 @@ fn parse_item(p: *P) -> int {
     if k == lx::T_MODULE {
         t := advance(p);
         n := new_node(p, N_MODULE, t.line, t.col);
-        set_text(p, n, ident(p));
+        set_slice(p, n, ident_tok(p));
         expect(p, lx::T_SEMICOLON, "';'");
         return n;
     }
@@ -1252,7 +1310,7 @@ fn parse_item(p: *P) -> int {
                 expect(p, lx::T_COLON, "':'");
                 ty := parse_type(p);
                 f := new_node(p, N_FIELD, ft.line, ft.col);
-                set_text(p, f, tok_text(p, ft));
+                set_slice(p, f, ft);
                 tn := new_node(p, N_IDENT, ft.line, ft.col);
                 set_text(p, tn, ty);
                 set_a(p, f, tn);
@@ -1279,7 +1337,7 @@ fn parse_item(p: *P) -> int {
         while !at(p, lx::T_RBRACE) && !p.failed {
             vt := expect(p, lx::T_IDENT, "variant name");
             v := new_node(p, N_VARIANT, vt.line, vt.col);
-            set_text(p, v, tok_text(p, vt));
+            set_slice(p, v, vt);
             if eat(p, lx::T_LPAREN) {
                 tys := new_node(p, N_TYPES, vt.line, vt.col);
                 tfirst := -1;
@@ -1357,7 +1415,7 @@ fn parse_item(p: *P) -> int {
         t2 := expect(p, lx::T_FN, "'fn'");
         n := new_node(p, N_FN, t2.line, t2.col);
         set_num(p, n, 1);
-        set_text(p, n, ident(p));
+        set_slice(p, n, ident_tok(p));
         // the extern branch never sets a body; the dump reads n.c for normal
         // functions only, but a stale -1 must not reach `get`
         type_params(p, n);
@@ -1368,7 +1426,7 @@ fn parse_item(p: *P) -> int {
             while true {
                 pt := expect(p, lx::T_IDENT, "parameter name");
                 param := new_node(p, N_PARAM, pt.line, pt.col);
-                set_text(p, param, tok_text(p, pt));
+                set_slice(p, param, pt);
                 if eat(p, lx::T_COLON) {
                     ty := parse_type(p);
                     tn := new_node(p, N_IDENT, pt.line, pt.col);
@@ -1450,7 +1508,7 @@ fn dump_type_of(p: *P, b: *StrBuf, i: int) {
         put(b, "-");
         return;
     }
-    put(b, get(p, i).text);
+    put(b, text_of(p, i));
 }
 
 fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
@@ -1468,14 +1526,14 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_MODULE {
-        put(b, "module " + n.text);
+        put(b, "module " + text_of(p, i));
         nl(b);
         return;
     }
     if k == N_USE {
-        put(b, "use " + n.text);
+        put(b, "use " + text_of(p, i));
         if n.a >= 0 {
-            put(b, " as " + get(p, n.a).text);
+            put(b, " as " + text_of(p, n.a));
         }
         if n.b >= 0 {
             names := get(p, n.b);
@@ -1486,9 +1544,9 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
                 j := names.a;
                 while j >= 0 {
                     item := get(p, j);
-                    put(b, " " + item.text);
+                    put(b, " " + text_of(p, j));
                     if item.a >= 0 {
-                        put(b, " as " + get(p, item.a).text);
+                        put(b, " as " + text_of(p, item.a));
                     }
                     j = item.next;
                 }
@@ -1499,32 +1557,32 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_CONST {
-        put(b, "const " + n.text + ":");
+        put(b, "const " + text_of(p, i) + ":");
         dump_type_of(p, b, n.a);
         nl(b);
         dump_node(p, b, n.b, depth + 1, "value");
         return;
     }
     if k == N_STRUCT {
-        put(b, "struct " + n.text + tparams_text(p, n.d));
+        put(b, "struct " + text_of(p, i) + tparams_text(p, n.d));
         nl(b);
         dump_list(p, b, n.a, depth + 1, "");
         return;
     }
     if k == N_FIELD {
-        put(b, "field " + n.text + ":");
+        put(b, "field " + text_of(p, i) + ":");
         dump_type_of(p, b, n.a);
         nl(b);
         return;
     }
     if k == N_ENUM {
-        put(b, "enum " + n.text + tparams_text(p, n.d));
+        put(b, "enum " + text_of(p, i) + tparams_text(p, n.d));
         nl(b);
         dump_list(p, b, n.a, depth + 1, "");
         return;
     }
     if k == N_VARIANT {
-        put(b, "variant " + n.text);
+        put(b, "variant " + text_of(p, i));
         if n.a >= 0 {
             put(b, "(");
             j := get(p, n.a).a;
@@ -1533,7 +1591,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
                 if !first {
                     put(b, ", ");
                 }
-                put(b, get(p, j).text);
+                put(b, text_of(p, j));
                 first = false;
                 j = get(p, j).next;
             }
@@ -1543,13 +1601,13 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_IMPL {
-        put(b, "impl " + n.text + tparams_text(p, n.d));
+        put(b, "impl " + text_of(p, i) + tparams_text(p, n.d));
         nl(b);
         dump_list(p, b, n.a, depth + 1, "");
         return;
     }
     if k == N_FN {
-        put(b, "fn " + n.text + tparams_text(p, n.d));
+        put(b, "fn " + text_of(p, i) + tparams_text(p, n.d));
         if n.num == 1 {
             put(b, " extern");
         }
@@ -1565,7 +1623,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_PARAM {
-        put(b, "param " + n.text);
+        put(b, "param " + text_of(p, i));
         if n.a >= 0 {
             put(b, ":");
             dump_type_of(p, b, n.a);
@@ -1574,7 +1632,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_TEST {
-        put(b, "test " + n.text);
+        put(b, "test " + text_of(p, i));
         nl(b);
         dump_node(p, b, n.a, depth + 1, "body");
         return;
@@ -1586,7 +1644,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_LET {
-        put(b, "let " + n.text);
+        put(b, "let " + text_of(p, i));
         if n.a >= 0 {
             put(b, ":");
             dump_type_of(p, b, n.a);
@@ -1596,7 +1654,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_SHORT {
-        put(b, "short " + n.text);
+        put(b, "short " + text_of(p, i));
         nl(b);
         dump_node(p, b, n.a, depth + 1, "value");
         return;
@@ -1641,7 +1699,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_FOR {
-        put(b, "for " + n.text);
+        put(b, "for " + text_of(p, i));
         nl(b);
         dump_node(p, b, n.a, depth + 1, "start");
         dump_node(p, b, n.b, depth + 1, "end");
@@ -1649,7 +1707,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_FORIN {
-        put(b, "for-in " + n.text);
+        put(b, "for-in " + text_of(p, i));
         nl(b);
         dump_node(p, b, n.a, depth + 1, "iter");
         dump_node(p, b, n.b, depth + 1, "body");
@@ -1701,27 +1759,27 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_IDENT {
-        put(b, "ident " + n.text);
+        put(b, "ident " + text_of(p, i));
         nl(b);
         return;
     }
     if k == N_INT {
-        put(b, "int " + n.text);
+        put(b, "int " + text_of(p, i));
         nl(b);
         return;
     }
     if k == N_UINT {
-        put(b, "uint " + n.text);
+        put(b, "uint " + text_of(p, i));
         nl(b);
         return;
     }
     if k == N_FLOAT {
-        put(b, "float " + n.text);
+        put(b, "float " + text_of(p, i));
         nl(b);
         return;
     }
     if k == N_STR {
-        put(b, "str " + n.text);
+        put(b, "str " + text_of(p, i));
         nl(b);
         return;
     }
@@ -1744,7 +1802,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_CALL {
-        put(b, "call " + n.text);
+        put(b, "call " + text_of(p, i));
         if n.a >= 0 {
             put(b, "[");
             j := get(p, n.a).a;
@@ -1753,7 +1811,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
                 if !first {
                     put(b, ", ");
                 }
-                put(b, get(p, j).text);
+                put(b, text_of(p, j));
                 first = false;
                 j = get(p, j).next;
             }
@@ -1771,14 +1829,14 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_METHOD {
-        put(b, "method " + n.text);
+        put(b, "method " + text_of(p, i));
         nl(b);
         dump_node(p, b, n.a, depth + 1, "recv");
         dump_list(p, b, n.b, depth + 1, "arg");
         return;
     }
     if k == N_FIELD_ACCESS {
-        put(b, "field " + n.text);
+        put(b, "field " + text_of(p, i));
         nl(b);
         dump_node(p, b, n.a, depth + 1, "recv");
         return;
@@ -1791,19 +1849,19 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_CAST {
-        put(b, "cast " + n.text);
+        put(b, "cast " + text_of(p, i));
         nl(b);
         dump_node(p, b, n.a, depth + 1, "");
         return;
     }
     if k == N_STRUCT_LIT {
-        put(b, "struct-lit " + n.text);
+        put(b, "struct-lit " + text_of(p, i));
         nl(b);
         dump_list(p, b, n.a, depth + 1, "");
         return;
     }
     if k == N_INIT {
-        put(b, "init " + n.text);
+        put(b, "init " + text_of(p, i));
         nl(b);
         dump_node(p, b, n.a, depth + 1, "value");
         return;
@@ -1835,7 +1893,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_NEW {
-        put(b, "new " + n.text);
+        put(b, "new " + text_of(p, i));
         nl(b);
         if n.a >= 0 {
             dump_node(p, b, n.a, depth + 1, "count");
@@ -1843,7 +1901,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_SIZEOF {
-        put(b, "sizeof " + n.text);
+        put(b, "sizeof " + text_of(p, i));
         nl(b);
         return;
     }
@@ -1864,7 +1922,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
         return;
     }
     if k == N_VARIANT_PAT {
-        put(b, "variant-pat " + n.text);
+        put(b, "variant-pat " + text_of(p, i));
         if n.a >= 0 {
             put(b, "(");
             j := n.a;
@@ -1873,7 +1931,7 @@ fn dump_node(p: *P, b: *StrBuf, i: int, depth: int, tag: string) {
                 if !first {
                     put(b, ",");
                 }
-                put(b, get(p, j).text);
+                put(b, text_of(p, j));
                 first = false;
                 j = get(p, j).next;
             }
@@ -1897,7 +1955,7 @@ fn tparams_text(p: *P, t: int) -> string {
         if !first {
             out = out + ",";
         }
-        out = out + get(p, j).text;
+        out = out + text_of(p, j);
         first = false;
         j = get(p, j).next;
     }
