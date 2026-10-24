@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792808475632,
+  "lastUpdate": 1792810038784,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1181,6 +1181,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.1,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "74abf7cd5c9436304422d6e57f9260e1e6d12ea9",
+          "message": "self-hosting: the parser is now written in Wlel and proven identical to the Rust one — `selfhost/parser.wlel` is a complete recursive-descent parser (items: `module`, `use` with `as` and import lists, `const`, `struct`, `enum`, `impl`, `extern`, `fn`, `test`; every statement form; all expressions with the reference precedence table; `match` and patterns; struct literals; generic calls; `new`/`wlel_sizeof`/`wlel_arena`; function-pointer types; and the suffixed-literal rewrite where `10u8` parses as a cast, exactly as the Rust AST records it), reusing `selfhost/lexer.wlel` as a module so the whole front end is Wlel; the tree is a flat arena — one `Vec[Node]` with index children and `next` sibling links, token text sliced from the source, no per-node allocation (79 300 nodes for `flagship/json.wlel` in one vector) — which measured 20 passes in 20 ms = 37 MB/s; `tests/parser_parity_tests.rs` builds the Wlel parser, dumps the tree for every `.wlel` file in the repository (41 today) and compares it line for line against a Rust-side dumper of `wlel::ast` (item order, node shapes, operator codes, type and literal spellings), plus a throughput guard; two real bugs fell out of the parity work and are fixed: the codegen's module mangling rewrote `\"::\"` to `\"__\"` inside *any* string argument of an `_wlel_*` helper, so `_wlel_strcat(a, \"::\")` silently corrupted user data (it is now a whitelist: `_wlel_sort`, `_wlel_bsearch`, `_wlel_thread_spawn`, `_wlel_chan_new`), and two `const X` declarations in one module were silently accepted keeping the last value (now `duplicate const 'X'`); `wparse <file> [dump|bench [n]]` is the parser's CLI and `selfhost/README.md` documents the stage table and measurements; 657 cargo tests green (2 new parity/throughput tests), clippy -D warnings clean, wlel fmt canonical, docs site renders; version 1.7.0 -> 1.8.0",
+          "timestamp": "2026-10-24T02:46:05Z",
+          "tree_id": "dda58d34cbfba998de14cf216d7ce489b0567845",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/74abf7cd5c9436304422d6e57f9260e1e6d12ea9"
+        },
+        "date": 1792810037613,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 15.2,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 58,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 7,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.3,
             "unit": "ms"
           }
         ]
