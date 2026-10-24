@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions before 1.0 shipped as a single evolving language; only the
 milestones that matter to users are listed.
 
+## [1.10.0] — 2026-10-24
+
+The codegen stage joins the lexer, the parser and the checker: the compiler's
+whole front end and its first back end are written in Wlel, and the C it
+produces is proven to behave like the Rust compiler's output.
+
+### Added
+
+- **`selfhost/codegen.wlel`** — a Wlel → C generator over the checker's node
+  arena: the runtime prelude, `c_type` built on interned type indices instead
+  of re-parsing a spelling, `std__`/`geom__` mangling, forward-declared
+  structs and tagged enums, `match` as a GCC statement-expression, range
+  `for`, automatic `->` through a pointer, `new`/`sizeof`, compound
+  assignment. The checker writes each node's type back into the arena, so
+  codegen never re-derives one.
+- **`tests/codegen_parity_tests.rs`** — the gate is behavioural: the generated
+  C is compiled and run, and stdout + exit status must match the Rust
+  compiler's build for nine cases (arithmetic, control flow, structs,
+  strings/bools, exit status, narrow widths, enums + match, range for,
+  pointers + `new`), plus a throughput guard. A mutation check (turning `+`
+  into `-`) confirms the gate fails when it should.
+- **Not yet covered** by the codegen: `defer`, `try` (`expr?`), array types
+  `[T; N]`, `for-in`, `impl` methods, statement-form `match`, and the arena
+  statement.
+
+### Fixed
+
+- **`impl` method docs stayed in the body.** The formatter flushed a pending
+  `///` before a method only after the body's first statement, so
+  `/// the payload` written above `fn unwrap` landed above its `return` and
+  the doc generator no longer read it. `impl_def` now flushes before each
+  method, and `lib/std.wlel` is restored to its pre-format revision and
+  re-formatted with the fixed printer.
+
+### Changed
+
+- Version 1.9.1 -> 1.10.0 (additive; the Rust compiler is still the one that
+  ships).
+
 ## [1.9.1] — 2026-10-24
 
 Patch release: the checker parity gate failed on Windows.

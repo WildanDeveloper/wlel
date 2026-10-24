@@ -1,6 +1,6 @@
 {
   "name": "tree-sitter-wlel",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "description": "Wlel grammar for tree-sitter",
   "license": "Apache-2.0",
   "repository": {

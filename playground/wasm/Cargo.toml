@@ -1,6 +1,6 @@
 [package]
 name = "wlel-playground"
-version = "1.9.1"
+version = "1.10.0"
 edition = "2021"
 publish = false
 description = "Wlel front-end compiled to WebAssembly for the browser playground"

@@ -4,11 +4,11 @@ version = 4
 
 [[package]]
 name = "wlel"
-version = "1.9.1"
+version = "1.10.0"
 
 [[package]]
 name = "wlel-playground"
-version = "1.9.1"
+version = "1.10.0"
 dependencies = [
  "wlel",
 ]

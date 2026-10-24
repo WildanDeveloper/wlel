@@ -9,7 +9,7 @@ implementation before the next one starts.
 | lexer | `lexer.wlel` | `tests/selfhost_tests.rs` — token-for-token parity on every `.wlel` file in the repository |
 | parser | `parser.wlel` | `tests/parser_parity_tests.rs` — AST dump parity on every `.wlel` file |
 | checker | `checker.wlel` | `tests/checker_parity_tests.rs` — agreement on every `.wlel` file, plus an exact-diagnostic corpus |
-| codegen | planned | generated C diff parity |
+| codegen | `codegen.wlel` | `tests/codegen_parity_tests.rs` — behavioural parity (stdout + exit code) over the supported core |
 
 ## The lexer
 
@@ -130,6 +130,26 @@ wcheck <file>          # "ok", or the first diagnostic on stderr
 wcheck <file> -v       # also print every declared signature
 wcheck <file> bench 20 # 20 full checks in-process, prints MB/s
 ```
+
+## The codegen
+
+`codegen.wlel` turns a checked program into C. It reads the types the checker
+left in the node arena (`Node.ty`), so a type comparison is an integer
+comparison and no type is ever re-parsed from a spelling. The generator covers
+the core language: functions with prototypes, `let`/assignment/`return`,
+`if`/`else`/`while`/range `for`, calls, unary and binary operators, casts,
+structs (declaration, literal, field access, `->` through a pointer), tagged
+enums with a payload union, `match` as a value, arrays by literal, `new` and
+`sizeof`, string concatenation and the `std::print*` family.
+
+The gate is **behavioural**: `tests/codegen_parity_tests.rs` compiles the
+generated C and compares stdout and the exit status with the Rust compiler's
+build of the same source — a different but correct C is allowed to differ in
+text, and only behaviour may not. A mutation check (turning `+` into `-`)
+confirms the gate fails when it should.
+
+Not yet covered: `defer`, `try` (`expr?`), array types `[T; N]`, `for-in`,
+`impl` methods, statement-form `match`, and the arena statement.
 
 ## Why parity first
 

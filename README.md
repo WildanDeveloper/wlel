@@ -109,9 +109,10 @@ programs pass LeakSanitizer by default** — something C and C++ cannot claim.
 
 ### Not yet (planned, in order)
 - [ ] Self-hosting — in progress: `selfhost/lexer.wlel` (token-for-token
-  parity, 128 MB/s), `selfhost/parser.wlel` (AST parity on all 41 sources) and
-  `selfhost/checker.wlel` (diagnostic parity, 24 MB/s) are written in Wlel and
-  verified against the Rust implementations (see
+  parity, 128 MB/s), `selfhost/parser.wlel` (AST parity on all 41 sources),
+  `selfhost/checker.wlel` (diagnostic parity, 24 MB/s) and
+  `selfhost/codegen.wlel` (behavioural parity over the supported core) are
+  written in Wlel and verified against the Rust implementations (see
   [selfhost/README.md](selfhost/README.md))
 
 ### Experimental
@@ -991,7 +992,7 @@ highlighting and the language client together:
 
 ```bash
 git clone https://github.com/WildanDeveloper/wlel
-cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.9.1
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.10.0
 # reload the window, then open any .wlel file
 ```
 
@@ -1194,10 +1195,13 @@ Shipped:
    errors instead of a flat global scope. Two files may now define the same
    name.
 8. **Self-hosting** — started in 1.7.0: the lexer (`selfhost/lexer.wlel`,
-   zero-copy tokens), the parser (`selfhost/parser.wlel`, flat node arena) and
-   the checker (`selfhost/checker.wlel`) are written in Wlel, each with a
-   parity gate against the Rust implementation over every source in the
-   repository. Codegen follows the same pattern.
+   zero-copy tokens), the parser (`selfhost/parser.wlel`, flat node arena),
+   the checker (`selfhost/checker.wlel`) and the first codegen
+   (`selfhost/codegen.wlel`) are written in Wlel, each with a parity gate
+   against the Rust implementation — the lexer's is token-for-token, the
+   parser's an AST dump, the checker's the first diagnostic, and the
+   codegen's is behavioural (the generated C is compiled and run, and stdout
+   plus the exit status must match).
 9. **Runtime/compile performance** — incremental per-file compilation for
    the LSP, arena memory reclamation for parse-heavy programs, collection
    and sort hot paths.
