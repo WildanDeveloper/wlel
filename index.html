@@ -76,7 +76,7 @@ is freed (LIFO unwind — verified with AddressSanitizer). Strings you build wit
 programs pass LeakSanitizer by default</strong> — something C and C++ cannot claim.</p>
 <h2 id="feature-status-10">Feature status (1.0)</h2>
 <h3 id="language">Language</h3>
-<ul><li><input type="checkbox" disabled checked> First-class arenas: <code>arena(size) { ... }</code>, <code>arena { ... }</code> (default 4 KiB), <code>wlel_arena()</code></li><li><input type="checkbox" disabled checked> Typed allocator: <code>new(T)</code>, <code>new(T, count)</code> — arena-aware, falls back to heap outside arenas</li><li><input type="checkbox" disabled checked> Root arena: temporaries and global allocations freed at exit via <code>atexit</code> — zero leaks end-to-end</li><li><input type="checkbox" disabled checked> Safe unwind: early return / <code>break</code> / <code>defer</code> inside arenas evaluate the return value first</li><li><input type="checkbox" disabled checked> <code>defer</code> — LIFO at scope exit, loop-aware, early-return-aware; multi-statement <code>defer { ... }</code> blocks with their own defer scope</li><li><input type="checkbox" disabled checked> Control flow: <code>if / else if / else</code>, <code>while</code>, <code>for i in a..b</code>, <code>break</code>, <code>continue</code></li><li><input type="checkbox" disabled checked> Structs (nominal, C layout), struct literals, field access with auto-deref; forward &amp; recursive definitions</li><li><input type="checkbox" disabled checked> Pointers (<code>*T</code>, <code>&amp;</code>, <code>*</code>), arrays <code>[T; N]</code> with C-style decay (implicit at call arguments, explicit <code>arr as *T</code> anywhere), <code>wlel_sizeof(T)</code></li><li><input type="checkbox" disabled checked> Casts: <code>expr as T</code> (numerics, pointers, int↔ptr)</li><li><input type="checkbox" disabled checked> Compound assignment <code>+= -= *= /= %=</code>, bitwise <code>&amp; | ^ ~ &lt;&lt; &gt;&gt;</code></li><li><input type="checkbox" disabled checked> Modules: recursive <code>use &quot;path.wlel&quot;;</code> with diamond-import deduplication, <code>use std;</code></li><li><input type="checkbox" disabled checked> FFI: <code>extern fn sqrt(x: f64) -&gt; f64;</code> binds straight to C symbols; structs are C structs (see <a href="#ffi">FFI</a>)</li><li><input type="checkbox" disabled checked> Reserved names rejected by the compiler: the <code>_wlel_</code> prefix, <code>__</code> (the monomorphization separator), builtin type names, C keywords and <code>main</code></li></ul>
+<ul><li><input type="checkbox" disabled checked> First-class arenas: <code>arena(size) { ... }</code>, <code>arena { ... }</code> (default 4 KiB), <code>wlel_arena()</code></li><li><input type="checkbox" disabled checked> Typed allocator: <code>new(T)</code>, <code>new(T, count)</code> — arena-aware, falls back to heap outside arenas</li><li><input type="checkbox" disabled checked> Root arena: temporaries and global allocations freed at exit via <code>atexit</code> — zero leaks end-to-end</li><li><input type="checkbox" disabled checked> Safe unwind: early return / <code>break</code> / <code>defer</code> inside arenas evaluate the return value first</li><li><input type="checkbox" disabled checked> <code>defer</code> — LIFO at scope exit, loop-aware, early-return-aware; multi-statement <code>defer { ... }</code> blocks with their own defer scope</li><li><input type="checkbox" disabled checked> Control flow: <code>if / else if / else</code>, <code>while</code>, <code>for i in a..b</code>, <code>break</code>, <code>continue</code></li><li><input type="checkbox" disabled checked> Structs (nominal, C layout), struct literals, field access with auto-deref; forward &amp; recursive definitions</li><li><input type="checkbox" disabled checked> Pointers (<code>*T</code>, <code>&amp;</code>, <code>*</code>), arrays <code>[T; N]</code> with C-style decay (implicit at call arguments, explicit <code>arr as *T</code> anywhere), <code>wlel_sizeof(T)</code></li><li><input type="checkbox" disabled checked> Casts: <code>expr as T</code> (numerics, pointers, int↔ptr)</li><li><input type="checkbox" disabled checked> Compound assignment <code>+= -= *= /= %=</code>, bitwise <code>&amp; | ^ ~ &lt;&lt; &gt;&gt;</code></li><li><input type="checkbox" disabled checked> Modules: <code>module name;</code>, qualified access (<code>geom::add</code>), import lists/aliases, recursive <code>use &quot;path.wlel&quot;;</code> with diamond deduplication, <code>use std;</code> (see <a href="#modules">Modules</a>)</li><li><input type="checkbox" disabled checked> FFI: <code>extern fn sqrt(x: f64) -&gt; f64;</code> binds straight to C symbols; structs are C structs (see <a href="#ffi">FFI</a>)</li><li><input type="checkbox" disabled checked> Reserved names rejected by the compiler: the <code>_wlel_</code> prefix, <code>__</code> (the monomorphization separator), builtin type names, C keywords and <code>main</code></li></ul>
 <h3 id="numbers">Numbers</h3>
 <ul><li><input type="checkbox" disabled checked> Width types: <code>u8 u16 u32 u64, i8 i16 i32 i64, usize, f32 f64</code> (<code>int</code> = i64, <code>float</code> = f64, <code>byte</code>/<code>char</code> = u8)</li><li><input type="checkbox" disabled checked> Literal suffixes: <code>10u8</code>, <code>2.5f32</code>, full u64 range (<code>18_446_744_073_709_551_615u64</code>)</li><li><input type="checkbox" disabled checked> Untyped literals adapt to context with range checks; narrowing requires an explicit cast; mixed int widths require a cast, while <code>f32</code> → <code>f64</code> widens implicitly and mixed float widths take the wider side</li><li><input type="checkbox" disabled checked> Overflow is never UB — see <a href="#overflow-semantics">Overflow semantics</a></li></ul>
 <h3 id="diagnostics-tooling">Diagnostics &amp; tooling</h3>
@@ -433,6 +433,54 @@ fn main() -&gt; int {
 }</code></pre>
 <ul><li><strong>Declare the exact C types.</strong> Wlel <code>int</code> is i64 (C <code>long long</code>), so C <code>int</code> is <code>i32</code>, C <code>size_t</code> is <code>usize</code>, C <code>double</code> is <code>f64</code>. A mismatched declaration is caught by cc as a conflicting-types error.</li><li><strong>Wlel structs are C structs</strong> — same fields, same order, same layout (locked by <code>static_assert</code>/<code>offsetof</code> tests). Third-party bindings (raylib, SDL) name their structs exactly as C does; the C header is never included, so the Wlel declaration <em>is</em> the binding:</li></ul>
 <ul><li><strong>Linker flags</strong>: <code>-l &lt;lib&gt;</code> and <code>-L &lt;dir&gt;</code> are repeatable on <code>wlel build</code>, <code>wlel run</code>, and <code>wlel test</code>, and pass straight through to cc (<code>-l raylib -L raylib/lib</code>).</li><li><strong>Variadic C functions</strong> (<code>printf</code>) cannot be declared — wrap them or use <code>std::format</code>.</li><li>The generated prototype is non-<code>static</code>; a repeated <em>compatible</em> declaration is fine (the prelude already declares libc), but never redeclare a libc typedef — bind a name the headers do not define.</li></ul>
+<h2 id="modules">Modules</h2>
+<p>Every file is a module: <code>module geom;</code> names it, or the file stem does
+(<code>lib/geom.wlel</code> → <code>geom</code>). Files reach each other through that name, so two
+modules may both define <code>helper</code> — they are <code>geom::helper</code> and <code>text::helper</code>,
+not a duplicate-symbol error.</p>
+<pre><code class="language-wlel">// lib/geom.wlel
+module geom;
+
+struct Vec2 { x: float, y: float }
+
+fn add(a: Vec2, b: Vec2) -&gt; Vec2 {
+    return Vec2 { x: a.x + b.x, y: a.y + b.y };
+}</code></pre>
+<pre><code class="language-wlel">// main.wlel — the file you run is the root module: its own items stay
+// unqualified, which is why `fn main` is still the entry point.
+use std;
+use &quot;lib/geom.wlel&quot;;
+use &quot;lib/units.wlel&quot; as u;
+use &quot;lib/units.wlel&quot; { metres_to_feet };
+
+fn main() -&gt; int {
+    v := geom::Vec2 { x: 1.0, y: 2.0 };
+    w := geom::add(v, v);
+    std::println_float(u::metres_to_feet(w.x));
+    std::println_float(metres_to_feet(w.y));   // imported by name
+    return 0;
+}</code></pre>
+<p>The import forms:</p>
+<table>
+<thead><tr><th>Form</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>use &quot;lib/geom.wlel&quot;;</code></td><td>bind the module; <code>geom::add(...)</code> works</td></tr>
+<tr><td><code>use &quot;lib/geom.wlel&quot; as g;</code></td><td>bind it under another name</td></tr>
+<tr><td><code>use &quot;lib/geom.wlel&quot; { add, Vec2 };</code></td><td>also use those names unqualified</td></tr>
+<tr><td><code>use &quot;lib/geom.wlel&quot; { add as plus };</code></td><td>rename one imported name</td></tr>
+<tr><td><code>use &quot;lib/geom.wlel&quot; { * };</code></td><td>import every export</td></tr>
+<tr><td><code>use std;</code></td><td>the embedded standard library</td></tr>
+<tr><td><code>use geom;</code></td><td>a package dependency by name (project mode)</td></tr>
+</tbody></table>
+<p>Resolution is deliberate about collisions: a bare name resolves to the
+current module first, then to imported names. If two imported modules both
+provide it, that is an <strong>error naming both</strong> — never a silent pick:</p>
+<pre><code>main.wlel:7:12: &#x27;helper&#x27; is ambiguous — it could be `geom::helper` or
+`text::helper`; qualify it, or import the one you want with
+`use &quot;…&quot; { helper };`</code></pre>
+<p>Names are mangled to <code>geom__add</code> in the generated C, so the two modules never
+collide at link time. A single-file program is unaffected: with no <code>use</code> and
+no <code>module</code> line, everything behaves exactly as before.</p>
 <h2 id="projects">Projects</h2>
 <p>A project is a directory with a <code>wlel.toml</code>. Scaffold one and run it:</p>
 <pre><code class="language-bash">$ wlel new myapp
@@ -475,9 +523,10 @@ $ wlel add json https://example.com/repo.git  # explicit name, full URL
 $ wlel add pointlib --path ../pointlib        # path dependency
 added &#x27;json&#x27; (git = &quot;https://github.com/user/wlel-json&quot;) (satisfies 1.2 via tag v1.2.3)
 next: wlel run</code></pre>
-<p>Dependency functions, structs and tests merge into your program (like file
-imports, diamond-deduped), nested dependencies resolve recursively, and two
-dependencies sharing a name from different sources are rejected. Git
+<p>A dependency is a <strong>module named after its package</strong>: <code>use pointlib;</code> then
+<code>pointlib::mk(...)</code>. Its tests join your suite, nested dependencies resolve
+recursively, and two dependencies sharing a name from different sources are
+rejected. Git
 revisions are pinned in <code>wlel.lock</code> after the first build — commit it, and
 every later build checks out exactly that revision, even on machines that
 have never seen the repo. Delete the lock to move to the remote's HEAD.</p>
@@ -558,7 +607,7 @@ what the editor shows is what the compiler sees:</p>
 <p><strong>VS Code</strong> — install the bundled extension, which ships the syntax
 highlighting and the language client together:</p>
 <pre><code class="language-bash">git clone https://github.com/WildanDeveloper/wlel
-cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.3.0
+cp -r wlel/editors/vscode-wlel ~/.vscode/extensions/wlel-1.4.0
 # reload the window, then open any .wlel file</code></pre>
 <p>It has no build step and no dependencies: the TextMate grammar is plain JSON
 and the client is a small JSON-RPC bridge over <code>wlel lsp</code>. Settings:
@@ -656,7 +705,7 @@ production backend could track. Revisit when the language is closer to 1.0.</p>
 <h2 id="roadmap">Roadmap</h2>
 <p>Shipped:</p>
 <ol><li><strong>Stdlib &amp; tooling</strong> — generics via monomorphization, <code>Vec[T]</code>/<code>HashMap[K,V]</code>, string library, file I/O, <code>wlel fmt</code>, FFI.</li><li><strong>Expressiveness</strong> — tagged enums + exhaustive <code>match</code>, <code>Result[T,E]</code>, method sugar, concurrency, LSP, <code>wlel doc</code>.</li><li><strong>1.0 scope</strong> — git-tag package registry, QBE backend, three flagship apps, fuzz soak, spec v1.0.</li><li><strong>CI integrity</strong> — flagship check/test/build/bench jobs and <code>fmt -check</code> over <code>flagship/</code>.</li><li><strong>1.0 freeze</strong> — the spec's open questions are resolved and documented in <a href="https://github.com/WildanDeveloper/wlel/blob/main/docs/spec.md#17-resolved-for-the-10-freeze">§17</a> (mixed float widths take the wider side, f32→f64 widens implicitly, explicit array decay, evaluation order stays C-inherited, no pointer arithmetic); source extension is <code>.wlel</code> (the pre-1.0 one is claimed by Wolfram Language in Linguist/editors); <code>wlel --version</code>; <code>scripts/release.sh</code> + <code>docs/cross-compile.md</code> for release binaries.</li></ol>
-<ol><li><strong>Ecosystem</strong> — shipped in 1.1.0–1.3.0: Apache-2.0 license and package metadata, the dependency lifecycle (<code>init/remove/update/tree/clean</code>), scaffolds with a README and a CI workflow, editor support (VS Code extension, tree-sitter grammar, GitHub Linguist registration kit), a checksum-verifying <code>install.sh</code>, generated Homebrew/Scoop manifests, a documentation site, and a WebAssembly playground that runs the real lexer/parser/type checker in the browser.</li><li><strong>Module namespaces</strong> — imports currently merge into one flat global scope (two files defining <code>helper</code> is a duplicate-symbol error); this is also the main blocker for self-hosting.</li><li><strong>Self-hosting</strong> — the only unchecked milestone left.</li><li><strong>Runtime/compile performance</strong> — incremental per-file compilation for the LSP, arena memory reclamation for parse-heavy programs, collection and sort hot paths.</li></ol>
+<ol><li><strong>Ecosystem</strong> — shipped in 1.1.0–1.3.0: Apache-2.0 license and package metadata, the dependency lifecycle (<code>init/remove/update/tree/clean</code>), scaffolds with a README and a CI workflow, editor support (VS Code extension, tree-sitter grammar, GitHub Linguist registration kit), a checksum-verifying <code>install.sh</code>, generated Homebrew/Scoop manifests, a documentation site, and a WebAssembly playground that runs the real lexer/parser/type checker in the browser.</li><li><strong>Module namespaces</strong> — shipped in 1.4.0: <code>module name;</code>, qualified access (<code>geom::add</code>), import lists/aliases, and deliberate ambiguity errors instead of a flat global scope. Two files may now define the same name.</li><li><strong>Self-hosting</strong> — the only unchecked milestone left.</li><li><strong>Runtime/compile performance</strong> — incremental per-file compilation for the LSP, arena memory reclamation for parse-heavy programs, collection and sort hot paths.</li></ol>
 <p>Deliberately <strong>not</strong> on the roadmap: borrow checker, macros, GC, OOP class
 hierarchies, exceptions. Simplicity is a feature, not a phase.</p>
 <h2 id="license">License</h2>
