@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792818505725,
+  "lastUpdate": 1792818692589,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1313,6 +1313,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.3,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "c9912c283ba2334b55f237bd64c0928cd48db769",
+          "message": "tests: the parser parity gate builds the self-hosted parser once instead of once per file — `Case::dump` invoked `wlel build selfhost/parser.wlel` inside the loop over every source, so the gate ran 41 full compiler invocations and took 7 s; a `parser_binary()` `OnceLock` (the same shape `tests/selfhost_tests.rs` already uses) builds it once and every file reuses the binary, taking the test from 7 s to 0.07 s with identical coverage (41/41 files, AST dump compared line for line against the Rust dumper); 657 cargo tests green, clippy -D warnings clean",
+          "timestamp": "2026-10-24T05:10:48Z",
+          "tree_id": "738fa04bd62772a0575b68d7845d606e6913420b",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/c9912c283ba2334b55f237bd64c0928cd48db769"
+        },
+        "date": 1792818691789,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 14.4,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 65,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 8,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.1,
             "unit": "ms"
           }
         ]
