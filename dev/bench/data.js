@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792820936162,
+  "lastUpdate": 1792833805504,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1489,6 +1489,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 4,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "c5196aba9fa388be251bdeaee3335747810ef8f1",
+          "message": "release: v1.10.0 — the codegen stage is in the repository and released; version 1.9.1 predated `selfhost/codegen.wlel` entirely, so the archives did not contain the fourth self-hosted stage at all; this tag carries it plus the `impl` doc-comment fix, the version bump across the six version files, `lib/std.wlel` restored to its pre-format revision and re-formatted with the fixed printer, the tree-sitter grammar regenerated (minor 10) and the wasm playground rebuilt; the docs now state exactly what the generator covers and what it does not (`defer`, `try`, `[T; N]`, for-in, `impl` methods, statement-form `match`, arena); 665 cargo tests green, clippy -D warnings clean, wlel fmt canonical, docs site renders",
+          "timestamp": "2026-10-24T09:22:11Z",
+          "tree_id": "52171fd9e25ddadf5649d2550e398905563edd64",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/c5196aba9fa388be251bdeaee3335747810ef8f1"
+        },
+        "date": 1792833804503,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 19.8,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 66,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 9,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 3.8,
             "unit": "ms"
           }
         ]
