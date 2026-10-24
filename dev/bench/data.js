@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792804265544,
+  "lastUpdate": 1792804867600,
   "repoUrl": "https://github.com/WildanDeveloper/wlel",
   "entries": {
     "Wlel benchmarks": [
@@ -1005,6 +1005,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "compile kitchen.wlel (front-end)",
             "value": 3.4,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "committer": {
+            "email": "wildandeveloper@users.noreply.github.com",
+            "name": "WildanDeveloper",
+            "username": "WildanDeveloper"
+          },
+          "distinct": true,
+          "id": "0b97f6fd444e90cdcac138a5e544738a34f85e39",
+          "message": "release: v1.5.1 — the host-runtime fixes (Windows headers, directory removal, reserved stdio names) plus the version bump and the changelog entry; 634 cargo tests green, clippy -D warnings clean, docs site renders",
+          "timestamp": "2026-10-24T01:19:54Z",
+          "tree_id": "2fe390a9766b3120f465bc1aa52b820d0a5faa89",
+          "url": "https://github.com/WildanDeveloper/wlel/commit/0b97f6fd444e90cdcac138a5e544738a34f85e39"
+        },
+        "date": 1792804866327,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "fib(35) runtime",
+            "value": 11.3,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M ints",
+            "value": 56,
+            "unit": "ms"
+          },
+          {
+            "name": "sort 1M pre-sorted ints",
+            "value": 4,
+            "unit": "ms"
+          },
+          {
+            "name": "compile kitchen.wlel (front-end)",
+            "value": 2.9,
             "unit": "ms"
           }
         ]
